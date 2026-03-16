@@ -1,0 +1,27 @@
+[project]
+name = "taxtracker"
+version = "0.1.0"
+description = "Tax Return tracker app"
+readme = "README.md"
+requires-python = ">=3.14.3"
+dependencies = [
+    "django==6.0.3",
+]
+
+[dependency-groups]
+dev = [
+    "ruff==0.15.6",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+exclude = ["*/migrations/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"*/migrations/*.py" = ["E501"]
+"taxtracker/settings.py" = ["E501"]
