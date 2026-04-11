@@ -6,6 +6,7 @@ import zipfile
 from django.contrib.auth.models import User
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from .models import FinancialYear, Item
 
@@ -38,7 +39,7 @@ class FinancialYearModelTests(TestCase):
         self.assertEqual(self.fy.effective_lodgement_date, override)
 
     def test_days_until_lodgement(self):
-        today = datetime.date.today()
+        today = timezone.now().date()
         expected = (self.fy.effective_lodgement_date - today).days
         self.assertEqual(self.fy.days_until_lodgement, expected)
 
