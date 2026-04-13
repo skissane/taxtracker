@@ -1,5 +1,6 @@
 import datetime
 
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -101,6 +102,24 @@ class Item(models.Model):
     @property
     def is_done(self):
         return self.status == self.STATUS_DONE
+
+    def clean(self):
+        if self.parent_id is None or self.pk is None:
+            return
+        # Walk the ancestor chain; if we encounter self, there is a cycle.
+        visited = {self.pk}
+        current_id = self.parent_id
+        while current_id is not None:
+            if current_id in visited:
+                raise ValidationError(
+                    {"parent": "Setting this parent would create a circular reference."}
+                )
+            visited.add(current_id)
+            try:
+                ancestor = Item.objects.only("parent_id").get(pk=current_id)
+                current_id = ancestor.parent_id
+            except Item.DoesNotExist:
+                break
 
     def get_folder_path(self):
         """Return a list of titles representing the path from root to this item."""

@@ -297,6 +297,104 @@ class ItemChildInlineTests(TestCase):
         self.assertEqual(grandchild.year_id, fy2025.pk)
 
 
+class ItemParentCycleTests(TestCase):
+    """Tests that circular parent references are rejected with a ValidationError."""
+
+    def setUp(self):
+        self.fy = FinancialYear.objects.create(year=2024)
+        self.user = User.objects.create_superuser("admin", "admin@example.com", "pass")
+        self.client = Client()
+        self.client.login(username="admin", password="pass")
+
+    def test_direct_cycle_raises_validation_error(self):
+        """Item cannot be its own parent (A → A)."""
+        item = Item.objects.create(year=self.fy, title="A", order=1)
+        item.parent_id = item.pk
+        with self.assertRaises(Exception) as ctx:
+            item.clean()
+        from django.core.exceptions import ValidationError
+
+        self.assertIsInstance(ctx.exception, ValidationError)
+
+    def test_indirect_two_element_cycle_raises_validation_error(self):
+        """Two-element cycle: A → B, then B → A should be rejected."""
+        b = Item.objects.create(year=self.fy, title="B", order=2)
+        _a = Item.objects.create(year=self.fy, parent=b, title="A", order=1)
+        b.parent_id = _a.pk
+        from django.core.exceptions import ValidationError
+
+        with self.assertRaises(ValidationError):
+            b.clean()
+
+    def test_indirect_three_element_cycle_raises_validation_error(self):
+        """Three-element cycle: A → B → C, then C → A should be rejected."""
+        c = Item.objects.create(year=self.fy, title="C", order=3)
+        b = Item.objects.create(year=self.fy, parent=c, title="B", order=2)
+        a = Item.objects.create(year=self.fy, parent=b, title="A", order=1)
+        c.parent_id = a.pk
+        from django.core.exceptions import ValidationError
+
+        with self.assertRaises(ValidationError):
+            c.clean()
+
+    def _item_change_url(self, item):
+        return reverse("admin:tracker_item_change", args=[item.pk])
+
+    def test_admin_form_rejects_direct_cycle(self):
+        """Admin form shows a form error (not RecursionError) for self-parent."""
+        item = Item.objects.create(year=self.fy, title="A", order=1)
+        url = self._item_change_url(item)
+        data = {
+            "year": self.fy.pk,
+            "parent": str(item.pk),  # self-reference
+            "order": "1",
+            "title": "A",
+            "status": "pending",
+            "notes": "",
+            "children-TOTAL_FORMS": "0",
+            "children-INITIAL_FORMS": "0",
+            "children-MIN_NUM_FORMS": "0",
+            "children-MAX_NUM_FORMS": "1000",
+            "attachments-TOTAL_FORMS": "0",
+            "attachments-INITIAL_FORMS": "0",
+            "attachments-MIN_NUM_FORMS": "0",
+            "attachments-MAX_NUM_FORMS": "1000",
+        }
+        response = self.client.post(url, data)
+        # Should show the form with errors (200), not redirect (302) or crash (500).
+        self.assertEqual(response.status_code, 200)
+        item.refresh_from_db()
+        self.assertIsNone(item.parent_id)
+
+    def test_admin_form_rejects_indirect_three_element_cycle(self):
+        """Admin form rejects A → B → C → A cycle."""
+        c = Item.objects.create(year=self.fy, title="C", order=3)
+        b = Item.objects.create(year=self.fy, parent=c, title="B", order=2)
+        a = Item.objects.create(year=self.fy, parent=b, title="A", order=1)
+        # Try to make C's parent = A, closing the cycle.
+        url = self._item_change_url(c)
+        data = {
+            "year": self.fy.pk,
+            "parent": str(a.pk),
+            "order": "3",
+            "title": "C",
+            "status": "pending",
+            "notes": "",
+            "children-TOTAL_FORMS": "0",
+            "children-INITIAL_FORMS": "0",
+            "children-MIN_NUM_FORMS": "0",
+            "children-MAX_NUM_FORMS": "1000",
+            "attachments-TOTAL_FORMS": "0",
+            "attachments-INITIAL_FORMS": "0",
+            "attachments-MIN_NUM_FORMS": "0",
+            "attachments-MAX_NUM_FORMS": "1000",
+        }
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, 200)
+        c.refresh_from_db()
+        self.assertIsNone(c.parent_id)
+
+
 class EnsureSuperuserCommandTests(TestCase):
     """Tests for the ensure_superuser management command."""
 
