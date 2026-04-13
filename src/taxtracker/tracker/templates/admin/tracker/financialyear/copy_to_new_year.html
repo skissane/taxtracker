@@ -4,12 +4,12 @@
 
 {% block breadcrumbs %}
   <div class="breadcrumbs">
-    <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> &rsaquo;
-    <a href="{% url 'admin:tracker_financialyear_changelist' %}">Financial Years</a> &rsaquo;
-    <a href="{% url 'admin:tracker_financialyear_change' fy.pk %}">{{ fy }}</a> &rsaquo;
+    <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> ›
+    <a href="{% url 'admin:tracker_financialyear_changelist' %}">Financial Years</a> ›
+    <a href="{% url 'admin:tracker_financialyear_change' fy.pk %}">{{ fy }}</a> ›
     Copy to New Year
   </div>
-{% endblock %}
+{% endblock breadcrumbs %}
 {% block content %}
   <h1>{{ title }}</h1>
   <p>
@@ -26,4 +26,4 @@
          href="{% url 'admin:tracker_financialyear_change' fy.pk %}">Cancel</a>
     </div>
   </form>
-{% endblock %}
+{% endblock content %}
