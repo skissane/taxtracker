@@ -66,21 +66,38 @@ class ItemAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
         if change and "year" in form.changed_data and obj.parent_id is None:
-            # Cascade year change to all descendants.
-            def _update_descendants(item):
-                for child in item.children.all():
-                    child.year_id = obj.year_id
-                    child.save(update_fields=["year"])
-                    _update_descendants(child)
-
-            _update_descendants(obj)
+            # BFS to collect all descendant IDs (one query per depth level),
+            # then a single bulk update — avoids N individual saves.
+            ids_to_update = []
+            current_level = [obj.pk]
+            while current_level:
+                children = list(
+                    Item.objects.filter(parent_id__in=current_level).values_list(
+                        "pk", flat=True
+                    )
+                )
+                ids_to_update.extend(children)
+                current_level = children
+            if ids_to_update:
+                Item.objects.filter(pk__in=ids_to_update).update(year_id=obj.year_id)
 
     def save_formset(self, request, form, formset, change):
         instances = formset.save(commit=False)
+        # Batch-fetch year_id for all parent IDs to avoid N+1 queries.
+        parent_ids = {
+            i.parent_id for i in instances if isinstance(i, Item) and i.parent_id
+        }
+        year_by_parent_id = {}
+        if parent_ids:
+            year_by_parent_id = dict(
+                Item.objects.filter(pk__in=parent_ids).values_list("pk", "year_id")
+            )
         for instance in instances:
             # Auto-inherit year from parent for inline-created child items.
             if isinstance(instance, Item) and instance.parent_id:
-                instance.year_id = instance.parent.year_id
+                instance.year_id = year_by_parent_id.get(
+                    instance.parent_id, instance.parent.year_id
+                )
             instance.save()
         formset.save_m2m()
         for obj in formset.deleted_objects:
