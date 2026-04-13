@@ -38,12 +38,17 @@ class ChildItemInline(admin.TabularInline):
 
 @admin.register(Item)
 class ItemAdmin(admin.ModelAdmin):
-    list_display = ("title", "year", "parent", "status", "order")
+    list_display = ("title", "year_link", "parent", "status", "order")
     list_filter = ("year", "status", "parent")
     search_fields = ("title", "notes")
     list_select_related = ("year", "parent")
     inlines = [ChildItemInline, AttachmentInline]
     fields = ("year", "parent", "order", "title", "status", "notes")
+
+    @admin.display(description="Year")
+    def year_link(self, obj):
+        url = reverse("admin:tracker_financialyear_change", args=[obj.year_id])
+        return format_html('<a href="{}">{}</a>', url, obj.year)
 
     def get_queryset(self, request):
         return (
