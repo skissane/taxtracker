@@ -1,28 +1,29 @@
 {% extends "admin/base_site.html" %}
+
 {% load i18n %}
 
 {% block breadcrumbs %}
-<div class="breadcrumbs">
-  <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> &rsaquo;
-  <a href="{% url 'admin:tracker_financialyear_changelist' %}">Financial Years</a> &rsaquo;
-  <a href="{% url 'admin:tracker_financialyear_change' fy.pk %}">{{ fy }}</a> &rsaquo;
-  Copy to New Year
-</div>
-{% endblock %}
-
-{% block content %}
-<h1>{{ title }}</h1>
-
-<p>
-  This will create <strong>FY{{ new_year_num }}</strong> and copy all items
-  (title and order only — not notes, status, or attachments) from <strong>{{ fy }}</strong>.
-</p>
-
-<form method="post">
-  {% csrf_token %}
-  <div>
-    <input type="submit" value="Confirm — Create FY{{ new_year_num }}" class="button default">
-    <a class="button cancel" href="{% url 'admin:tracker_financialyear_change' fy.pk %}">Cancel</a>
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> &rsaquo;
+    <a href="{% url 'admin:tracker_financialyear_changelist' %}">Financial Years</a> &rsaquo;
+    <a href="{% url 'admin:tracker_financialyear_change' fy.pk %}">{{ fy }}</a> &rsaquo;
+    Copy to New Year
   </div>
-</form>
+{% endblock %}
+{% block content %}
+  <h1>{{ title }}</h1>
+  <p>
+    This will create <strong>FY{{ new_year_num }}</strong> and copy all items
+    (title and order only — not notes, status, or attachments) from <strong>{{ fy }}</strong>.
+  </p>
+  <form method="post">
+    {% csrf_token %}
+    <div>
+      <input type="submit"
+             value="Confirm — Create FY{{ new_year_num }}"
+             class="button default">
+      <a class="button cancel"
+         href="{% url 'admin:tracker_financialyear_change' fy.pk %}">Cancel</a>
+    </div>
+  </form>
 {% endblock %}

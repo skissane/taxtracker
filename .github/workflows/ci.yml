@@ -32,5 +32,11 @@ jobs:
       - name: Check formatting with ruff
         run: uv run --group dev ruff format --check .
 
+      - name: Lint with djlint
+        run: uv run --group dev djlint --lint .
+
+      - name: Check formatting with djlint
+        run: uv run --group dev djlint --check .
+
       - name: Run tests
         run: uv run python manage.py test taxtracker.tracker --verbosity=2

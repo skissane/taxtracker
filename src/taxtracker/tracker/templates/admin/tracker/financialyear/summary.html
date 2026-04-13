@@ -1,91 +1,109 @@
 {% extends "admin/base_site.html" %}
+
 {% load i18n %}
 
 {% block breadcrumbs %}
-<div class="breadcrumbs">
-  <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> &rsaquo;
-  <a href="{% url 'admin:tracker_financialyear_changelist' %}">Financial Years</a> &rsaquo;
-  <a href="{% url 'admin:tracker_financialyear_change' fy.pk %}">{{ fy }}</a> &rsaquo;
-  Status Summary
-</div>
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> &rsaquo;
+    <a href="{% url 'admin:tracker_financialyear_changelist' %}">Financial Years</a> &rsaquo;
+    <a href="{% url 'admin:tracker_financialyear_change' fy.pk %}">{{ fy }}</a> &rsaquo;
+    Status Summary
+  </div>
 {% endblock %}
-
 {% block content %}
-<div style="background:#f8f9fa;border:1px solid #dee2e6;padding:1em 1.5em;border-radius:4px;margin-bottom:1.5em;">
-  <table style="border-collapse:collapse;width:100%;">
-    <tr>
-      <th style="text-align:left;padding:4px 12px 4px 0;">Period</th>
-      <td>{{ fy.start_date }} – {{ fy.end_date }}</td>
-    </tr>
-    <tr>
-      <th style="text-align:left;padding:4px 12px 4px 0;">Lodgement Date</th>
-      <td>
-        {{ fy.effective_lodgement_date }}
-        {% if fy.lodgement_date_override %}
-          <span style="color:#856404;background:#fff3cd;padding:1px 6px;border-radius:3px;font-size:.85em;">agent override</span>
-        {% else %}
-          <span style="color:#155724;background:#d4edda;padding:1px 6px;border-radius:3px;font-size:.85em;">default</span>
-        {% endif %}
-      </td>
-    </tr>
-    <tr>
-      <th style="text-align:left;padding:4px 12px 4px 0;">Days Until Lodgement</th>
-      <td>
-      {% if fy.days_until_lodgement > 0 %}
-          {{ fy.days_until_lodgement }} days remaining
-        {% elif fy.days_until_lodgement == 0 %}
-          <strong>Due today!</strong>
-        {% else %}
-          {{ fy.days_until_lodgement|stringformat:"d"|slice:"1:" }} days overdue
-        {% endif %}
-      </td>
-    </tr>
-    <tr>
-      <th style="text-align:left;padding:4px 12px 4px 0;">Progress</th>
-      <td>
-        <strong>{{ done }}</strong> done,
-        <strong>{{ pending }}</strong> pending
-        ({{ total }} total)
-      </td>
-    </tr>
+  <div style="background:#f8f9fa;
+              border:1px solid #dee2e6;
+              padding:1em 1.5em;
+              border-radius:4px;
+              margin-bottom:1.5em">
+    <table style="border-collapse:collapse;width:100%;">
+      <tr>
+        <th style="text-align:left;padding:4px 12px 4px 0;">Period</th>
+        <td>{{ fy.start_date }} – {{ fy.end_date }}</td>
+      </tr>
+      <tr>
+        <th style="text-align:left;padding:4px 12px 4px 0;">Lodgement Date</th>
+        <td>
+          {{ fy.effective_lodgement_date }}
+          {% if fy.lodgement_date_override %}
+            <span style="color:#856404;
+                         background:#fff3cd;
+                         padding:1px 6px;
+                         border-radius:3px;
+                         font-size:.85em">agent override</span>
+          {% else %}
+            <span style="color:#155724;
+                         background:#d4edda;
+                         padding:1px 6px;
+                         border-radius:3px;
+                         font-size:.85em">default</span>
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <th style="text-align:left;padding:4px 12px 4px 0;">Days Until Lodgement</th>
+        <td>
+          {% if fy.days_until_lodgement > 0 %}
+            {{ fy.days_until_lodgement }} days remaining
+          {% elif fy.days_until_lodgement == 0 %}
+            <strong>Due today!</strong>
+          {% else %}
+            {{ fy.days_until_lodgement|stringformat:"d"|slice:"1:" }} days overdue
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <th style="text-align:left;padding:4px 12px 4px 0;">Progress</th>
+        <td>
+          <strong>{{ done }}</strong> done,
+          <strong>{{ pending }}</strong> pending
+          ({{ total }} total)
+        </td>
+      </tr>
+    </table>
+  </div>
+  <h2>Item Checklist</h2>
+  <table style="border-collapse:collapse;width:100%;min-width:600px;">
+    <thead>
+      <tr style="background:#417690;color:white;">
+        <th style="text-align:left;padding:6px 12px;">Item</th>
+        <th style="text-align:left;padding:6px 12px;">Status</th>
+        <th style="text-align:left;padding:6px 12px;">Attachments</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in tree_rows %}
+        <tr style="{% if row.item.is_done %}background:#d4edda;
+                   {% else %}background:{% cycle '#fff' '#f9f9f9' %};
+                   {% endif %}">
+          <td style="padding:5px 12px;padding-left:{{ row.depth|add:1 }}em;">
+            {% if row.depth %}&rdsh;{% endif %}
+            <a href="{% url 'admin:tracker_item_change' row.item.pk %}">{{ row.item.title }}</a>
+            {% if row.item.notes %}
+              <span style="color:#666;
+                           font-size:.85em;
+                           margin-left:.5em"
+                    title="{{ row.item.notes }}">📝</span>
+            {% endif %}
+          </td>
+          <td style="padding:5px 12px;">
+            {% if row.item.is_done %}
+              <span style="color:#155724;">✔ Done</span>
+            {% else %}
+              <span style="color:#721c24;">⏳ Pending</span>
+            {% endif %}
+          </td>
+          <td style="padding:5px 12px;">{{ row.item.attachments.count }}</td>
+        </tr>
+      {% empty %}
+        <tr>
+          <td colspan="3" style="padding:1em;">No items defined for this year.</td>
+        </tr>
+      {% endfor %}
+    </tbody>
   </table>
-</div>
-
-<h2>Item Checklist</h2>
-<table style="border-collapse:collapse;width:100%;min-width:600px;">
-  <thead>
-    <tr style="background:#417690;color:white;">
-      <th style="text-align:left;padding:6px 12px;">Item</th>
-      <th style="text-align:left;padding:6px 12px;">Status</th>
-      <th style="text-align:left;padding:6px 12px;">Attachments</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for row in tree_rows %}
-    <tr style="{% if row.item.is_done %}background:#d4edda;{% else %}background:{% cycle '#fff' '#f9f9f9' %};{% endif %}">
-      <td style="padding:5px 12px;padding-left:{{ row.depth|add:1 }}em;">
-        {% if row.depth %}&rdsh; {% endif %}
-        <a href="{% url 'admin:tracker_item_change' row.item.pk %}">{{ row.item.title }}</a>
-        {% if row.item.notes %}
-          <span style="color:#666;font-size:.85em;margin-left:.5em;" title="{{ row.item.notes }}">📝</span>
-        {% endif %}
-      </td>
-      <td style="padding:5px 12px;">
-        {% if row.item.is_done %}
-          <span style="color:#155724;">✔ Done</span>
-        {% else %}
-          <span style="color:#721c24;">⏳ Pending</span>
-        {% endif %}
-      </td>
-      <td style="padding:5px 12px;">{{ row.item.attachments.count }}</td>
-    </tr>
-    {% empty %}
-    <tr><td colspan="3" style="padding:1em;">No items defined for this year.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
-
-<p style="margin-top:1.5em;">
-  <a class="button default" href="{% url 'admin:tracker_financialyear_change' fy.pk %}">← Back to {{ fy }}</a>
-</p>
+  <p style="margin-top:1.5em;">
+    <a class="button default"
+       href="{% url 'admin:tracker_financialyear_change' fy.pk %}">← Back to {{ fy }}</a>
+  </p>
 {% endblock %}
