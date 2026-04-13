@@ -1,7 +1,10 @@
 import io
+import sqlite3
 import zipfile
 
+from django.conf import settings
 from django.contrib import admin, messages
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -184,6 +187,11 @@ class FinancialYearAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.copy_to_new_year_view),
                 name="tracker_financialyear_copy_to_new_year",
             ),
+            path(
+                "download-db-backup/",
+                self.admin_site.admin_view(self.download_db_backup_view),
+                name="tracker_financialyear_download_db_backup",
+            ),
         ]
         return custom + super().get_urls()
 
@@ -223,6 +231,17 @@ class FinancialYearAdmin(admin.ModelAdmin):
     def download_zip_link(self, obj):
         url = reverse("admin:tracker_financialyear_download_zip", args=[obj.pk])
         return format_html('<a href="{}">Download ZIP</a>', url)
+
+    # ------------------------------------------------------------------
+    # Changelist view override (inject backup URL)
+    # ------------------------------------------------------------------
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        extra_context["download_db_backup_url"] = reverse(
+            "admin:tracker_financialyear_download_db_backup"
+        )
+        return super().changelist_view(request, extra_context)
 
     # ------------------------------------------------------------------
     # Summary view
@@ -274,6 +293,25 @@ class FinancialYearAdmin(admin.ModelAdmin):
         response["Content-Disposition"] = (
             f'attachment; filename="{fy}_attachments.zip"'
         )
+        return response
+
+    # ------------------------------------------------------------------
+    # DB backup download view
+    # ------------------------------------------------------------------
+
+    def download_db_backup_view(self, request):
+        if not request.user.is_superuser:
+            raise PermissionDenied
+
+        db_path = settings.DATABASES["default"]["NAME"]
+        dest_conn = sqlite3.connect(":memory:")
+        with sqlite3.connect(str(db_path)) as source_conn:
+            source_conn.backup(dest_conn)
+        backup_bytes = dest_conn.serialize()
+        dest_conn.close()
+
+        response = HttpResponse(backup_bytes, content_type="application/x-sqlite3")
+        response["Content-Disposition"] = 'attachment; filename="db-backup.sqlite3"'
         return response
 
     # ------------------------------------------------------------------

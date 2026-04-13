@@ -175,6 +175,25 @@ class AdminViewTests(TestCase):
         with zipfile.ZipFile(buf) as zf:
             self.assertIn("index.md", zf.namelist())
 
+    def test_download_db_backup_view(self):
+        url = reverse("admin:tracker_financialyear_download_db_backup")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/x-sqlite3")
+        self.assertIn("db-backup.sqlite3", response["Content-Disposition"])
+        # Content should be a valid SQLite database (starts with the magic header)
+        self.assertTrue(response.content[:16].startswith(b"SQLite format 3\x00"))
+
+    def test_download_db_backup_requires_superuser(self):
+        non_super = User.objects.create_user("regular", "r@example.com", "pass")
+        non_super.is_staff = True
+        non_super.save()
+        client = Client()
+        client.login(username="regular", password="pass")
+        url = reverse("admin:tracker_financialyear_download_db_backup")
+        response = client.get(url)
+        self.assertEqual(response.status_code, 403)
+
     def test_copy_to_new_year_get(self):
         url = reverse(
             "admin:tracker_financialyear_copy_to_new_year", args=[self.fy.pk]
