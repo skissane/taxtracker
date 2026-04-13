@@ -95,9 +95,17 @@ class Item(models.Model):
         verbose_name_plural = "Items"
 
     def __str__(self):
-        if self.parent:
-            return f"{self.parent} > {self.title}"
-        return self.title
+        parts = [self.title]
+        visited = {self.pk}
+        current = self
+        while current.parent_id is not None:
+            if current.parent_id in visited:
+                parts.insert(0, "…")
+                break
+            visited.add(current.parent_id)
+            current = current.parent
+            parts.insert(0, current.title)
+        return " > ".join(parts)
 
     @property
     def is_done(self):
@@ -124,8 +132,12 @@ class Item(models.Model):
     def get_folder_path(self):
         """Return a list of titles representing the path from root to this item."""
         path = [self.title]
+        visited = {self.pk}
         current = self
         while current.parent_id is not None:
+            if current.parent_id in visited:
+                break
+            visited.add(current.parent_id)
             current = current.parent
             path.insert(0, current.title)
         return path

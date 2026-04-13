@@ -388,6 +388,22 @@ class ItemParentCycleTests(TestCase):
         c.refresh_from_db()
         self.assertIsNone(c.parent_id)
 
+    def test_str_is_cycle_safe_for_existing_cycle_in_db(self):
+        """Item.__str__ must not raise RecursionError if a cycle exists in DB."""
+        # Bypass clean() to force a cycle directly into the DB.
+        a = Item.objects.create(year=self.fy, title="A", order=1)
+        b = Item.objects.create(year=self.fy, title="B", order=2)
+        # Create cycle: A → B → A via raw update to bypass validation.
+        Item.objects.filter(pk=a.pk).update(parent_id=b.pk)
+        Item.objects.filter(pk=b.pk).update(parent_id=a.pk)
+        a.refresh_from_db()
+        b.refresh_from_db()
+        # __str__ must not raise; the result should contain both titles.
+        result = str(a)
+        self.assertIn("A", result)
+        result_b = str(b)
+        self.assertIn("B", result_b)
+
 
 class EnsureSuperuserCommandTests(TestCase):
     """Tests for the ensure_superuser management command."""
