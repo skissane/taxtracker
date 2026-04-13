@@ -58,9 +58,7 @@ class Command(BaseCommand):
             self.stdout.write(
                 f"Created superuser '{username}' with password: {password}"
             )
-            self.stdout.write(
-                "Change this password after first login."
-            )
+            self.stdout.write("Change this password after first login.")
             return
 
         # User exists – repair flags if needed.

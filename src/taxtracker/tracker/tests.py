@@ -1,4 +1,3 @@
-
 import datetime
 import io
 import zipfile
@@ -29,9 +28,7 @@ class FinancialYearModelTests(TestCase):
         self.assertEqual(self.fy.default_lodgement_date, datetime.date(2024, 10, 31))
 
     def test_effective_lodgement_date_default(self):
-        self.assertEqual(
-            self.fy.effective_lodgement_date, datetime.date(2024, 10, 31)
-        )
+        self.assertEqual(self.fy.effective_lodgement_date, datetime.date(2024, 10, 31))
 
     def test_effective_lodgement_date_override(self):
         override = datetime.date(2024, 12, 31)
@@ -58,9 +55,7 @@ class FinancialYearModelTests(TestCase):
 class ItemModelTests(TestCase):
     def setUp(self):
         self.fy = FinancialYear.objects.create(year=2024)
-        self.parent = Item.objects.create(
-            year=self.fy, title="Income", order=1
-        )
+        self.parent = Item.objects.create(year=self.fy, title="Income", order=1)
         self.child = Item.objects.create(
             year=self.fy, parent=self.parent, title="Salary", order=1
         )
@@ -89,7 +84,10 @@ class CopyItemsTests(TestCase):
     def setUp(self):
         self.fy = FinancialYear.objects.create(year=2024)
         self.root = Item.objects.create(
-            year=self.fy, title="Root", order=1, notes="some note",
+            year=self.fy,
+            title="Root",
+            order=1,
+            notes="some note",
             status=Item.STATUS_DONE,
         )
         self.child = Item.objects.create(
@@ -104,9 +102,7 @@ class CopyItemsTests(TestCase):
 
     def test_copy_to_new_year_creates_items(self):
         client = self._create_superuser_client()
-        url = reverse(
-            "admin:tracker_financialyear_copy_to_new_year", args=[self.fy.pk]
-        )
+        url = reverse("admin:tracker_financialyear_copy_to_new_year", args=[self.fy.pk])
         response = client.post(url)
         self.assertEqual(response.status_code, 302)
 
@@ -125,15 +121,11 @@ class CopyItemsTests(TestCase):
     def test_copy_existing_year_shows_error(self):
         FinancialYear.objects.create(year=2025)
         client = self._create_superuser_client()
-        url = reverse(
-            "admin:tracker_financialyear_copy_to_new_year", args=[self.fy.pk]
-        )
+        url = reverse("admin:tracker_financialyear_copy_to_new_year", args=[self.fy.pk])
         response = client.post(url)
         # Should redirect back with error message
         self.assertEqual(response.status_code, 302)
-        self.assertFalse(
-            FinancialYear.objects.filter(year=2026).exists()
-        )
+        self.assertFalse(FinancialYear.objects.filter(year=2026).exists())
 
 
 class AdminViewTests(TestCase):
@@ -159,9 +151,7 @@ class AdminViewTests(TestCase):
         self.assertContains(response, "Test Item")
 
     def test_download_zip_view(self):
-        url = reverse(
-            "admin:tracker_financialyear_download_zip", args=[self.fy.pk]
-        )
+        url = reverse("admin:tracker_financialyear_download_zip", args=[self.fy.pk])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/zip")
@@ -195,9 +185,7 @@ class AdminViewTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_copy_to_new_year_get(self):
-        url = reverse(
-            "admin:tracker_financialyear_copy_to_new_year", args=[self.fy.pk]
-        )
+        url = reverse("admin:tracker_financialyear_copy_to_new_year", args=[self.fy.pk])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "FY2025")
@@ -209,6 +197,7 @@ class EnsureSuperuserCommandTests(TestCase):
     def _call(self, **kwargs):
         """Call ensure_superuser and return captured stdout."""
         from io import StringIO
+
         out = StringIO()
         call_command("ensure_superuser", stdout=out, **kwargs)
         return out.getvalue()

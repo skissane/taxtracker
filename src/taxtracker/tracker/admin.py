@@ -54,11 +54,7 @@ class ItemAdmin(admin.ModelAdmin):
         return format_html('<a href="{}">{}</a>', url, obj.year)
 
     def get_queryset(self, request):
-        return (
-            super()
-            .get_queryset(request)
-            .select_related("year", "parent")
-        )
+        return super().get_queryset(request).select_related("year", "parent")
 
 
 # ---------------------------------------------------------------------------
@@ -90,9 +86,9 @@ def _build_zip(fy):
 
     # Pre-fetch all items and attachments for this year.
     items = list(
-        fy.items.select_related("parent").prefetch_related("attachments").order_by(
-            "order", "title"
-        )
+        fy.items.select_related("parent")
+        .prefetch_related("attachments")
+        .order_by("order", "title")
     )
 
     # Build an id → item dict for quick lookup.
@@ -290,9 +286,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
         fy = get_object_or_404(FinancialYear, pk=pk)
         buf = _build_zip(fy)
         response = HttpResponse(buf, content_type="application/zip")
-        response["Content-Disposition"] = (
-            f'attachment; filename="{fy}_attachments.zip"'
-        )
+        response["Content-Disposition"] = f'attachment; filename="{fy}_attachments.zip"'
         return response
 
     # ------------------------------------------------------------------
@@ -334,9 +328,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
                 request,
                 f"FY{new_year_num} already exists.",
             )
-            return redirect(
-                reverse("admin:tracker_financialyear_changelist")
-            )
+            return redirect(reverse("admin:tracker_financialyear_changelist"))
 
         if request.method == "POST":
             with transaction.atomic():
