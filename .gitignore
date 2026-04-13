@@ -9,7 +9,7 @@ __pycache__/
 
 # Django
 *.sqlite3
-file:memorydb_*
+memorydb_*
 /media/
 /static/
 /staticfiles/

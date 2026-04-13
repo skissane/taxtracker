@@ -3,6 +3,7 @@ import io
 import zipfile
 
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -310,19 +311,14 @@ class ItemParentCycleTests(TestCase):
         """Item cannot be its own parent (A → A)."""
         item = Item.objects.create(year=self.fy, title="A", order=1)
         item.parent_id = item.pk
-        with self.assertRaises(Exception) as ctx:
+        with self.assertRaises(ValidationError):
             item.clean()
-        from django.core.exceptions import ValidationError
-
-        self.assertIsInstance(ctx.exception, ValidationError)
 
     def test_indirect_two_element_cycle_raises_validation_error(self):
         """Two-element cycle: A → B, then B → A should be rejected."""
         b = Item.objects.create(year=self.fy, title="B", order=2)
-        _a = Item.objects.create(year=self.fy, parent=b, title="A", order=1)
-        b.parent_id = _a.pk
-        from django.core.exceptions import ValidationError
-
+        a = Item.objects.create(year=self.fy, parent=b, title="A", order=1)
+        b.parent_id = a.pk
         with self.assertRaises(ValidationError):
             b.clean()
 
@@ -332,8 +328,6 @@ class ItemParentCycleTests(TestCase):
         b = Item.objects.create(year=self.fy, parent=c, title="B", order=2)
         a = Item.objects.create(year=self.fy, parent=b, title="A", order=1)
         c.parent_id = a.pk
-        from django.core.exceptions import ValidationError
-
         with self.assertRaises(ValidationError):
             c.clean()
 
