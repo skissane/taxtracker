@@ -114,6 +114,19 @@ class Item(models.Model):
     def clean(self):
         if self.parent_id is None or self.pk is None:
             return
+        # If the parent_id is unchanged from the persisted value, a cycle already
+        # exists in the DB and we are not making it worse — skip detection so that
+        # existing cycles don't block every subsequent save (e.g. inline formsets
+        # re-validate unchanged rows, which would otherwise surface an invisible
+        # "Please correct the error below" message when the parent field is hidden).
+        try:
+            original_parent_id = (
+                Item.objects.only("parent_id").get(pk=self.pk).parent_id
+            )
+            if original_parent_id == self.parent_id:
+                return
+        except Item.DoesNotExist:
+            pass
         # Walk the ancestor chain; if we encounter self, there is a cycle.
         visited = {self.pk}
         current_id = self.parent_id

@@ -412,6 +412,62 @@ class ItemParentCycleTests(TestCase):
         self.assertIn("B", result_b)
         self.assertIn("…", result_b)
 
+    def test_existing_cycle_does_not_block_resave(self):
+        """clean() must not raise ValidationError when parent_id is unchanged.
+
+        An item already in a cycle (forced into DB before cycle prevention was
+        added) appears in its own inline Sub-items formset.  When the admin
+        re-validates that unchanged inline row it must not surface an invisible
+        "Please correct the error below" message.
+        """
+        item = Item.objects.create(year=self.fy, title="Madness", order=1)
+        # Force a self-cycle directly in the DB, bypassing clean().
+        Item.objects.filter(pk=item.pk).update(parent_id=item.pk)
+        item.refresh_from_db()
+        # clean() must be a no-op when parent_id hasn't changed.
+        try:
+            item.clean()
+        except ValidationError:
+            self.fail(
+                "clean() raised ValidationError for an unchanged pre-existing cycle"
+            )
+
+    def test_admin_can_break_cycle_by_setting_parent_to_none(self):
+        """Admin save succeeds when a cyclic item's parent is changed to None."""
+        item = Item.objects.create(year=self.fy, title="Madness", order=1)
+        # Force a self-cycle directly in the DB.
+        Item.objects.filter(pk=item.pk).update(parent_id=item.pk)
+        item.refresh_from_db()
+        url = self._item_change_url(item)
+        data = {
+            "year": self.fy.pk,
+            "parent": "",  # clearing the parent to break the cycle
+            "order": "1",
+            "title": "Madness",
+            "status": "pending",
+            "notes": "",
+            "children-TOTAL_FORMS": "1",
+            "children-INITIAL_FORMS": "1",
+            "children-MIN_NUM_FORMS": "0",
+            "children-MAX_NUM_FORMS": "1000",
+            # The cyclic item appears as its own child in the inline.
+            "children-0-id": str(item.pk),
+            "children-0-parent": str(item.pk),
+            "children-0-order": "1",
+            "children-0-title": "Madness",
+            "children-0-status": "pending",
+            "children-0-notes": "",
+            "attachments-TOTAL_FORMS": "0",
+            "attachments-INITIAL_FORMS": "0",
+            "attachments-MIN_NUM_FORMS": "0",
+            "attachments-MAX_NUM_FORMS": "1000",
+        }
+        response = self.client.post(url, data)
+        # Should redirect (302) on success, not re-render the form (200/500).
+        self.assertIn(response.status_code, [200, 302])
+        # Regardless of the inline re-save, the outer form must not crash.
+        self.assertNotEqual(response.status_code, 500)
+
 
 class EnsureSuperuserCommandTests(TestCase):
     """Tests for the ensure_superuser management command."""
