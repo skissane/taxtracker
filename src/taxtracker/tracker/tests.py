@@ -191,6 +191,112 @@ class AdminViewTests(TestCase):
         self.assertContains(response, "FY2025")
 
 
+class ItemChildInlineTests(TestCase):
+    """Tests for child-item year-inheritance fixes in ItemAdmin."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin", "admin@example.com", "pass")
+        self.client = Client()
+        self.client.login(username="admin", password="pass")
+        self.fy = FinancialYear.objects.create(year=2024)
+        self.parent_item = Item.objects.create(year=self.fy, title="Parent", order=1)
+
+    def _item_change_url(self, item):
+        return reverse("admin:tracker_item_change", args=[item.pk])
+
+    def test_inline_child_inherits_year_on_save(self):
+        """Saving a new inline sub-item must not raise IntegrityError."""
+        url = self._item_change_url(self.parent_item)
+        data = {
+            "year": self.fy.pk,
+            "parent": "",
+            "order": "1",
+            "title": "Parent",
+            "status": "pending",
+            "notes": "",
+            # Management form for ChildItemInline (prefix = "children")
+            "children-TOTAL_FORMS": "1",
+            "children-INITIAL_FORMS": "0",
+            "children-MIN_NUM_FORMS": "0",
+            "children-MAX_NUM_FORMS": "1000",
+            "children-0-order": "0",
+            "children-0-title": "Child Item",
+            "children-0-status": "pending",
+            "children-0-notes": "",
+            "children-0-id": "",
+            # Management form for AttachmentInline
+            "attachments-TOTAL_FORMS": "0",
+            "attachments-INITIAL_FORMS": "0",
+            "attachments-MIN_NUM_FORMS": "0",
+            "attachments-MAX_NUM_FORMS": "1000",
+        }
+        response = self.client.post(url, data)
+        # Should redirect on success (not 200 = form error, not 500 = IntegrityError)
+        self.assertEqual(response.status_code, 302)
+        child = Item.objects.get(title="Child Item")
+        self.assertEqual(child.year_id, self.fy.pk)
+        self.assertEqual(child.parent_id, self.parent_item.pk)
+
+    def test_year_field_hidden_for_child_item(self):
+        """Year field should not appear in the change form for child items."""
+        child = Item.objects.create(
+            year=self.fy, parent=self.parent_item, title="Child", order=1
+        )
+        url = self._item_change_url(child)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        # The year select widget should NOT be rendered for child items.
+        self.assertNotContains(response, 'id="id_year"')
+
+    def test_year_field_present_for_root_item(self):
+        """Year field must appear in the change form for root items."""
+        url = self._item_change_url(self.parent_item)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="id_year"')
+
+    def test_cascade_year_on_root_item_save(self):
+        """Changing a root item's year must cascade to all descendants."""
+        fy2025 = FinancialYear.objects.create(year=2025)
+        child = Item.objects.create(
+            year=self.fy, parent=self.parent_item, title="Child", order=1
+        )
+        grandchild = Item.objects.create(
+            year=self.fy, parent=child, title="Grandchild", order=1
+        )
+
+        url = self._item_change_url(self.parent_item)
+        data = {
+            "year": fy2025.pk,
+            "parent": "",
+            "order": "1",
+            "title": "Parent",
+            "status": "pending",
+            "notes": "",
+            "children-TOTAL_FORMS": "1",
+            "children-INITIAL_FORMS": "1",
+            "children-MIN_NUM_FORMS": "0",
+            "children-MAX_NUM_FORMS": "1000",
+            "children-0-id": str(child.pk),
+            "children-0-parent": str(self.parent_item.pk),
+            "children-0-order": "1",
+            "children-0-title": "Child",
+            "children-0-status": "pending",
+            "children-0-notes": "",
+            "attachments-TOTAL_FORMS": "0",
+            "attachments-INITIAL_FORMS": "0",
+            "attachments-MIN_NUM_FORMS": "0",
+            "attachments-MAX_NUM_FORMS": "1000",
+        }
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, 302)
+
+        child.refresh_from_db()
+        grandchild.refresh_from_db()
+        self.assertEqual(child.year_id, fy2025.pk)
+        self.assertEqual(grandchild.year_id, fy2025.pk)
+
+
 class EnsureSuperuserCommandTests(TestCase):
     """Tests for the ensure_superuser management command."""
 

@@ -56,6 +56,36 @@ class ItemAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         return super().get_queryset(request).select_related("year", "parent")
 
+    def get_fields(self, request, obj=None):
+        fields = list(super().get_fields(request, obj))
+        # Child items cannot have a different year from their parent — hide the field.
+        if obj and obj.parent_id:
+            fields = [f for f in fields if f != "year"]
+        return fields
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if change and "year" in form.changed_data and obj.parent_id is None:
+            # Cascade year change to all descendants.
+            def _update_descendants(item):
+                for child in item.children.all():
+                    child.year_id = obj.year_id
+                    child.save(update_fields=["year"])
+                    _update_descendants(child)
+
+            _update_descendants(obj)
+
+    def save_formset(self, request, form, formset, change):
+        instances = formset.save(commit=False)
+        for instance in instances:
+            # Auto-inherit year from parent for inline-created child items.
+            if isinstance(instance, Item) and instance.parent_id:
+                instance.year_id = instance.parent.year_id
+            instance.save()
+        formset.save_m2m()
+        for obj in formset.deleted_objects:
+            obj.delete()
+
 
 # ---------------------------------------------------------------------------
 # Attachment Admin
