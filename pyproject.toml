@@ -30,4 +30,3 @@ ignore = []
 profile = "django"
 indent = 2
 blank_line_after_tag = "load,extends"
-ignore="H021,H023,T003"
