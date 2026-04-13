@@ -463,10 +463,11 @@ class ItemParentCycleTests(TestCase):
             "attachments-MAX_NUM_FORMS": "1000",
         }
         response = self.client.post(url, data)
-        # Should redirect (302) on success, not re-render the form (200/500).
-        self.assertIn(response.status_code, [200, 302])
-        # Regardless of the inline re-save, the outer form must not crash.
-        self.assertNotEqual(response.status_code, 500)
+        # Must redirect (302) on success — a 200 means the form was re-rendered
+        # with errors, and a 500 means an unhandled exception.
+        self.assertEqual(response.status_code, 302)
+        item.refresh_from_db()
+        self.assertIsNone(item.parent_id)
 
 
 class EnsureSuperuserCommandTests(TestCase):
