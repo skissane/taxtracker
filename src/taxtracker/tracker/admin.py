@@ -303,12 +303,19 @@ class FinancialYearAdmin(admin.ModelAdmin):
         if not request.user.is_superuser:
             raise PermissionDenied
 
+        engine = settings.DATABASES["default"]["ENGINE"]
+        if engine != "django.db.backends.sqlite3":
+            messages.error(request, "DB backup is only available for SQLite databases.")
+            return redirect(reverse("admin:tracker_financialyear_changelist"))
+
         db_path = settings.DATABASES["default"]["NAME"]
         dest_conn = sqlite3.connect(":memory:")
-        with sqlite3.connect(str(db_path)) as source_conn:
-            source_conn.backup(dest_conn)
-        backup_bytes = dest_conn.serialize()
-        dest_conn.close()
+        try:
+            with sqlite3.connect(str(db_path)) as source_conn:
+                source_conn.backup(dest_conn)
+            backup_bytes = dest_conn.serialize()
+        finally:
+            dest_conn.close()
 
         response = HttpResponse(backup_bytes, content_type="application/x-sqlite3")
         response["Content-Disposition"] = 'attachment; filename="db-backup.sqlite3"'
