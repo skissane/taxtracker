@@ -28,7 +28,6 @@
     .tt-footer { margin-top: 1.5em; }
   </style>
 {% endblock extrastyle %}
-
 {% block breadcrumbs %}
   <div class="breadcrumbs">
     <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> ›
@@ -37,7 +36,6 @@
     Status Summary
   </div>
 {% endblock breadcrumbs %}
-
 {% block content %}
   <div class="tt-info-box">
     <table class="tt-table">
@@ -93,9 +91,7 @@
           <td class="tt-depth-{{ row.depth }}">
             {% if row.depth %}↳{% endif %}
             <a href="{% url 'admin:tracker_item_change' row.item.pk %}">{{ row.item.title }}</a>
-            {% if row.item.notes %}
-              <span class="tt-notes" title="{{ row.item.notes }}">📝</span>
-            {% endif %}
+            {% if row.item.notes %}<span class="tt-notes" title="{{ row.item.notes }}">📝</span>{% endif %}
           </td>
           <td class="tt-td">
             {% if row.item.is_done %}
