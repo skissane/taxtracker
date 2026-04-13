@@ -398,11 +398,19 @@ class ItemParentCycleTests(TestCase):
         Item.objects.filter(pk=b.pk).update(parent_id=a.pk)
         a.refresh_from_db()
         b.refresh_from_db()
-        # __str__ must not raise; the result should contain both titles.
-        result = str(a)
+        # __str__ must not raise a RecursionError; cycle is indicated by "…".
+        try:
+            result = str(a)
+        except RecursionError:
+            self.fail("Item.__str__ raised RecursionError on a cyclic item")
         self.assertIn("A", result)
-        result_b = str(b)
+        self.assertIn("…", result)
+        try:
+            result_b = str(b)
+        except RecursionError:
+            self.fail("Item.__str__ raised RecursionError on a cyclic item")
         self.assertIn("B", result_b)
+        self.assertIn("…", result_b)
 
 
 class EnsureSuperuserCommandTests(TestCase):
