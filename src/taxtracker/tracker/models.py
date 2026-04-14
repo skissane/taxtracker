@@ -356,16 +356,22 @@ class DatabaseStorage(Storage):
     def get_available_name(self, name, max_length=None):
         # Each save creates a new record so there are no name conflicts.
         if max_length and len(name) > max_length:
-            name = name[:max_length]
+            stem = Path(name).stem
+            suffix = Path(name).suffix
+            allowed = max_length - len(suffix)
+            name = stem[:allowed] + suffix if allowed > 0 else name[:max_length]
         return name
 
     def _name_to_pk(self, name):
         # Expected format: "db/<pk>/<filename>"
         if not isinstance(name, str):
-            raise ValueError(f"Invalid database storage path: {name!r}")
+            raise ValueError(f"Expected str, got {type(name).__name__}: {name!r}")
         parts = name.split("/", 2)
         if len(parts) >= 2 and parts[0] == "db":
-            return int(parts[1])
+            try:
+                return int(parts[1])
+            except ValueError:
+                raise ValueError(f"Invalid database storage path: {name!r}") from None
         raise ValueError(f"Invalid database storage path: {name!r}")
 
 
