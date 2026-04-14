@@ -898,7 +898,8 @@ class FileTypePrimaryValidationTests(TestCase):
     def test_single_mime_type_without_primary_auto_sets_primary(self):
         """Exactly one MIME type with is_primary unchecked should be auto-set."""
         response = self._post_filetype(
-            mime_types=[{"mime_type": "application/tst", "is_primary": False}]
+            mime_types=[{"mime_type": "application/tst", "is_primary": False}],
+            extensions=[{"extension": "tst", "is_primary": True}],
         )
         self.assertEqual(response.status_code, 302)
         ft = FileType.objects.get(short_name="TST")
@@ -907,7 +908,8 @@ class FileTypePrimaryValidationTests(TestCase):
     def test_single_extension_without_primary_auto_sets_primary(self):
         """Exactly one extension with is_primary unchecked should be auto-set."""
         response = self._post_filetype(
-            extensions=[{"extension": "tst", "is_primary": False}]
+            mime_types=[{"mime_type": "application/tst", "is_primary": True}],
+            extensions=[{"extension": "tst", "is_primary": False}],
         )
         self.assertEqual(response.status_code, 302)
         ft = FileType.objects.get(short_name="TST")
@@ -990,16 +992,28 @@ class FileTypePrimaryValidationTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(FileType.objects.filter(short_name="TST").exists())
 
-    def test_only_extensions_no_mime_types_allowed(self):
-        """FileType with only file extensions (no MIME types) should save."""
+    def test_only_extensions_no_mime_types_fails(self):
+        """FileType with only file extensions (no MIME types) must fail validation."""
         response = self._post_filetype(
             extensions=[{"extension": "tst", "is_primary": True}]
         )
-        self.assertEqual(response.status_code, 302)
-        self.assertTrue(FileType.objects.filter(short_name="TST").exists())
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "A file type must have at least one MIME type")
+        self.assertFalse(FileType.objects.filter(short_name="TST").exists())
+
+    def test_only_mime_types_no_extensions_fails(self):
+        """FileType with only MIME types (no file extensions) must fail validation."""
+        response = self._post_filetype(
+            mime_types=[{"mime_type": "application/tst", "is_primary": True}]
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response, "A file type must have at least one file extension"
+        )
+        self.assertFalse(FileType.objects.filter(short_name="TST").exists())
 
     # ------------------------------------------------------------------
-    # At-least-one cross-formset requirement
+    # At-least-one independent requirement
     # ------------------------------------------------------------------
 
     def test_no_mime_or_extension_fails_validation(self):
@@ -1008,6 +1022,10 @@ class FileTypePrimaryValidationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(
             response,
-            "A file type must have at least one MIME type or file extension",
+            "A file type must have at least one MIME type",
+        )
+        self.assertContains(
+            response,
+            "A file type must have at least one file extension",
         )
         self.assertFalse(FileType.objects.filter(short_name="TST").exists())

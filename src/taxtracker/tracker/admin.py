@@ -31,6 +31,7 @@ class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
     """Base formset that enforces exactly one row is marked is_primary=True.
 
     Rules:
+    - If _nonempty_error is set and there are no non-deleted rows, raise it.
     - If exactly one non-deleted row exists and none is marked primary,
       automatically mark it as primary (and persist the change).
     - If multiple rows exist and none is marked primary, raise ValidationError.
@@ -39,6 +40,7 @@ class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
     """
 
     _primary_label = "item"
+    _nonempty_error = None  # if set, raised when there are no non-deleted rows
     _auto_primary_form = None  # set in clean() when auto-setting a single row
 
     def clean(self):
@@ -51,6 +53,8 @@ class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
             if f.cleaned_data and not f.cleaned_data.get("DELETE", False)
         ]
         if not non_deleted_forms:
+            if self._nonempty_error:
+                raise ValidationError(self._nonempty_error)
             return
         primary_forms = [
             f for f in non_deleted_forms if f.cleaned_data.get("is_primary")
@@ -92,42 +96,12 @@ class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
 
 class MimeTypeFormSet(_AtLeastOnePrimaryFormSet):
     _primary_label = "MIME type"
+    _nonempty_error = "A file type must have at least one MIME type."
 
 
 class FileExtensionFormSet(_AtLeastOnePrimaryFormSet):
-    """Extension of _AtLeastOnePrimaryFormSet with cross-formset validation.
-
-    In addition to the single-formset primary checks, also validates that at
-    least one MIME type OR file extension is provided for the parent FileType.
-    This formset must be cleaned *after* MimeTypeFormSet so that the MIME type
-    formset's cleaned_data is available for the cross-formset check.
-    """
-
     _primary_label = "file extension"
-    _mime_formset = None  # injected by FileTypeAdmin._create_formsets
-
-    def clean(self):
-        super().clean()
-        if self._mime_formset is None:
-            return
-        # Skip cross-formset check if the MIME type formset already has
-        # individual form errors (avoid cascading / confusing error messages).
-        if any(self._mime_formset.errors):
-            return
-
-        def _has_data(formset, field):
-            return any(
-                bool(f.cleaned_data.get(field))
-                for f in formset.forms
-                if f.cleaned_data and not f.cleaned_data.get("DELETE", False)
-            )
-
-        if not _has_data(self._mime_formset, "mime_type") and not _has_data(
-            self, "extension"
-        ):
-            raise ValidationError(
-                "A file type must have at least one MIME type or file extension."
-            )
+    _nonempty_error = "A file type must have at least one file extension."
 
 
 # ---------------------------------------------------------------------------
@@ -359,20 +333,6 @@ class FileTypeAdmin(admin.ModelAdmin):
     list_display = ("short_name", "full_name", "primary_mime_type", "primary_extension")
     search_fields = ("short_name", "full_name")
     inlines = [MimeTypeInline, FileExtensionInline]
-
-    def _create_formsets(self, request, obj, change):
-        formsets, inline_instances = super()._create_formsets(request, obj, change)
-        # Inject a reference to the MimeType formset into the FileExtension
-        # formset so that the cross-formset "at least one MIME or extension"
-        # validation can work.  MimeTypeInline is listed first, so it is always
-        # validated before FileExtensionFormSet.clean() runs.
-        mime_fs = next((f for f in formsets if isinstance(f, MimeTypeFormSet)), None)
-        ext_fs = next(
-            (f for f in formsets if isinstance(f, FileExtensionFormSet)), None
-        )
-        if mime_fs is not None and ext_fs is not None:
-            ext_fs._mime_formset = mime_fs
-        return formsets, inline_instances
 
     @admin.display(description="Primary MIME Type")
     def primary_mime_type(self, obj):
