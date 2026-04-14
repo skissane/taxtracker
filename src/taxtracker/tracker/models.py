@@ -323,7 +323,12 @@ class Attachment(models.Model):
         verbose_name_plural = "Attachments"
 
     def __str__(self):
-        label = self.title or Path(self.file.name).name
+        if self.title:
+            label = self.title
+        elif self.file and self.file.name:
+            label = Path(self.file.name).name
+        else:
+            label = "(no file)"
         return f"{label} ({self.item})"
 
     def save(self, *args, **kwargs):
