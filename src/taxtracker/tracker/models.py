@@ -332,7 +332,7 @@ class DatabaseStorage(Storage):
         try:
             pk = self._name_to_pk(name)
             return DBStoredFile.objects.filter(pk=pk).exists()
-        except ValueError, TypeError:
+        except ValueError:
             return False
 
     def url(self, name):
@@ -345,7 +345,7 @@ class DatabaseStorage(Storage):
         try:
             pk = self._name_to_pk(name)
             DBStoredFile.objects.filter(pk=pk).delete()
-        except ValueError, TypeError:
+        except ValueError:
             pass
 
     def size(self, name):
@@ -361,6 +361,8 @@ class DatabaseStorage(Storage):
 
     def _name_to_pk(self, name):
         # Expected format: "db/<pk>/<filename>"
+        if not isinstance(name, str):
+            raise ValueError(f"Invalid database storage path: {name!r}")
         parts = name.split("/", 2)
         if len(parts) >= 2 and parts[0] == "db":
             return int(parts[1])

@@ -842,14 +842,15 @@ class DatabaseStorageTests(TestCase):
         self.assertIn("served.txt", response.get("Content-Disposition", ""))
 
     def test_serve_file_view_requires_login(self):
-        """Unauthenticated requests to the serve view should be redirected."""
+        """Unauthenticated requests to the serve view should redirect to login."""
         att = Attachment(item=self.item, file=self._simple_file("secret.pdf"))
         att.save()
         pk = att.file.storage._name_to_pk(att.file.name)
         url = reverse("admin:tracker_attachment_serve_file", args=[pk])
         response = Client().get(url)
-        # Should redirect to login page
-        self.assertIn(response.status_code, [302, 403])
+        # Django admin redirects unauthenticated users to the login page
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login/", response["Location"])
 
 
 class FileTypePrimaryValidationTests(TestCase):
