@@ -4,12 +4,21 @@ import zipfile
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
 from django.core.management import call_command
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import FileExtension, FileType, FinancialYear, Item, MimeType
+from .models import (
+    Attachment,
+    DBStoredFile,
+    FileExtension,
+    FileType,
+    FinancialYear,
+    Item,
+    MimeType,
+)
 
 
 class FinancialYearModelTests(TestCase):
@@ -690,15 +699,11 @@ class AttachmentTitleTests(TestCase):
         return ContentFile(b"%PDF-1.4 test", name=name)
 
     def test_title_auto_populated_from_filename(self):
-        from taxtracker.tracker.models import Attachment
-
         att = Attachment(item=self.item, file=self._make_simple_file("report.pdf"))
         att.save()
         self.assertEqual(att.title, "report.pdf")
 
     def test_explicit_title_not_overwritten(self):
-        from taxtracker.tracker.models import Attachment
-
         att = Attachment(
             item=self.item,
             title="My Report",
@@ -708,8 +713,6 @@ class AttachmentTitleTests(TestCase):
         self.assertEqual(att.title, "My Report")
 
     def test_filetype_fk_saves_and_loads(self):
-        from taxtracker.tracker.models import Attachment
-
         att = Attachment(
             item=self.item,
             title="My Report",
@@ -721,8 +724,6 @@ class AttachmentTitleTests(TestCase):
         self.assertEqual(att.file_type, self.ft)
 
     def test_filetype_nullable(self):
-        from taxtracker.tracker.models import Attachment
-
         att = Attachment(
             item=self.item,
             title="No Type",
@@ -731,3 +732,198 @@ class AttachmentTitleTests(TestCase):
         att.save()
         att.refresh_from_db()
         self.assertIsNone(att.file_type)
+
+
+class DatabaseStorageTests(TestCase):
+    """Tests for DatabaseStorage backend and file-storage related behaviours."""
+
+    def setUp(self):
+        self.fy = FinancialYear.objects.create(year=2024)
+        self.item = Item.objects.create(year=self.fy, title="Income", order=1)
+        self.ft = FileType.objects.create(short_name="PDF", full_name="PDF Document")
+        FileExtension.objects.create(
+            file_type=self.ft, extension="pdf", is_primary=True
+        )
+
+    def _simple_file(self, name="document.pdf", content=b"%PDF-1.4 test"):
+        return ContentFile(content, name=name)
+
+    # ------------------------------------------------------------------
+    # File stored in database (not on disk)
+    # ------------------------------------------------------------------
+
+    def test_attachment_file_stored_in_db(self):
+        """Uploading a file should create a DBStoredFile record."""
+        before = DBStoredFile.objects.count()
+        att = Attachment(item=self.item, file=self._simple_file("doc.pdf"))
+        att.save()
+        self.assertEqual(DBStoredFile.objects.count(), before + 1)
+
+    def test_attachment_file_content_retrievable(self):
+        """The file content saved to DB should match what was uploaded."""
+        data = b"Hello database storage"
+        att = Attachment(item=self.item, file=self._simple_file("hello.txt", data))
+        att.save()
+        att.refresh_from_db()
+        stored_content = att.file.read()
+        self.assertEqual(stored_content, data)
+
+    def test_attachment_file_name_stored_correctly(self):
+        """DBStoredFile.filename should be the uploaded filename."""
+        att = Attachment(item=self.item, file=self._simple_file("myfile.pdf"))
+        att.save()
+        db_file = DBStoredFile.objects.get(
+            pk=att.file.storage._name_to_pk(att.file.name)
+        )
+        self.assertEqual(db_file.filename, "myfile.pdf")
+
+    def test_attachment_file_deleted_removes_db_record(self):
+        """Deleting an Attachment should remove the DBStoredFile record."""
+        att = Attachment(item=self.item, file=self._simple_file("del.pdf"))
+        att.save()
+        pk = att.file.storage._name_to_pk(att.file.name)
+        att.delete()
+        self.assertFalse(DBStoredFile.objects.filter(pk=pk).exists())
+
+    # ------------------------------------------------------------------
+    # Auto-guess file type from extension
+    # ------------------------------------------------------------------
+
+    def test_auto_guess_file_type_from_extension(self):
+        """file_type should be auto-set from the file extension when not provided."""
+        att = Attachment(item=self.item, file=self._simple_file("report.pdf"))
+        att.save()
+        att.refresh_from_db()
+        self.assertEqual(att.file_type, self.ft)
+
+    def test_auto_guess_file_type_case_insensitive(self):
+        """Extension matching should be case-insensitive (e.g. .PDF → pdf)."""
+        att = Attachment(item=self.item, file=self._simple_file("report.PDF"))
+        att.save()
+        att.refresh_from_db()
+        self.assertEqual(att.file_type, self.ft)
+
+    def test_auto_guess_file_type_unknown_extension_leaves_null(self):
+        """An unrecognised extension should leave file_type as None."""
+        att = Attachment(item=self.item, file=self._simple_file("report.xyz"))
+        att.save()
+        att.refresh_from_db()
+        self.assertIsNone(att.file_type)
+
+    def test_explicit_file_type_not_overwritten(self):
+        """An explicitly set file_type should not be overwritten by auto-guess."""
+        ft2 = FileType.objects.create(short_name="TXT", full_name="Text File")
+        att = Attachment(
+            item=self.item, file=self._simple_file("report.pdf"), file_type=ft2
+        )
+        att.save()
+        att.refresh_from_db()
+        self.assertEqual(att.file_type, ft2)
+
+    # ------------------------------------------------------------------
+    # File serving view
+    # ------------------------------------------------------------------
+
+    def test_serve_file_view(self):
+        """The serve_file_view should return the correct file content."""
+        User.objects.create_superuser("admin", "a@b.com", "pass")
+        client = Client()
+        client.login(username="admin", password="pass")
+
+        content = b"Hello attachment content"
+        att = Attachment(item=self.item, file=self._simple_file("served.txt", content))
+        att.save()
+        pk = att.file.storage._name_to_pk(att.file.name)
+
+        url = reverse("admin:tracker_attachment_serve_file", args=[pk])
+        response = client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, content)
+        self.assertIn("served.txt", response.get("Content-Disposition", ""))
+
+    def test_serve_file_view_requires_login(self):
+        """Unauthenticated requests to the serve view should be redirected."""
+        att = Attachment(item=self.item, file=self._simple_file("secret.pdf"))
+        att.save()
+        pk = att.file.storage._name_to_pk(att.file.name)
+        url = reverse("admin:tracker_attachment_serve_file", args=[pk])
+        response = Client().get(url)
+        # Should redirect to login page
+        self.assertIn(response.status_code, [302, 403])
+
+
+class FileTypePrimaryValidationTests(TestCase):
+    """Tests for the 'at least one primary' admin formset validation."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin", "a@b.com", "pass")
+        self.client = Client()
+        self.client.login(username="admin", password="pass")
+
+    def _post_filetype(self, mime_types=None, extensions=None):
+        """POST to FileType add view with inline mime types and extensions."""
+        data = {
+            "short_name": "TST",
+            "full_name": "Test Type",
+            # Management forms
+            "mime_types-TOTAL_FORMS": str(len(mime_types or [])),
+            "mime_types-INITIAL_FORMS": "0",
+            "mime_types-MIN_NUM_FORMS": "0",
+            "mime_types-MAX_NUM_FORMS": "1000",
+            "file_extensions-TOTAL_FORMS": str(len(extensions or [])),
+            "file_extensions-INITIAL_FORMS": "0",
+            "file_extensions-MIN_NUM_FORMS": "0",
+            "file_extensions-MAX_NUM_FORMS": "1000",
+        }
+        for i, mt in enumerate(mime_types or []):
+            data[f"mime_types-{i}-mime_type"] = mt["mime_type"]
+            data[f"mime_types-{i}-is_primary"] = "on" if mt.get("is_primary") else ""
+            data[f"mime_types-{i}-id"] = ""
+            data[f"mime_types-{i}-file_type"] = ""
+        for i, ext in enumerate(extensions or []):
+            data[f"file_extensions-{i}-extension"] = ext["extension"]
+            data[f"file_extensions-{i}-is_primary"] = (
+                "on" if ext.get("is_primary") else ""
+            )
+            data[f"file_extensions-{i}-id"] = ""
+            data[f"file_extensions-{i}-file_type"] = ""
+        url = reverse("admin:tracker_filetype_add")
+        return self.client.post(url, data)
+
+    def test_at_least_one_primary_mime_type_required(self):
+        """Saving a FileType with MIME types but none marked primary should fail."""
+        response = self._post_filetype(
+            mime_types=[{"mime_type": "application/tst", "is_primary": False}]
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response, "At least one MIME type must be marked as primary"
+        )
+        self.assertFalse(FileType.objects.filter(short_name="TST").exists())
+
+    def test_at_least_one_primary_extension_required(self):
+        """Saving a FileType with extensions but none marked primary should fail."""
+        response = self._post_filetype(
+            mime_types=[{"mime_type": "application/tst", "is_primary": True}],
+            extensions=[{"extension": "tst", "is_primary": False}],
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response, "At least one file extension must be marked as primary"
+        )
+        self.assertFalse(FileType.objects.filter(short_name="TST").exists())
+
+    def test_with_primary_set_saves_successfully(self):
+        """FileType with at least one primary mime type and extension should save."""
+        response = self._post_filetype(
+            mime_types=[{"mime_type": "application/tst", "is_primary": True}],
+            extensions=[{"extension": "tst", "is_primary": True}],
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(FileType.objects.filter(short_name="TST").exists())
+
+    def test_no_mime_types_is_allowed(self):
+        """Saving a FileType with no MIME types (empty inlines) should succeed."""
+        response = self._post_filetype()
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(FileType.objects.filter(short_name="TST").exists())

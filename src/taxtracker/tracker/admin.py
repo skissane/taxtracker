@@ -1,17 +1,64 @@
 import io
-import sqlite3
+import mimetypes
 import zipfile
 
 from django.conf import settings
 from django.contrib import admin, messages
-from django.core.exceptions import PermissionDenied
-from django.db import transaction
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import connections, transaction
+from django.forms import BaseInlineFormSet
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils.html import format_html
 
-from .models import Attachment, FileExtension, FileType, FinancialYear, Item, MimeType
+from .models import (
+    Attachment,
+    DBStoredFile,
+    FileExtension,
+    FileType,
+    FinancialYear,
+    Item,
+    MimeType,
+)
+
+# ---------------------------------------------------------------------------
+# Formsets — "at least one primary" validation
+# ---------------------------------------------------------------------------
+
+
+class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
+    """Base formset that enforces at least one row is marked is_primary=True."""
+
+    _primary_label = "item"
+
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+        has_primary = False
+        has_non_deleted = False
+        for form in self.forms:
+            if not form.cleaned_data:
+                continue
+            if form.cleaned_data.get("DELETE", False):
+                continue
+            has_non_deleted = True
+            if form.cleaned_data.get("is_primary"):
+                has_primary = True
+        if has_non_deleted and not has_primary:
+            raise ValidationError(
+                f"At least one {self._primary_label} must be marked as primary."
+            )
+
+
+class MimeTypeFormSet(_AtLeastOnePrimaryFormSet):
+    _primary_label = "MIME type"
+
+
+class FileExtensionFormSet(_AtLeastOnePrimaryFormSet):
+    _primary_label = "file extension"
+
 
 # ---------------------------------------------------------------------------
 # Inlines
@@ -118,6 +165,26 @@ class AttachmentAdmin(admin.ModelAdmin):
     list_select_related = ("item", "item__year", "file_type")
     autocomplete_fields = ("file_type",)
 
+    def get_urls(self):
+        custom = [
+            path(
+                "file/<int:pk>/",
+                self.admin_site.admin_view(self.serve_file_view),
+                name="tracker_attachment_serve_file",
+            ),
+        ]
+        return custom + super().get_urls()
+
+    def serve_file_view(self, request, pk):
+        obj = get_object_or_404(DBStoredFile, pk=pk)
+        content = bytes(obj.content)
+        content_type, _ = mimetypes.guess_type(obj.filename)
+        if not content_type:
+            content_type = "application/octet-stream"
+        response = HttpResponse(content, content_type=content_type)
+        response["Content-Disposition"] = f'inline; filename="{obj.filename}"'
+        return response
+
 
 # ---------------------------------------------------------------------------
 # FinancialYear Admin
@@ -207,12 +274,14 @@ class MimeTypeInline(admin.TabularInline):
     model = MimeType
     extra = 1
     fields = ("mime_type", "is_primary")
+    formset = MimeTypeFormSet
 
 
 class FileExtensionInline(admin.TabularInline):
     model = FileExtension
     extra = 1
     fields = ("extension", "is_primary")
+    formset = FileExtensionFormSet
 
 
 @admin.register(FileType)
@@ -401,14 +470,8 @@ class FinancialYearAdmin(admin.ModelAdmin):
             messages.error(request, "DB backup is only available for SQLite databases.")
             return redirect(reverse("admin:tracker_financialyear_changelist"))
 
-        db_path = settings.DATABASES["default"]["NAME"]
-        dest_conn = sqlite3.connect(":memory:")
-        try:
-            with sqlite3.connect(str(db_path)) as source_conn:
-                source_conn.backup(dest_conn)
-            backup_bytes = dest_conn.serialize()
-        finally:
-            dest_conn.close()
+        with connections["default"].cursor() as cursor:
+            backup_bytes = cursor.connection.serialize()
 
         response = HttpResponse(backup_bytes, content_type="application/x-sqlite3")
         response["Content-Disposition"] = 'attachment; filename="db-backup.sqlite3"'

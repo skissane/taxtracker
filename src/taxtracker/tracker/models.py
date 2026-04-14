@@ -1,10 +1,14 @@
 import datetime
+import os
 import re
 from pathlib import Path
 
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
+from django.core.files.storage import Storage
 from django.db import models
 from django.utils import timezone
+from django.utils.deconstruct import deconstructible
 
 
 class FinancialYear(models.Model):
@@ -293,6 +297,79 @@ class FileExtension(models.Model):
         super().save(*args, **kwargs)
 
 
+class DBStoredFile(models.Model):
+    """Binary file content stored in the database."""
+
+    filename = models.CharField(max_length=255)
+    content = models.BinaryField()
+
+    class Meta:
+        verbose_name = "Stored File"
+        verbose_name_plural = "Stored Files"
+
+    def __str__(self):
+        return self.filename
+
+
+@deconstructible
+class DatabaseStorage(Storage):
+    """Django storage backend that saves file content in the database."""
+
+    _PREFIX = "db/"
+
+    def _open(self, name, mode="rb"):
+        pk = self._name_to_pk(name)
+        obj = DBStoredFile.objects.get(pk=pk)
+        return ContentFile(bytes(obj.content), name=name)
+
+    def _save(self, name, content):
+        filename = os.path.basename(name)
+        data = content.read()
+        obj = DBStoredFile.objects.create(filename=filename, content=data)
+        return f"{self._PREFIX}{obj.pk}/{filename}"
+
+    def exists(self, name):
+        try:
+            pk = self._name_to_pk(name)
+            return DBStoredFile.objects.filter(pk=pk).exists()
+        except ValueError, TypeError:
+            return False
+
+    def url(self, name):
+        from django.urls import reverse
+
+        pk = self._name_to_pk(name)
+        return reverse("admin:tracker_attachment_serve_file", args=[pk])
+
+    def delete(self, name):
+        try:
+            pk = self._name_to_pk(name)
+            DBStoredFile.objects.filter(pk=pk).delete()
+        except ValueError, TypeError:
+            pass
+
+    def size(self, name):
+        pk = self._name_to_pk(name)
+        obj = DBStoredFile.objects.get(pk=pk)
+        return len(obj.content)
+
+    def get_available_name(self, name, max_length=None):
+        # Each save creates a new record so there are no name conflicts.
+        if max_length and len(name) > max_length:
+            name = name[:max_length]
+        return name
+
+    def _name_to_pk(self, name):
+        # Expected format: "db/<pk>/<filename>"
+        parts = name.split("/", 2)
+        if len(parts) >= 2 and parts[0] == "db":
+            return int(parts[1])
+        raise ValueError(f"Invalid database storage path: {name!r}")
+
+
+_database_storage = DatabaseStorage()
+
+
 class Attachment(models.Model):
     """A file attachment associated with an Item."""
 
@@ -315,7 +392,7 @@ class Attachment(models.Model):
         related_name="attachments",
         help_text="Type of the uploaded file.",
     )
-    file = models.FileField(upload_to="attachments/%Y/")
+    file = models.FileField(storage=_database_storage)
 
     class Meta:
         ordering = ["title"]
@@ -334,4 +411,19 @@ class Attachment(models.Model):
     def save(self, *args, **kwargs):
         if not self.title and self.file:
             self.title = Path(self.file.name).name
+        if not self.file_type_id and self.file:
+            ext = Path(self.file.name).suffix.lstrip(".").lower()
+            if ext:
+                try:
+                    fe = FileExtension.objects.get(extension=ext)
+                    self.file_type = fe.file_type
+                except FileExtension.DoesNotExist:
+                    pass
         super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        # Delete the stored file from the database when the attachment is removed.
+        file_name = self.file.name if self.file else None
+        super().delete(*args, **kwargs)
+        if file_name:
+            self.file.storage.delete(file_name)
