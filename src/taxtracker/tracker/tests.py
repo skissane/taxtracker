@@ -891,10 +891,39 @@ class FileTypePrimaryValidationTests(TestCase):
         url = reverse("admin:tracker_filetype_add")
         return self.client.post(url, data)
 
-    def test_at_least_one_primary_mime_type_required(self):
-        """Saving a FileType with MIME types but none marked primary should fail."""
+    # ------------------------------------------------------------------
+    # Auto-set primary (single row, not marked primary)
+    # ------------------------------------------------------------------
+
+    def test_single_mime_type_without_primary_auto_sets_primary(self):
+        """Exactly one MIME type with is_primary unchecked should be auto-set."""
         response = self._post_filetype(
             mime_types=[{"mime_type": "application/tst", "is_primary": False}]
+        )
+        self.assertEqual(response.status_code, 302)
+        ft = FileType.objects.get(short_name="TST")
+        self.assertTrue(ft.mime_types.get().is_primary)
+
+    def test_single_extension_without_primary_auto_sets_primary(self):
+        """Exactly one extension with is_primary unchecked should be auto-set."""
+        response = self._post_filetype(
+            extensions=[{"extension": "tst", "is_primary": False}]
+        )
+        self.assertEqual(response.status_code, 302)
+        ft = FileType.objects.get(short_name="TST")
+        self.assertTrue(ft.file_extensions.get().is_primary)
+
+    # ------------------------------------------------------------------
+    # Multiple rows — primary required, or error
+    # ------------------------------------------------------------------
+
+    def test_multiple_mime_types_none_primary_fails(self):
+        """Multiple MIME types with none marked primary must fail validation."""
+        response = self._post_filetype(
+            mime_types=[
+                {"mime_type": "application/tst", "is_primary": False},
+                {"mime_type": "application/x-tst", "is_primary": False},
+            ]
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(
@@ -902,17 +931,55 @@ class FileTypePrimaryValidationTests(TestCase):
         )
         self.assertFalse(FileType.objects.filter(short_name="TST").exists())
 
-    def test_at_least_one_primary_extension_required(self):
-        """Saving a FileType with extensions but none marked primary should fail."""
+    def test_multiple_extensions_none_primary_fails(self):
+        """Multiple extensions with none marked primary must fail validation."""
         response = self._post_filetype(
             mime_types=[{"mime_type": "application/tst", "is_primary": True}],
-            extensions=[{"extension": "tst", "is_primary": False}],
+            extensions=[
+                {"extension": "tst", "is_primary": False},
+                {"extension": "ts2", "is_primary": False},
+            ],
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(
             response, "At least one file extension must be marked as primary"
         )
         self.assertFalse(FileType.objects.filter(short_name="TST").exists())
+
+    # ------------------------------------------------------------------
+    # Multiple primaries — validation error instead of IntegrityError
+    # ------------------------------------------------------------------
+
+    def test_multiple_primary_mime_types_shows_validation_error(self):
+        """Multiple MIME types all marked primary must produce a validation error."""
+        response = self._post_filetype(
+            mime_types=[
+                {"mime_type": "application/tst", "is_primary": True},
+                {"mime_type": "application/x-tst", "is_primary": True},
+            ]
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Only one MIME type may be marked as primary")
+        self.assertFalse(FileType.objects.filter(short_name="TST").exists())
+
+    def test_multiple_primary_extensions_shows_validation_error(self):
+        """Multiple extensions all marked primary must produce a validation error."""
+        response = self._post_filetype(
+            mime_types=[{"mime_type": "application/tst", "is_primary": True}],
+            extensions=[
+                {"extension": "tst", "is_primary": True},
+                {"extension": "ts2", "is_primary": True},
+            ],
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response, "Only one file extension may be marked as primary"
+        )
+        self.assertFalse(FileType.objects.filter(short_name="TST").exists())
+
+    # ------------------------------------------------------------------
+    # Successful saves
+    # ------------------------------------------------------------------
 
     def test_with_primary_set_saves_successfully(self):
         """FileType with at least one primary mime type and extension should save."""
@@ -923,8 +990,24 @@ class FileTypePrimaryValidationTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(FileType.objects.filter(short_name="TST").exists())
 
-    def test_no_mime_types_is_allowed(self):
-        """Saving a FileType with no MIME types (empty inlines) should succeed."""
-        response = self._post_filetype()
+    def test_only_extensions_no_mime_types_allowed(self):
+        """FileType with only file extensions (no MIME types) should save."""
+        response = self._post_filetype(
+            extensions=[{"extension": "tst", "is_primary": True}]
+        )
         self.assertEqual(response.status_code, 302)
         self.assertTrue(FileType.objects.filter(short_name="TST").exists())
+
+    # ------------------------------------------------------------------
+    # At-least-one cross-formset requirement
+    # ------------------------------------------------------------------
+
+    def test_no_mime_or_extension_fails_validation(self):
+        """Saving a FileType with no MIME types and no extensions must fail."""
+        response = self._post_filetype()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "A file type must have at least one MIME type or file extension",
+        )
+        self.assertFalse(FileType.objects.filter(short_name="TST").exists())

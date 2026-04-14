@@ -28,28 +28,66 @@ from .models import (
 
 
 class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
-    """Base formset that enforces at least one row is marked is_primary=True."""
+    """Base formset that enforces exactly one row is marked is_primary=True.
+
+    Rules:
+    - If exactly one non-deleted row exists and none is marked primary,
+      automatically mark it as primary (and persist the change).
+    - If multiple rows exist and none is marked primary, raise ValidationError.
+    - If multiple rows are marked primary, raise ValidationError (prevents
+      IntegrityError from the unique DB constraint).
+    """
 
     _primary_label = "item"
+    _auto_primary_form = None  # set in clean() when auto-setting a single row
 
     def clean(self):
         super().clean()
         if any(self.errors):
             return
-        has_primary = False
-        has_non_deleted = False
-        for form in self.forms:
-            if not form.cleaned_data:
-                continue
-            if form.cleaned_data.get("DELETE", False):
-                continue
-            has_non_deleted = True
-            if form.cleaned_data.get("is_primary"):
-                has_primary = True
-        if has_non_deleted and not has_primary:
+        non_deleted_forms = [
+            f
+            for f in self.forms
+            if f.cleaned_data and not f.cleaned_data.get("DELETE", False)
+        ]
+        if not non_deleted_forms:
+            return
+        primary_forms = [
+            f for f in non_deleted_forms if f.cleaned_data.get("is_primary")
+        ]
+        if len(primary_forms) > 1:
             raise ValidationError(
-                f"At least one {self._primary_label} must be marked as primary."
+                f"Only one {self._primary_label} may be marked as primary."
             )
+        if not primary_forms:
+            if len(non_deleted_forms) == 1:
+                # Exactly one row — auto-set it as primary.
+                # We update both cleaned_data (used if the form itself is saved
+                # via form.save()) and instance.is_primary (used as a fallback for
+                # unchanged existing rows that form.save() may skip).
+                non_deleted_forms[0].cleaned_data["is_primary"] = True
+                non_deleted_forms[0].instance.is_primary = True
+                self._auto_primary_form = non_deleted_forms[0]
+            else:
+                raise ValidationError(
+                    f"At least one {self._primary_label} must be marked as primary."
+                )
+
+    def save(self, commit=True):
+        instances = super().save(commit=commit)
+        # For the auto-set-primary case, ensure the DB is updated even when the
+        # form was not otherwise "changed" (e.g. an existing row already in the DB
+        # whose is_primary was False and the user didn't explicitly tick the box).
+        if commit and self._auto_primary_form is not None:
+            inst = self._auto_primary_form.instance
+            # Only issue the UPDATE if it hasn't already been persisted as True
+            # (new rows are saved by super().save() with is_primary=True from the
+            # instance; this UPDATE is mainly for existing unchanged rows that
+            # form.save() would skip because has_changed() returns False).
+            if inst.pk and not inst.is_primary:
+                self.model.objects.filter(pk=inst.pk).update(is_primary=True)
+                inst.is_primary = True
+        return instances
 
 
 class MimeTypeFormSet(_AtLeastOnePrimaryFormSet):
@@ -57,7 +95,39 @@ class MimeTypeFormSet(_AtLeastOnePrimaryFormSet):
 
 
 class FileExtensionFormSet(_AtLeastOnePrimaryFormSet):
+    """Extension of _AtLeastOnePrimaryFormSet with cross-formset validation.
+
+    In addition to the single-formset primary checks, also validates that at
+    least one MIME type OR file extension is provided for the parent FileType.
+    This formset must be cleaned *after* MimeTypeFormSet so that the MIME type
+    formset's cleaned_data is available for the cross-formset check.
+    """
+
     _primary_label = "file extension"
+    _mime_formset = None  # injected by FileTypeAdmin._create_formsets
+
+    def clean(self):
+        super().clean()
+        if self._mime_formset is None:
+            return
+        # Skip cross-formset check if the MIME type formset already has
+        # individual form errors (avoid cascading / confusing error messages).
+        if any(self._mime_formset.errors):
+            return
+
+        def _has_data(formset, field):
+            return any(
+                bool(f.cleaned_data.get(field))
+                for f in formset.forms
+                if f.cleaned_data and not f.cleaned_data.get("DELETE", False)
+            )
+
+        if not _has_data(self._mime_formset, "mime_type") and not _has_data(
+            self, "extension"
+        ):
+            raise ValidationError(
+                "A file type must have at least one MIME type or file extension."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +359,20 @@ class FileTypeAdmin(admin.ModelAdmin):
     list_display = ("short_name", "full_name", "primary_mime_type", "primary_extension")
     search_fields = ("short_name", "full_name")
     inlines = [MimeTypeInline, FileExtensionInline]
+
+    def _create_formsets(self, request, obj, change):
+        formsets, inline_instances = super()._create_formsets(request, obj, change)
+        # Inject a reference to the MimeType formset into the FileExtension
+        # formset so that the cross-formset "at least one MIME or extension"
+        # validation can work.  MimeTypeInline is listed first, so it is always
+        # validated before FileExtensionFormSet.clean() runs.
+        mime_fs = next((f for f in formsets if isinstance(f, MimeTypeFormSet)), None)
+        ext_fs = next(
+            (f for f in formsets if isinstance(f, FileExtensionFormSet)), None
+        )
+        if mime_fs is not None and ext_fs is not None:
+            ext_fs._mime_formset = mime_fs
+        return formsets, inline_instances
 
     @admin.display(description="Primary MIME Type")
     def primary_mime_type(self, obj):
