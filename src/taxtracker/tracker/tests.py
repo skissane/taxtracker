@@ -9,7 +9,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import FinancialYear, Item
+from .models import FileExtension, FileType, FinancialYear, Item, MimeType
 
 
 class FinancialYearModelTests(TestCase):
@@ -533,3 +533,201 @@ class EnsureSuperuserCommandTests(TestCase):
         self.assertEqual(len(printed_password), 32)
         user.refresh_from_db()
         self.assertTrue(user.check_password(printed_password))
+
+
+class FileTypeModelTests(TestCase):
+    """Tests for FileType, MimeType, and FileExtension models."""
+
+    def setUp(self):
+        self.ft = FileType.objects.create(short_name="PDF", full_name="PDF Document")
+
+    def test_filetype_str(self):
+        self.assertEqual(str(self.ft), "PDF")
+
+    def test_filetype_short_name_unique(self):
+        from django.db import IntegrityError
+
+        with self.assertRaises(IntegrityError):
+            FileType.objects.create(short_name="PDF", full_name="Other PDF")
+
+    def test_filetype_full_name_unique(self):
+        from django.db import IntegrityError
+
+        with self.assertRaises(IntegrityError):
+            FileType.objects.create(short_name="PDF2", full_name="PDF Document")
+
+    # ------------------------------------------------------------------
+    # MimeType tests
+    # ------------------------------------------------------------------
+
+    def test_mimetype_str(self):
+        mt = MimeType.objects.create(
+            file_type=self.ft, mime_type="application/pdf", is_primary=True
+        )
+        self.assertEqual(str(mt), "application/pdf")
+
+    def test_mimetype_valid_formats(self):
+        valid = [
+            "application/pdf",
+            "image/jpeg",
+            "text/plain",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/x-pdf",
+        ]
+        for mt_str in valid:
+            mt = MimeType(file_type=self.ft, mime_type=mt_str)
+            mt.clean()  # should not raise
+
+    def test_mimetype_invalid_no_slash(self):
+        mt = MimeType(file_type=self.ft, mime_type="applicationpdf")
+        with self.assertRaises(ValidationError):
+            mt.clean()
+
+    def test_mimetype_invalid_two_slashes(self):
+        mt = MimeType(file_type=self.ft, mime_type="application/pdf/extra")
+        with self.assertRaises(ValidationError):
+            mt.clean()
+
+    def test_mimetype_invalid_with_space(self):
+        mt = MimeType(file_type=self.ft, mime_type="application /pdf")
+        with self.assertRaises(ValidationError):
+            mt.clean()
+
+    def test_mimetype_globally_unique(self):
+        from django.db import IntegrityError
+
+        ft2 = FileType.objects.create(short_name="PDF2", full_name="PDF 2")
+        MimeType.objects.create(
+            file_type=self.ft, mime_type="application/pdf", is_primary=True
+        )
+        with self.assertRaises(IntegrityError):
+            MimeType.objects.create(
+                file_type=ft2, mime_type="application/pdf", is_primary=False
+            )
+
+    def test_at_most_one_primary_mime_type_per_file_type(self):
+        from django.db import IntegrityError
+
+        MimeType.objects.create(
+            file_type=self.ft, mime_type="application/pdf", is_primary=True
+        )
+        with self.assertRaises(IntegrityError):
+            MimeType.objects.create(
+                file_type=self.ft, mime_type="application/x-pdf", is_primary=True
+            )
+
+    # ------------------------------------------------------------------
+    # FileExtension tests
+    # ------------------------------------------------------------------
+
+    def test_extension_str(self):
+        ext = FileExtension.objects.create(
+            file_type=self.ft, extension="pdf", is_primary=True
+        )
+        self.assertEqual(str(ext), "pdf")
+
+    def test_extension_forced_lowercase_on_save(self):
+        ext = FileExtension(file_type=self.ft, extension="PDF", is_primary=True)
+        ext.save()
+        ext.refresh_from_db()
+        self.assertEqual(ext.extension, "pdf")
+
+    def test_extension_forced_lowercase_in_clean(self):
+        ext = FileExtension(file_type=self.ft, extension="PDF")
+        ext.clean()
+        self.assertEqual(ext.extension, "pdf")
+
+    def test_extension_invalid_with_dot(self):
+        ext = FileExtension(file_type=self.ft, extension=".pdf")
+        with self.assertRaises(ValidationError):
+            ext.clean()
+
+    def test_extension_invalid_with_slash(self):
+        ext = FileExtension(file_type=self.ft, extension="pd/f")
+        with self.assertRaises(ValidationError):
+            ext.clean()
+
+    def test_extension_invalid_with_space(self):
+        ext = FileExtension(file_type=self.ft, extension="p df")
+        with self.assertRaises(ValidationError):
+            ext.clean()
+
+    def test_extension_globally_unique(self):
+        from django.db import IntegrityError
+
+        ft2 = FileType.objects.create(short_name="PDF2", full_name="PDF 2")
+        FileExtension.objects.create(
+            file_type=self.ft, extension="pdf", is_primary=True
+        )
+        with self.assertRaises(IntegrityError):
+            FileExtension.objects.create(
+                file_type=ft2, extension="pdf", is_primary=False
+            )
+
+    def test_at_most_one_primary_extension_per_file_type(self):
+        from django.db import IntegrityError
+
+        FileExtension.objects.create(
+            file_type=self.ft, extension="pdf", is_primary=True
+        )
+        with self.assertRaises(IntegrityError):
+            FileExtension.objects.create(
+                file_type=self.ft, extension="pdff", is_primary=True
+            )
+
+
+class AttachmentTitleTests(TestCase):
+    """Tests for Attachment.title auto-population and FK file_type."""
+
+    def setUp(self):
+        self.fy = FinancialYear.objects.create(year=2024)
+        self.item = Item.objects.create(year=self.fy, title="Income", order=1)
+        self.ft = FileType.objects.create(short_name="PDF", full_name="PDF Document")
+
+    def _make_simple_file(self, name="document.pdf"):
+        from django.core.files.base import ContentFile
+
+        return ContentFile(b"%PDF-1.4 test", name=name)
+
+    def test_title_auto_populated_from_filename(self):
+        from taxtracker.tracker.models import Attachment
+
+        att = Attachment(item=self.item, file=self._make_simple_file("report.pdf"))
+        att.save()
+        self.assertEqual(att.title, "report.pdf")
+
+    def test_explicit_title_not_overwritten(self):
+        from taxtracker.tracker.models import Attachment
+
+        att = Attachment(
+            item=self.item,
+            title="My Report",
+            file=self._make_simple_file("report.pdf"),
+        )
+        att.save()
+        self.assertEqual(att.title, "My Report")
+
+    def test_filetype_fk_saves_and_loads(self):
+        from taxtracker.tracker.models import Attachment
+
+        att = Attachment(
+            item=self.item,
+            title="My Report",
+            file_type=self.ft,
+            file=self._make_simple_file("report.pdf"),
+        )
+        att.save()
+        att.refresh_from_db()
+        self.assertEqual(att.file_type, self.ft)
+
+    def test_filetype_nullable(self):
+        from taxtracker.tracker.models import Attachment
+
+        att = Attachment(
+            item=self.item,
+            title="No Type",
+            file=self._make_simple_file("report.pdf"),
+        )
+        att.save()
+        att.refresh_from_db()
+        self.assertIsNone(att.file_type)

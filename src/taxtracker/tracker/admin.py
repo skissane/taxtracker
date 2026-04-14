@@ -11,7 +11,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils.html import format_html
 
-from .models import Attachment, FinancialYear, Item
+from .models import Attachment, FileExtension, FileType, FinancialYear, Item, MimeType
 
 # ---------------------------------------------------------------------------
 # Inlines
@@ -22,6 +22,7 @@ class AttachmentInline(admin.TabularInline):
     model = Attachment
     extra = 1
     fields = ("title", "notes", "file_type", "file")
+    autocomplete_fields = ("file_type",)
 
 
 class ChildItemInline(admin.TabularInline):
@@ -113,8 +114,9 @@ class ItemAdmin(admin.ModelAdmin):
 class AttachmentAdmin(admin.ModelAdmin):
     list_display = ("title", "item", "file_type", "file")
     list_filter = ("item__year", "file_type")
-    search_fields = ("title", "notes", "item__title")
-    list_select_related = ("item", "item__year")
+    search_fields = ("title", "notes", "item__title", "file_type__short_name")
+    list_select_related = ("item", "item__year", "file_type")
+    autocomplete_fields = ("file_type",)
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +196,56 @@ def _build_zip(fy):
 
     buf.seek(0)
     return buf
+
+
+# ---------------------------------------------------------------------------
+# FileType Admin
+# ---------------------------------------------------------------------------
+
+
+class MimeTypeInline(admin.TabularInline):
+    model = MimeType
+    extra = 1
+    fields = ("mime_type", "is_primary")
+
+
+class FileExtensionInline(admin.TabularInline):
+    model = FileExtension
+    extra = 1
+    fields = ("extension", "is_primary")
+
+
+@admin.register(FileType)
+class FileTypeAdmin(admin.ModelAdmin):
+    list_display = ("short_name", "full_name", "primary_mime_type", "primary_extension")
+    search_fields = ("short_name", "full_name")
+    inlines = [MimeTypeInline, FileExtensionInline]
+
+    @admin.display(description="Primary MIME Type")
+    def primary_mime_type(self, obj):
+        mt = obj.mime_types.filter(is_primary=True).first()
+        return mt.mime_type if mt else "—"
+
+    @admin.display(description="Primary Extension")
+    def primary_extension(self, obj):
+        ext = obj.file_extensions.filter(is_primary=True).first()
+        return ext.extension if ext else "—"
+
+
+@admin.register(MimeType)
+class MimeTypeAdmin(admin.ModelAdmin):
+    list_display = ("mime_type", "file_type", "is_primary")
+    list_filter = ("file_type", "is_primary")
+    search_fields = ("mime_type",)
+    list_select_related = ("file_type",)
+
+
+@admin.register(FileExtension)
+class FileExtensionAdmin(admin.ModelAdmin):
+    list_display = ("extension", "file_type", "is_primary")
+    list_filter = ("file_type", "is_primary")
+    search_fields = ("extension",)
+    list_select_related = ("file_type",)
 
 
 @admin.register(FinancialYear)

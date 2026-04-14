@@ -1,4 +1,6 @@
 import datetime
+import re
+from pathlib import Path
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -156,6 +158,141 @@ class Item(models.Model):
         return path
 
 
+class FileType(models.Model):
+    """A recognised file type with associated MIME types and file extensions."""
+
+    short_name = models.CharField(
+        max_length=50,
+        unique=True,
+        help_text="Short human-readable name, e.g. PDF",
+    )
+    full_name = models.CharField(
+        max_length=255,
+        unique=True,
+        help_text="Full human-readable name, e.g. PDF Document",
+    )
+
+    class Meta:
+        ordering = ["short_name"]
+        verbose_name = "File Type"
+        verbose_name_plural = "File Types"
+
+    def __str__(self):
+        return self.short_name
+
+
+_MIME_TYPE_RE = re.compile(
+    r"^[a-zA-Z0-9][a-zA-Z0-9!#$&\-^_]*"
+    r"/[a-zA-Z0-9][a-zA-Z0-9!#$&\-^_.+]*$"
+)
+
+
+class MimeType(models.Model):
+    """A MIME type associated with a FileType."""
+
+    file_type = models.ForeignKey(
+        FileType,
+        on_delete=models.CASCADE,
+        related_name="mime_types",
+    )
+    mime_type = models.CharField(
+        max_length=255,
+        help_text="MIME type string, e.g. application/pdf",
+    )
+    is_primary = models.BooleanField(
+        default=False,
+        help_text="Whether this is the primary MIME type for this file type.",
+    )
+
+    class Meta:
+        ordering = ["-is_primary", "mime_type"]
+        verbose_name = "MIME Type"
+        verbose_name_plural = "MIME Types"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["mime_type"],
+                name="unique_mime_type",
+            ),
+            models.UniqueConstraint(
+                fields=["file_type"],
+                condition=models.Q(is_primary=True),
+                name="unique_primary_mime_type_per_file_type",
+            ),
+        ]
+
+    def __str__(self):
+        return self.mime_type
+
+    def clean(self):
+        if self.mime_type and not _MIME_TYPE_RE.match(self.mime_type):
+            raise ValidationError(
+                {
+                    "mime_type": (
+                        "Invalid MIME type. Must be 'type/subtype' using only "
+                        "letters, digits and !#$&-^_ (type) or !#$&-^_.+ (subtype)."
+                    )
+                }
+            )
+
+
+_EXTENSION_INVALID_RE = re.compile(r"[\s./]")
+
+
+class FileExtension(models.Model):
+    """A file extension associated with a FileType."""
+
+    file_type = models.ForeignKey(
+        FileType,
+        on_delete=models.CASCADE,
+        related_name="file_extensions",
+    )
+    extension = models.CharField(
+        max_length=20,
+        help_text="Extension without leading dot, e.g. pdf. Always stored lowercase.",
+    )
+    is_primary = models.BooleanField(
+        default=False,
+        help_text="Whether this is the primary extension for this file type.",
+    )
+
+    class Meta:
+        ordering = ["-is_primary", "extension"]
+        verbose_name = "File Extension"
+        verbose_name_plural = "File Extensions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["extension"],
+                name="unique_file_extension",
+            ),
+            models.UniqueConstraint(
+                fields=["file_type"],
+                condition=models.Q(is_primary=True),
+                name="unique_primary_extension_per_file_type",
+            ),
+        ]
+
+    def __str__(self):
+        return self.extension
+
+    def clean(self):
+        if self.extension:
+            self.extension = self.extension.lower()
+            if _EXTENSION_INVALID_RE.search(self.extension):
+                raise ValidationError(
+                    {
+                        "extension": (
+                            "File extension must not contain whitespace, "
+                            "a dot, or a slash."
+                        )
+                    }
+                )
+
+    def save(self, *args, **kwargs):
+        if self.extension:
+            self.extension = self.extension.lower()
+        super().save(*args, **kwargs)
+
+
 class Attachment(models.Model):
     """A file attachment associated with an Item."""
 
@@ -164,12 +301,19 @@ class Attachment(models.Model):
         on_delete=models.CASCADE,
         related_name="attachments",
     )
-    title = models.CharField(max_length=255)
-    notes = models.TextField(blank=True)
-    file_type = models.CharField(
-        max_length=50,
+    title = models.CharField(
+        max_length=255,
         blank=True,
-        help_text="e.g. PDF, Word, CSV, Image",
+        help_text="Leave blank to auto-populate from the uploaded file name.",
+    )
+    notes = models.TextField(blank=True)
+    file_type = models.ForeignKey(
+        FileType,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="attachments",
+        help_text="Type of the uploaded file.",
     )
     file = models.FileField(upload_to="attachments/%Y/")
 
@@ -179,4 +323,10 @@ class Attachment(models.Model):
         verbose_name_plural = "Attachments"
 
     def __str__(self):
-        return f"{self.title} ({self.item})"
+        label = self.title or Path(self.file.name).name
+        return f"{label} ({self.item})"
+
+    def save(self, *args, **kwargs):
+        if not self.title and self.file:
+            self.title = Path(self.file.name).name
+        super().save(*args, **kwargs)
