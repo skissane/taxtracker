@@ -208,15 +208,6 @@ class AttachmentAdmin(admin.ModelAdmin):
     search_fields = ("title", "notes", "item__title", "file_type__short_name")
     list_select_related = ("item", "item__year", "file_type")
     autocomplete_fields = ("file_type",)
-    readonly_fields = ("item_link",)
-    fields = ("item_link", "item", "title", "notes", "file_type", "file")
-
-    @admin.display(description="Item (link)")
-    def item_link(self, obj):
-        if obj.pk is None or obj.item_id is None:
-            return "—"
-        url = reverse("admin:tracker_item_change", args=[obj.item_id])
-        return format_html('<a href="{}">{}</a>', url, obj.item)
 
     def get_urls(self):
         custom = [
