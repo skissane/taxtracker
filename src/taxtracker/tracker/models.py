@@ -118,45 +118,49 @@ class Item(models.Model):
         return self.status == self.STATUS_DONE
 
     def clean(self):
-        # Enforce year inheritance: a child item must always share its parent's year.
         if self.parent_id is not None:
+            # Enforce year inheritance: child items always share their parent's year.
             try:
-                parent = Item.objects.only("year_id", "parent_id").get(
-                    pk=self.parent_id
-                )
+                parent = Item.objects.only("year_id").get(pk=self.parent_id)
                 self.year_id = parent.year_id
             except Item.DoesNotExist:
                 pass
 
-        if self.parent_id is None or self.pk is None:
-            return
-        # If the parent_id is unchanged from the persisted value, a cycle already
-        # exists in the DB and we are not making it worse — skip detection so that
-        # existing cycles don't block every subsequent save (e.g. inline formsets
-        # re-validate unchanged rows, which would otherwise surface an invisible
-        # "Please correct the error below" message when the parent field is hidden).
-        try:
-            original_parent_id = (
-                Item.objects.only("parent_id").get(pk=self.pk).parent_id
-            )
-            if original_parent_id == self.parent_id:
-                return
-        except Item.DoesNotExist:
-            pass
-        # Walk the ancestor chain; if we encounter self, there is a cycle.
-        visited = {self.pk}
-        current_id = self.parent_id
-        while current_id is not None:
-            if current_id in visited:
-                raise ValidationError(
-                    {"parent": "Setting this parent would create a circular reference."}
-                )
-            visited.add(current_id)
-            try:
-                ancestor = Item.objects.only("parent_id").get(pk=current_id)
-                current_id = ancestor.parent_id
-            except Item.DoesNotExist:
-                break
+            # Cycle detection only makes sense for existing items with a parent.
+            if self.pk is not None:
+                # If the parent_id is unchanged from the persisted value, a cycle
+                # already exists in the DB and we are not making it worse — skip
+                # detection so that existing cycles don't block every subsequent save
+                # (e.g. inline formsets re-validate unchanged rows, which would
+                # otherwise surface an invisible "Please correct the error below"
+                # message when the parent field is hidden).
+                try:
+                    original_parent_id = (
+                        Item.objects.only("parent_id").get(pk=self.pk).parent_id
+                    )
+                    if original_parent_id == self.parent_id:
+                        return
+                except Item.DoesNotExist:
+                    pass
+                # Walk the ancestor chain; if we encounter self, there is a cycle.
+                visited = {self.pk}
+                current_id = self.parent_id
+                while current_id is not None:
+                    if current_id in visited:
+                        raise ValidationError(
+                            {
+                                "parent": (
+                                    "Setting this parent would create a circular"
+                                    " reference."
+                                )
+                            }
+                        )
+                    visited.add(current_id)
+                    try:
+                        ancestor = Item.objects.only("parent_id").get(pk=current_id)
+                        current_id = ancestor.parent_id
+                    except Item.DoesNotExist:
+                        break
 
     def save(self, *args, **kwargs):
         # Enforce year inheritance at the ORM level too, so direct saves (shell,
