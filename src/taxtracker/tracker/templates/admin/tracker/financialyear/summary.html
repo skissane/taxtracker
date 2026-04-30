@@ -1,0 +1,126 @@
+{% extends "admin/base_site.html" %}
+
+{% load i18n %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <style>
+    .tt-info-box { background: var(--darkened-bg); border: 1px solid var(--border-color); padding: 1em 1.5em; border-radius: 4px; margin-bottom: 1.5em; }
+    .tt-table { border-collapse: collapse; width: 100%; }
+    .tt-label { text-align: left; padding: 4px 12px 4px 0; }
+    .tt-badge-override { color: #856404; background: #fff3cd; padding: 1px 6px; border-radius: 3px; font-size: .85em; }
+    .tt-badge-default { color: #155724; background: #d4edda; padding: 1px 6px; border-radius: 3px; font-size: .85em; }
+    .tt-checklist { border-collapse: collapse; width: 100%; min-width: 600px; }
+    .tt-thead-row { background: var(--secondary, #417690); color: #fff; }
+    .tt-th { text-align: left; padding: 6px 12px; }
+    .tt-row-done { background: var(--message-success-bg); }
+    .tt-row-odd { background: var(--body-bg); }
+    .tt-row-even { background: var(--darkened-bg); }
+    .tt-td { padding: 5px 12px; }
+    .tt-depth-0 { padding: 5px 12px; }
+    .tt-depth-1 { padding: 5px 12px 5px 2em; }
+    .tt-depth-2 { padding: 5px 12px 5px 3em; }
+    .tt-depth-3 { padding: 5px 12px 5px 4em; }
+    .tt-depth-4 { padding: 5px 12px 5px 5em; }
+    .tt-notes { color: var(--body-quiet-color); font-size: .85em; margin-left: .5em; }
+    .tt-status-done { color: #2e7d32; }
+    .tt-status-pending { color: #b71c1c; }
+    .tt-footer { margin-top: 1.5em; }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) .tt-badge-default { color: #a5d6a7; background: #1b5e20; }
+      :root:not([data-theme="light"]) .tt-badge-override { color: #fff9c4; background: #5c4200; }
+      :root:not([data-theme="light"]) .tt-status-done { color: #81c784; }
+      :root:not([data-theme="light"]) .tt-status-pending { color: #ef9a9a; }
+    }
+    :root[data-theme="dark"] .tt-badge-default { color: #a5d6a7; background: #1b5e20; }
+    :root[data-theme="dark"] .tt-badge-override { color: #fff9c4; background: #5c4200; }
+    :root[data-theme="dark"] .tt-status-done { color: #81c784; }
+    :root[data-theme="dark"] .tt-status-pending { color: #ef9a9a; }
+  </style>
+{% endblock extrastyle %}
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> ›
+    <a href="{% url 'admin:tracker_financialyear_changelist' %}">Financial Years</a> ›
+    <a href="{% url 'admin:tracker_financialyear_change' fy.pk %}">{{ fy }}</a> ›
+    Status Summary
+  </div>
+{% endblock breadcrumbs %}
+{% block content %}
+  <div class="tt-info-box">
+    <table class="tt-table">
+      <tr>
+        <th class="tt-label">Period</th>
+        <td>{{ fy.start_date }} – {{ fy.end_date }}</td>
+      </tr>
+      <tr>
+        <th class="tt-label">Lodgement Date</th>
+        <td>
+          {{ fy.effective_lodgement_date }}
+          {% if fy.lodgement_date_override %}
+            <span class="tt-badge-override">agent override</span>
+          {% else %}
+            <span class="tt-badge-default">default</span>
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <th class="tt-label">Days Until Lodgement</th>
+        <td>
+          {% if fy.days_until_lodgement > 0 %}
+            {{ fy.days_until_lodgement }} days remaining
+          {% elif fy.days_until_lodgement == 0 %}
+            <strong>Due today!</strong>
+          {% else %}
+            {{ fy.days_until_lodgement|stringformat:"d"|slice:"1:" }} days overdue
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <th class="tt-label">Progress</th>
+        <td>
+          <strong>{{ done }}</strong> done,
+          <strong>{{ pending }}</strong> pending
+          ({{ total }} total)
+        </td>
+      </tr>
+    </table>
+  </div>
+  <h2>Item Checklist</h2>
+  <table class="tt-checklist">
+    <thead>
+      <tr class="tt-thead-row">
+        <th class="tt-th">Item</th>
+        <th class="tt-th">Status</th>
+        <th class="tt-th">Attachments</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in tree_rows %}
+        <tr class="{% if row.item.is_done %}tt-row-done{% else %}{% cycle 'tt-row-odd' 'tt-row-even' %}{% endif %}">
+          <td class="tt-depth-{{ row.depth }}">
+            {% if row.depth %}↳{% endif %}
+            <a href="{% url 'admin:tracker_item_change' row.item.pk %}">{{ row.item.title }}</a>
+            {% if row.item.notes %}<span class="tt-notes" title="{{ row.item.notes }}">📝</span>{% endif %}
+          </td>
+          <td class="tt-td">
+            {% if row.item.is_done %}
+              <span class="tt-status-done">✔ Done</span>
+            {% else %}
+              <span class="tt-status-pending">⏳ Pending</span>
+            {% endif %}
+          </td>
+          {% with attachments=row.item.attachments.all %}<td class="tt-td">{{ attachments|length }}</td>{% endwith %}
+        </tr>
+      {% empty %}
+        <tr>
+          <td colspan="3" class="tt-td">No items defined for this year.</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="tt-footer">
+    <a class="button default"
+       href="{% url 'admin:tracker_financialyear_change' fy.pk %}">← Back to {{ fy }}</a>
+  </p>
+{% endblock content %}
