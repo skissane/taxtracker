@@ -266,12 +266,24 @@ def _build_zip(fy):
     # Build an id → item dict for quick lookup.
     item_map = {item.pk: item for item in items}
 
+    def safe_component(title):
+        """Sanitize a title for safe use as a ZIP path component.
+
+        Prevents Zip Slip by replacing path separators and eliminating ``..``
+        traversal sequences.
+        """
+        safe = title.replace("/", "_").replace("\\", "_")
+        safe = safe.strip(". ")
+        while ".." in safe:
+            safe = safe.replace("..", ".")
+        return safe or "_"
+
     def folder_path(item):
         """Return a POSIX path string representing the item hierarchy."""
         parts = []
         current = item
         while True:
-            parts.insert(0, current.title)
+            parts.insert(0, safe_component(current.title))
             if current.parent_id is None:
                 break
             current = item_map.get(current.parent_id, current.parent)
@@ -471,23 +483,26 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
     def summary_view(self, request, pk):
         fy = get_object_or_404(FinancialYear, pk=pk)
-        items = (
-            fy.items.filter(parent=None)
-            .prefetch_related("children", "children__children", "attachments")
-            .order_by("order", "title")
+        # Fetch all items in a single query to avoid N+1 for deep hierarchies.
+        all_items = list(
+            fy.items.prefetch_related("attachments").order_by("order", "title")
         )
+
+        # Build a parent_id → [children] map (order is preserved from queryset).
+        children_map = {}
+        for item in all_items:
+            children_map.setdefault(item.parent_id, []).append(item)
 
         def item_tree(item, depth=0):
             rows = [{"item": item, "depth": depth}]
-            for child in item.children.order_by("order", "title"):
+            for child in children_map.get(item.pk, []):
                 rows.extend(item_tree(child, depth + 1))
             return rows
 
         tree_rows = []
-        for root_item in items:
+        for root_item in children_map.get(None, []):
             tree_rows.extend(item_tree(root_item))
 
-        all_items = list(fy.items.all())
         total = len(all_items)
         done = sum(1 for i in all_items if i.is_done)
         pending = total - done
@@ -511,7 +526,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
     def download_zip_view(self, request, pk):
         fy = get_object_or_404(FinancialYear, pk=pk)
         buf = _build_zip(fy)
-        response = HttpResponse(buf, content_type="application/zip")
+        response = HttpResponse(buf.getvalue(), content_type="application/zip")
         response["Content-Disposition"] = f'attachment; filename="{fy}_attachments.zip"'
         return response
 
