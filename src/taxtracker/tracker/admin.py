@@ -275,13 +275,14 @@ def _build_zip(fy):
 
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for item in items:
-            if not item.attachments.exists():
+            attachments = list(item.attachments.all())
+            if not attachments:
                 continue
             fp = folder_path(item)
             index_lines.append(f"## {fp}\n")
             if item.notes:
                 index_lines.append(f"{item.notes}\n\n")
-            for attachment in item.attachments.all():
+            for attachment in attachments:
                 # Sanitise filename.
                 safe_name = attachment.file.name.split("/")[-1]
                 zip_path = f"{fp}/{safe_name}"
