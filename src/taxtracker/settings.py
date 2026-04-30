@@ -23,23 +23,31 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # SECRET_KEY is stored in a file to avoid committing it to source control.
 # Set TAXTRACKER_SECRET_KEY_FILE to override the default location.
-_default_key_file = (
-    Path(os.environ.get("HOME", "~")).expanduser()
-    / ".config"
-    / "taxtracker"
-    / "secret_key"
-)
+_default_key_file = Path.home() / ".config" / "taxtracker" / "secret_key"
 _key_file = Path(os.environ.get("TAXTRACKER_SECRET_KEY_FILE", _default_key_file))
 
-if _key_file.exists():
-    _stored = _key_file.read_text(encoding="utf-8").strip()
-else:
-    _stored = ""
+try:
+    _stored = (
+        _key_file.read_text(encoding="utf-8").strip() if _key_file.exists() else ""
+    )
+except OSError as _e:
+    raise RuntimeError(
+        f"Could not read secret key file {_key_file}: {_e}. "
+        "Check file permissions or set TAXTRACKER_SECRET_KEY_FILE to a readable path."
+    ) from _e
 
 if not _stored:
     _stored = secrets.token_hex(50)
-    _key_file.parent.mkdir(parents=True, exist_ok=True)
-    _key_file.write_text(_stored + "\n", encoding="utf-8")
+    try:
+        _key_file.parent.mkdir(parents=True, exist_ok=True)
+        _key_file.write_text(_stored + "\n", encoding="utf-8")
+        _key_file.chmod(0o600)
+    except OSError as _e:
+        raise RuntimeError(
+            f"Could not write secret key file {_key_file}: {_e}. "
+            "Check directory permissions or set TAXTRACKER_SECRET_KEY_FILE "
+            "to a writable path."
+        ) from _e
 
 SECRET_KEY = _stored
 
