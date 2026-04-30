@@ -229,8 +229,9 @@ class AttachmentAdmin(admin.ModelAdmin):
         response = HttpResponse(content, content_type=content_type)
         filename_encoded = quote(obj.filename, safe="")
         filename_ascii = (
-            obj.filename.encode("ascii", errors="replace")
+            obj.filename.encode("ascii", errors="ignore")
             .decode("ascii")
+            .replace("\\", "\\\\")
             .replace('"', '\\"')
         )
         cd = (
