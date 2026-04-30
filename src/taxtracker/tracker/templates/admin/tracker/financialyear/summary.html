@@ -110,9 +110,7 @@
               <span class="tt-status-pending">⏳ Pending</span>
             {% endif %}
           </td>
-          {% with attachments=row.item.attachments.all %}
-            <td class="tt-td">{{ attachments|length }}</td>
-          {% endwith %}
+          {% with attachments=row.item.attachments.all %}<td class="tt-td">{{ attachments|length }}</td>{% endwith %}
         </tr>
       {% empty %}
         <tr>
