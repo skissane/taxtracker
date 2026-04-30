@@ -1,6 +1,7 @@
 import io
 import mimetypes
 import zipfile
+from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib import admin, messages
@@ -226,7 +227,17 @@ class AttachmentAdmin(admin.ModelAdmin):
         if not content_type:
             content_type = "application/octet-stream"
         response = HttpResponse(content, content_type=content_type)
-        response["Content-Disposition"] = f'inline; filename="{obj.filename}"'
+        filename_encoded = quote(obj.filename, safe="")
+        filename_ascii = (
+            obj.filename.encode("ascii", errors="replace")
+            .decode("ascii")
+            .replace('"', '\\"')
+        )
+        cd = (
+            f'inline; filename="{filename_ascii}";'
+            f" filename*=UTF-8''{filename_encoded}"
+        )
+        response["Content-Disposition"] = cd
         return response
 
 
