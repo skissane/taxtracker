@@ -288,8 +288,9 @@ def _build_zip(fy):
                 try:
                     with attachment.file.open("rb") as fh:
                         zf.writestr(zip_path, fh.read())
-                except OSError:
-                    # File missing on disk – skip but record in index.
+                except (OSError, DBStoredFile.DoesNotExist, ValueError):
+                    # File missing or stored blob reference is invalid/corrupt –
+                    # skip but record in index.
                     safe_name = f"[MISSING] {safe_name}"
                     zip_path = None
 
