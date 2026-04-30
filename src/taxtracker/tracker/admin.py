@@ -1,5 +1,6 @@
 import io
 import mimetypes
+import re
 import zipfile
 from urllib.parse import quote
 
@@ -274,8 +275,7 @@ def _build_zip(fy):
         """
         safe = title.replace("/", "_").replace("\\", "_")
         safe = safe.strip(". ")
-        while ".." in safe:
-            safe = safe.replace("..", ".")
+        safe = re.sub(r"\.{2,}", ".", safe)
         return safe or "_"
 
     def folder_path(item):
