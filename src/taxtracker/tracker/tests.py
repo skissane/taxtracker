@@ -90,6 +90,63 @@ class ItemModelTests(TestCase):
         self.assertEqual(self.child.get_folder_path(), ["Income", "Salary"])
 
 
+class ItemYearInheritanceTests(TestCase):
+    """Model-level enforcement: child items always inherit parent's year."""
+
+    def setUp(self):
+        self.fy2024 = FinancialYear.objects.create(year=2024)
+        self.fy2025 = FinancialYear.objects.create(year=2025)
+        self.parent = Item.objects.create(year=self.fy2024, title="Root", order=1)
+
+    def test_save_auto_corrects_child_year_mismatch(self):
+        """save() silently corrects a mismatched year to match the parent."""
+        child = Item(
+            year=self.fy2025,  # wrong year
+            parent=self.parent,
+            title="Child",
+            order=1,
+        )
+        child.save()
+        child.refresh_from_db()
+        self.assertEqual(child.year_id, self.fy2024.pk)
+
+    def test_clean_auto_corrects_child_year_mismatch(self):
+        """clean() silently corrects a mismatched year to match the parent."""
+        child = Item(
+            year=self.fy2025,  # wrong year
+            parent=self.parent,
+            title="Child",
+            order=1,
+        )
+        child.clean()
+        self.assertEqual(child.year_id, self.fy2024.pk)
+
+    def test_save_with_correct_year_unchanged(self):
+        """save() does not change year when child already has the correct year."""
+        child = Item.objects.create(
+            year=self.fy2024, parent=self.parent, title="Child", order=1
+        )
+        child.refresh_from_db()
+        self.assertEqual(child.year_id, self.fy2024.pk)
+
+    def test_root_item_year_not_affected(self):
+        """Items without a parent keep whatever year is assigned."""
+        root = Item.objects.create(year=self.fy2025, title="Root2", order=2)
+        root.refresh_from_db()
+        self.assertEqual(root.year_id, self.fy2025.pk)
+
+    def test_direct_orm_save_corrects_year(self):
+        """Direct ORM save (bypassing admin) still corrects the year."""
+        child = Item.objects.create(
+            year=self.fy2024, parent=self.parent, title="Child", order=1
+        )
+        # Directly change year via ORM (simulating a script/fixture misuse)
+        child.year = self.fy2025
+        child.save()
+        child.refresh_from_db()
+        self.assertEqual(child.year_id, self.fy2024.pk)
+
+
 class CopyItemsTests(TestCase):
     def setUp(self):
         self.fy = FinancialYear.objects.create(year=2024)

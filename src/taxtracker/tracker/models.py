@@ -118,6 +118,16 @@ class Item(models.Model):
         return self.status == self.STATUS_DONE
 
     def clean(self):
+        # Enforce year inheritance: a child item must always share its parent's year.
+        if self.parent_id is not None:
+            try:
+                parent = Item.objects.only("year_id", "parent_id").get(
+                    pk=self.parent_id
+                )
+                self.year_id = parent.year_id
+            except Item.DoesNotExist:
+                pass
+
         if self.parent_id is None or self.pk is None:
             return
         # If the parent_id is unchanged from the persisted value, a cycle already
@@ -147,6 +157,18 @@ class Item(models.Model):
                 current_id = ancestor.parent_id
             except Item.DoesNotExist:
                 break
+
+    def save(self, *args, **kwargs):
+        # Enforce year inheritance at the ORM level too, so direct saves (shell,
+        # fixtures, scripts) also respect the invariant without requiring full_clean().
+        if self.parent_id is not None:
+            try:
+                self.year_id = (
+                    Item.objects.only("year_id").get(pk=self.parent_id).year_id
+                )
+            except Item.DoesNotExist:
+                pass
+        super().save(*args, **kwargs)
 
     def get_folder_path(self):
         """Return a list of titles representing the path from root to this item."""
