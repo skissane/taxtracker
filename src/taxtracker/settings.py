@@ -10,6 +10,8 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
+import secrets
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -19,8 +21,27 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-zave*uxydguu-&8wry^tghpz4+g-jp&4$m=lypb=lhv4zn5lk-"
+# SECRET_KEY is stored in a file to avoid committing it to source control.
+# Set TAXTRACKER_SECRET_KEY_FILE to override the default location.
+_default_key_file = (
+    Path(os.environ.get("HOME", "~")).expanduser()
+    / ".config"
+    / "taxtracker"
+    / "secret_key"
+)
+_key_file = Path(os.environ.get("TAXTRACKER_SECRET_KEY_FILE", _default_key_file))
+
+if _key_file.exists():
+    _stored = _key_file.read_text(encoding="utf-8").strip()
+else:
+    _stored = ""
+
+if not _stored:
+    _stored = secrets.token_hex(50)
+    _key_file.parent.mkdir(parents=True, exist_ok=True)
+    _key_file.write_text(_stored + "\n", encoding="utf-8")
+
+SECRET_KEY = _stored
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
