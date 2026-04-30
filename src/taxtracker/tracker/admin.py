@@ -84,13 +84,13 @@ class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
         # whose is_primary was False and the user didn't explicitly tick the box).
         if commit and self._auto_primary_form is not None:
             inst = self._auto_primary_form.instance
-            # Only issue the UPDATE if it hasn't already been persisted as True
-            # (new rows are saved by super().save() with is_primary=True from the
-            # instance; this UPDATE is mainly for existing unchanged rows that
-            # form.save() would skip because has_changed() returns False).
-            if inst.pk and not inst.is_primary:
+            # clean() sets inst.is_primary = True in memory, so that value cannot
+            # be used to decide whether persistence is needed. For existing rows,
+            # unconditionally issue the UPDATE so unchanged forms are persisted.
+            # New rows are already saved by super().save() with is_primary=True.
+            if inst.pk:
                 self.model.objects.filter(pk=inst.pk).update(is_primary=True)
-                inst.is_primary = True
+            inst.is_primary = True
         return instances
 
 
