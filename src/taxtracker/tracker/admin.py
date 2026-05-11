@@ -14,6 +14,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils.html import format_html
 
+from .forms import AttachmentForm
 from .models import (
     Attachment,
     DBStoredFile,
@@ -113,6 +114,7 @@ class FileExtensionFormSet(_AtLeastOnePrimaryFormSet):
 
 class AttachmentInline(admin.TabularInline):
     model = Attachment
+    form = AttachmentForm
     extra = 1
     fields = ("title", "date", "notes", "file_type", "file")
     autocomplete_fields = ("file_type",)
@@ -205,6 +207,7 @@ class ItemAdmin(admin.ModelAdmin):
 
 @admin.register(Attachment)
 class AttachmentAdmin(admin.ModelAdmin):
+    form = AttachmentForm
     list_display = ("title", "date", "item", "file_type", "file")
     list_filter = ("item__year", "file_type")
     search_fields = ("title", "notes", "item__title", "file_type__short_name")

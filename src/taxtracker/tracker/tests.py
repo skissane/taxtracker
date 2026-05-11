@@ -10,6 +10,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from .forms import AttachmentForm, FlexibleDateField
 from .models import (
     Attachment,
     DBStoredFile,
@@ -884,6 +885,78 @@ class AttachmentDateTests(TestCase):
         att.save()
         att.refresh_from_db()
         self.assertIsNone(att.date)
+
+
+class AttachmentDateInputFormatTests(TestCase):
+    """Tests for FlexibleDateField and the extra English date-input formats."""
+
+    def setUp(self):
+        self.fy = FinancialYear.objects.create(year=2024)
+        self.item = Item.objects.create(year=self.fy, title="Income", order=1)
+        self.field = FlexibleDateField(required=False)
+
+    # ------------------------------------------------------------------
+    # Unit tests for FlexibleDateField
+    # ------------------------------------------------------------------
+
+    def test_iso_format_accepted(self):
+        self.assertEqual(self.field.clean("2023-07-20"), datetime.date(2023, 7, 20))
+
+    def test_day_month_year_full_name(self):
+        """'20 July 2023' should parse to 2023-07-20."""
+        self.assertEqual(self.field.clean("20 July 2023"), datetime.date(2023, 7, 20))
+
+    def test_month_day_comma_year_full_name(self):
+        """'June 30, 2023' should parse to 2023-06-30."""
+        self.assertEqual(self.field.clean("June 30, 2023"), datetime.date(2023, 6, 30))
+
+    def test_day_month_year_abbreviated(self):
+        """'20 Jul 2023' should parse to 2023-07-20."""
+        self.assertEqual(self.field.clean("20 Jul 2023"), datetime.date(2023, 7, 20))
+
+    def test_month_day_comma_year_abbreviated(self):
+        """'Jun 30, 2023' should parse to 2023-06-30."""
+        self.assertEqual(self.field.clean("Jun 30, 2023"), datetime.date(2023, 6, 30))
+
+    def test_invalid_date_string_raises(self):
+        from django.core.exceptions import ValidationError
+
+        with self.assertRaises(ValidationError):
+            self.field.clean("not a date")
+
+    def test_empty_string_returns_none(self):
+        self.assertIsNone(self.field.clean(""))
+
+    # ------------------------------------------------------------------
+    # Integration: AttachmentForm accepts the extra formats
+    # ------------------------------------------------------------------
+
+    def _form_data(self, date_str):
+        return {
+            "item": self.item.pk,
+            "title": "Test",
+            "date": date_str,
+            "notes": "",
+        }
+
+    def test_form_accepts_day_full_month_year(self):
+        """'20 July 2023' must not produce a date validation error."""
+        form = AttachmentForm(data=self._form_data("20 July 2023"))
+        self.assertNotIn("date", form.errors)
+
+    def test_form_accepts_full_month_day_comma_year(self):
+        """'June 30, 2023' must not produce a date validation error."""
+        form = AttachmentForm(data=self._form_data("June 30, 2023"))
+        self.assertNotIn("date", form.errors)
+
+    def test_form_accepts_iso_date(self):
+        """ISO format '2023-07-20' must not produce a date validation error."""
+        form = AttachmentForm(data=self._form_data("2023-07-20"))
+        self.assertNotIn("date", form.errors)
+
+    def test_form_rejects_invalid_date(self):
+        form = AttachmentForm(data=self._form_data("not a date"))
+        self.assertIn("date", form.errors)
 
 
 class DatabaseStorageTests(TestCase):
