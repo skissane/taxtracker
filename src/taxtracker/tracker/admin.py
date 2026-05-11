@@ -14,7 +14,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils.html import format_html
 
-from .forms import AttachmentForm
+from .archives import UnsupportedArchiveError, extract_from_archive
+from .forms import AttachmentForm, ImportArchiveForm
 from .models import (
     Attachment,
     DBStoredFile,
@@ -144,6 +145,20 @@ class ItemAdmin(admin.ModelAdmin):
     inlines = [ChildItemInline, AttachmentInline]
     fields = ("year", "parent", "order", "title", "status", "notes")
 
+    # ------------------------------------------------------------------
+    # Custom URLs
+    # ------------------------------------------------------------------
+
+    def get_urls(self):
+        custom = [
+            path(
+                "<int:pk>/import-archive/",
+                self.admin_site.admin_view(self.import_archive_view),
+                name="tracker_item_import_archive",
+            ),
+        ]
+        return custom + super().get_urls()
+
     @admin.display(description="Year")
     def year_link(self, obj):
         url = reverse("admin:tracker_financialyear_change", args=[obj.year_id])
@@ -198,6 +213,71 @@ class ItemAdmin(admin.ModelAdmin):
         formset.save_m2m()
         for obj in formset.deleted_objects:
             obj.delete()
+
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        extra_context = extra_context or {}
+        extra_context["import_archive_url"] = reverse(
+            "admin:tracker_item_import_archive", args=[object_id]
+        )
+        return super().change_view(request, object_id, form_url, extra_context)
+
+    # ------------------------------------------------------------------
+    # Import archive view
+    # ------------------------------------------------------------------
+
+    def import_archive_view(self, request, pk):
+        item = get_object_or_404(Item, pk=pk)
+
+        if request.method == "POST":
+            form = ImportArchiveForm(request.POST, request.FILES)
+        else:
+            form = ImportArchiveForm()
+
+        if request.method == "POST" and form.is_valid():
+            uploaded = form.cleaned_data["archive"]
+            file_bytes = uploaded.read()
+            filename = uploaded.name
+
+            try:
+                extracted = extract_from_archive(file_bytes, filename)
+            except UnsupportedArchiveError as exc:
+                messages.error(request, str(exc))
+                extracted = []
+
+            if extracted:
+                with transaction.atomic():
+                    for pdf_filename, pdf_bytes in extracted:
+                        att = Attachment(item=item)
+                        # save=False: store the file in the storage backend now
+                        # but don't yet write the Attachment row; att.save()
+                        # below will auto-extract the title, date, and file_type
+                        # from the filename before persisting to the DB.
+                        att.file.save(
+                            pdf_filename,
+                            io.BytesIO(pdf_bytes),
+                            save=False,
+                        )
+                        att.save()
+                messages.success(
+                    request,
+                    f"Imported {len(extracted)} attachment(s) from '{filename}'.",
+                )
+            elif not messages.get_messages(request):
+                messages.warning(
+                    request,
+                    f"No attachments could be extracted from '{filename}'.",
+                )
+
+            return redirect(reverse("admin:tracker_item_change", args=[item.pk]))
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": f"Import Archive — {item}",
+            "item": item,
+            "form": form,
+            "opts": self.model._meta,
+        }
+        return render(request, "admin/tracker/item/import_archive.html", context)
 
 
 # ---------------------------------------------------------------------------

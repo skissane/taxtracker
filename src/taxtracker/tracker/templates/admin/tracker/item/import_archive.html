@@ -1,0 +1,42 @@
+{% extends "admin/base_site.html" %}
+
+{% load i18n %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> ›
+    <a href="{% url 'admin:tracker_item_changelist' %}">Items</a> ›
+    <a href="{% url 'admin:tracker_item_change' item.pk %}">{{ item }}</a> ›
+    Import Archive
+  </div>
+{% endblock breadcrumbs %}
+
+{% block content %}
+  <h1>{{ title }}</h1>
+  <p>
+    Upload an archive file to extract attachments and add them to
+    <strong>{{ item }}</strong>.
+    Each file found in the archive will be saved as a new attachment.
+    Dates will be auto-extracted from filenames where possible.
+  </p>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <fieldset class="module aligned">
+      {% for field in form %}
+        <div class="form-row">
+          {{ field.errors }}
+          {{ field.label_tag }}
+          {{ field }}
+          {% if field.help_text %}
+            <p class="help">{{ field.help_text }}</p>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </fieldset>
+    <div class="submit-row">
+      <input type="submit" value="Import" class="default">
+      <a class="button cancel"
+         href="{% url 'admin:tracker_item_change' item.pk %}">Cancel</a>
+    </div>
+  </form>
+{% endblock content %}

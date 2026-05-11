@@ -1,0 +1,12 @@
+{% extends "admin/change_form.html" %}
+
+{% load i18n %}
+
+{% block object-tools-items %}
+  {% if original %}
+    <li>
+      <a href="{{ import_archive_url }}" class="historylink">📥 Import Archive</a>
+    </li>
+  {% endif %}
+  {{ block.super }}
+{% endblock object-tools-items %}

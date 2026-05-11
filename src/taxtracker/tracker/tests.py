@@ -1,5 +1,7 @@
+import base64
 import datetime
 import io
+import json
 import zipfile
 
 from django.contrib.auth.models import User
@@ -10,6 +12,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from .archives import UnsupportedArchiveError, extract_from_archive
 from .forms import AttachmentForm, FlexibleDateField
 from .models import (
     Attachment,
@@ -1254,3 +1257,210 @@ class FileTypePrimaryValidationTests(TestCase):
             "A file type must have at least one file extension",
         )
         self.assertFalse(FileType.objects.filter(short_name="TST").exists())
+
+
+# ---------------------------------------------------------------------------
+# archives.py unit tests
+# ---------------------------------------------------------------------------
+
+PDF_MAGIC = b"%PDF-1.4 fake pdf content"
+FIDELITY_URL_PREFIX = (
+    "https://netbenefitsww.fidelity.com"
+    "/mybenefitsww/spshistoryservices/activities/record/c:"
+)
+
+
+def _make_fidelity_har(
+    filename="statement-2023-07-20",
+    pdf_bytes=None,
+    method="GET",
+    mime_type="application/json",
+    body_encoding=None,
+):
+    """Build minimal Fidelity HAR bytes for testing."""
+    if pdf_bytes is None:
+        pdf_bytes = PDF_MAGIC
+    file_content_b64 = base64.b64encode(pdf_bytes).decode()
+    body_json = json.dumps({"fileContent": file_content_b64})
+    if body_encoding == "base64":
+        body_text = base64.b64encode(body_json.encode()).decode()
+    else:
+        body_text = body_json
+
+    entry = {
+        "request": {
+            "method": method,
+            "url": f"{FIDELITY_URL_PREFIX}{filename}",
+        },
+        "response": {
+            "content": {
+                "mimeType": mime_type,
+                "text": body_text,
+            },
+        },
+    }
+    if body_encoding:
+        entry["response"]["content"]["encoding"] = body_encoding
+
+    har = {"log": {"entries": [entry]}}
+    return json.dumps(har).encode()
+
+
+class ArchiveExtractorTests(TestCase):
+    """Unit tests for the archives.extract_from_archive helper."""
+
+    # ------------------------------------------------------------------
+    # Fidelity HAR — successful extraction
+    # ------------------------------------------------------------------
+
+    def test_har_extracts_pdf(self):
+        har_bytes = _make_fidelity_har("statement-2023-07-20", PDF_MAGIC)
+        results = extract_from_archive(har_bytes, "export.har")
+        self.assertEqual(len(results), 1)
+        name, data = results[0]
+        self.assertEqual(name, "statement-2023-07-20.pdf")
+        self.assertEqual(data, PDF_MAGIC)
+
+    def test_har_base64_encoded_body(self):
+        """HAR body itself Base64-encoded (body_encoding=base64)."""
+        har_bytes = _make_fidelity_har(
+            "statement-2023-07-20", PDF_MAGIC, body_encoding="base64"
+        )
+        results = extract_from_archive(har_bytes, "export.har")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0][1], PDF_MAGIC)
+
+    def test_har_filename_derived_from_url(self):
+        har_bytes = _make_fidelity_har("mystatement", PDF_MAGIC)
+        results = extract_from_archive(har_bytes, "export.har")
+        self.assertEqual(results[0][0], "mystatement.pdf")
+
+    def test_har_no_matching_entries(self):
+        """A HAR with no Fidelity entries returns an empty list."""
+        har = {"log": {"entries": []}}
+        results = extract_from_archive(json.dumps(har).encode(), "empty.har")
+        self.assertEqual(results, [])
+
+    def test_har_skips_non_get_requests(self):
+        har_bytes = _make_fidelity_har("statement-2023-07-20", PDF_MAGIC, method="POST")
+        results = extract_from_archive(har_bytes, "export.har")
+        self.assertEqual(results, [])
+
+    def test_har_skips_wrong_mime_type(self):
+        har_bytes = _make_fidelity_har(
+            "statement-2023-07-20", PDF_MAGIC, mime_type="text/html"
+        )
+        results = extract_from_archive(har_bytes, "export.har")
+        self.assertEqual(results, [])
+
+    def test_har_skips_non_pdf_content(self):
+        har_bytes = _make_fidelity_har("statement-2023-07-20", b"not a pdf")
+        results = extract_from_archive(har_bytes, "export.har")
+        self.assertEqual(results, [])
+
+    def test_invalid_json_raises_unsupported(self):
+        with self.assertRaises(UnsupportedArchiveError):
+            extract_from_archive(b"not json at all", "export.har")
+
+    # ------------------------------------------------------------------
+    # Unsupported format
+    # ------------------------------------------------------------------
+
+    def test_unknown_extension_raises(self):
+        with self.assertRaises(UnsupportedArchiveError):
+            extract_from_archive(b"anything", "archive.zip")
+
+    def test_no_extension_raises(self):
+        with self.assertRaises(UnsupportedArchiveError):
+            extract_from_archive(b"anything", "noextension")
+
+
+# ---------------------------------------------------------------------------
+# Import archive admin view tests
+# ---------------------------------------------------------------------------
+
+
+class ImportArchiveViewTests(TestCase):
+    """Tests for the Item admin 'Import Archive' view."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin", "a@b.com", "pass")
+        self.client = Client()
+        self.client.login(username="admin", password="pass")
+        self.fy = FinancialYear.objects.create(year=2024)
+        self.item = Item.objects.create(year=self.fy, title="Test Item", order=1)
+
+    def _import_url(self):
+        return reverse("admin:tracker_item_import_archive", args=[self.item.pk])
+
+    # ------------------------------------------------------------------
+    # GET — show upload form
+    # ------------------------------------------------------------------
+
+    def test_get_shows_form(self):
+        response = self.client.get(self._import_url())
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Import Archive")
+        self.assertContains(response, "Test Item")
+
+    def test_change_form_has_import_archive_link(self):
+        url = reverse("admin:tracker_item_change", args=[self.item.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Import Archive")
+        self.assertContains(response, self._import_url())
+
+    # ------------------------------------------------------------------
+    # POST — valid HAR → attachments created
+    # ------------------------------------------------------------------
+
+    def test_post_valid_har_creates_attachments(self):
+        har_bytes = _make_fidelity_har("statement-2023-07-20", PDF_MAGIC)
+        upload = io.BytesIO(har_bytes)
+        upload.name = "export.har"
+        before = Attachment.objects.filter(item=self.item).count()
+        response = self.client.post(
+            self._import_url(),
+            {"archive": upload},
+        )
+        self.assertRedirects(
+            response,
+            reverse("admin:tracker_item_change", args=[self.item.pk]),
+        )
+        self.assertEqual(Attachment.objects.filter(item=self.item).count(), before + 1)
+
+    def test_post_valid_har_date_extracted(self):
+        """Date is auto-extracted from the derived filename."""
+        har_bytes = _make_fidelity_har("statement-2023-07-20", PDF_MAGIC)
+        upload = io.BytesIO(har_bytes)
+        upload.name = "export.har"
+        self.client.post(self._import_url(), {"archive": upload})
+        att = Attachment.objects.filter(item=self.item).latest("pk")
+        self.assertEqual(att.date, datetime.date(2023, 7, 20))
+
+    def test_post_har_with_no_entries_shows_warning(self):
+        har = {"log": {"entries": []}}
+        upload = io.BytesIO(json.dumps(har).encode())
+        upload.name = "empty.har"
+        response = self.client.post(
+            self._import_url(),
+            {"archive": upload},
+            follow=True,
+        )
+        self.assertContains(response, "No attachments could be extracted")
+
+    def test_post_unsupported_format_shows_error(self):
+        upload = io.BytesIO(b"anything")
+        upload.name = "archive.zip"
+        response = self.client.post(
+            self._import_url(),
+            {"archive": upload},
+            follow=True,
+        )
+        self.assertContains(response, "Unrecognised archive format")
+
+    def test_post_missing_file_shows_form_error(self):
+        """Posting without a file should re-render the form with an error."""
+        response = self.client.post(self._import_url(), {})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This field is required")
