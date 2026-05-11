@@ -18,6 +18,7 @@ from .models import (
     FinancialYear,
     Item,
     MimeType,
+    _extract_date_from_filename,
 )
 
 
@@ -789,6 +790,100 @@ class AttachmentTitleTests(TestCase):
         att.save()
         att.refresh_from_db()
         self.assertIsNone(att.file_type)
+
+
+class AttachmentDateTests(TestCase):
+    """Tests for Attachment.date auto-extraction from filename."""
+
+    def setUp(self):
+        self.fy = FinancialYear.objects.create(year=2024)
+        self.item = Item.objects.create(year=self.fy, title="Income", order=1)
+
+    def _make_file(self, name):
+        return ContentFile(b"data", name=name)
+
+    # ------------------------------------------------------------------
+    # Unit tests for the helper function
+    # ------------------------------------------------------------------
+
+    def test_extract_iso_date(self):
+        self.assertEqual(
+            _extract_date_from_filename("statement-2026-01-15.pdf"),
+            datetime.date(2026, 1, 15),
+        )
+
+    def test_extract_compact_date_no_separator(self):
+        self.assertEqual(
+            _extract_date_from_filename("report20260115.pdf"),
+            datetime.date(2026, 1, 15),
+        )
+
+    def test_extract_date_followed_by_digits(self):
+        """DD may be followed by digits – the match is still valid."""
+        self.assertEqual(
+            _extract_date_from_filename("20260101123.pdf"),
+            datetime.date(2026, 1, 1),
+        )
+
+    def test_year_preceded_by_non_digit_allowed(self):
+        """Year preceded by a non-digit character (e.g. '-') is valid."""
+        self.assertEqual(
+            _extract_date_from_filename("123-2026-01-01.pdf"),
+            datetime.date(2026, 1, 1),
+        )
+
+    def test_year_preceded_by_digit_rejected(self):
+        """Year directly preceded by another digit must not be matched."""
+        self.assertIsNone(_extract_date_from_filename("1232026-01-01.pdf"))
+
+    def test_invalid_calendar_date_skipped(self):
+        """A pattern that is not a real date (e.g. month 13) must be ignored."""
+        self.assertIsNone(_extract_date_from_filename("2026-13-45.pdf"))
+
+    def test_returns_first_valid_date(self):
+        """When multiple date patterns exist, the first valid one is returned."""
+        self.assertEqual(
+            _extract_date_from_filename("2026-13-45_2025-06-30.txt"),
+            datetime.date(2025, 6, 30),
+        )
+
+    def test_no_date_in_filename(self):
+        self.assertIsNone(_extract_date_from_filename("nodatehere.pdf"))
+
+    # ------------------------------------------------------------------
+    # Integration tests via Attachment.save()
+    # ------------------------------------------------------------------
+
+    def test_date_auto_extracted_from_filename(self):
+        att = Attachment(
+            item=self.item, file=self._make_file("statement-2026-03-15.pdf")
+        )
+        att.save()
+        att.refresh_from_db()
+        self.assertEqual(att.date, datetime.date(2026, 3, 15))
+
+    def test_explicit_date_not_overwritten(self):
+        explicit = datetime.date(2000, 1, 1)
+        att = Attachment(
+            item=self.item,
+            date=explicit,
+            file=self._make_file("statement-2026-03-15.pdf"),
+        )
+        att.save()
+        att.refresh_from_db()
+        self.assertEqual(att.date, explicit)
+
+    def test_date_none_when_not_in_filename(self):
+        att = Attachment(item=self.item, file=self._make_file("nodatehere.pdf"))
+        att.save()
+        att.refresh_from_db()
+        self.assertIsNone(att.date)
+
+    def test_date_none_when_not_supplied_and_not_extractable(self):
+        att = Attachment(item=self.item, file=self._make_file("report.pdf"))
+        att.save()
+        att.refresh_from_db()
+        self.assertIsNone(att.date)
 
 
 class DatabaseStorageTests(TestCase):

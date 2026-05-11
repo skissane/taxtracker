@@ -403,6 +403,20 @@ class DatabaseStorage(Storage):
 
 _database_storage = DatabaseStorage()
 
+# Matches YYYY[-]MM[-]DD where YYYY is not preceded by a digit.
+# The separator between year/month and month/day is independently optional.
+_DATE_IN_FILENAME_RE = re.compile(r"(?<!\d)(\d{4})-?(\d{2})-?(\d{2})")
+
+
+def _extract_date_from_filename(name: str) -> datetime.date | None:
+    """Return the first valid calendar date found in *name*, or ``None``."""
+    for m in _DATE_IN_FILENAME_RE.finditer(name):
+        try:
+            return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            continue
+    return None
+
 
 class Attachment(models.Model):
     """A file attachment associated with an Item."""
@@ -416,6 +430,15 @@ class Attachment(models.Model):
         max_length=255,
         blank=True,
         help_text="Leave blank to auto-populate from the uploaded file name.",
+    )
+    date = models.DateField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Optional date for this attachment. "
+            "Leave blank to auto-extract from the filename, "
+            "or if no date can be found in the filename."
+        ),
     )
     notes = models.TextField(blank=True)
     file_type = models.ForeignKey(
@@ -453,6 +476,10 @@ class Attachment(models.Model):
                     self.file_type = fe.file_type
                 except FileExtension.DoesNotExist:
                     pass
+        if self.date is None and self.file:
+            extracted = _extract_date_from_filename(Path(self.file.name).name)
+            if extracted is not None:
+                self.date = extracted
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):

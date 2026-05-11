@@ -114,7 +114,7 @@ class FileExtensionFormSet(_AtLeastOnePrimaryFormSet):
 class AttachmentInline(admin.TabularInline):
     model = Attachment
     extra = 1
-    fields = ("title", "notes", "file_type", "file")
+    fields = ("title", "date", "notes", "file_type", "file")
     autocomplete_fields = ("file_type",)
 
 
@@ -205,7 +205,7 @@ class ItemAdmin(admin.ModelAdmin):
 
 @admin.register(Attachment)
 class AttachmentAdmin(admin.ModelAdmin):
-    list_display = ("title", "item", "file_type", "file")
+    list_display = ("title", "date", "item", "file_type", "file")
     list_filter = ("item__year", "file_type")
     search_fields = ("title", "notes", "item__title", "file_type__short_name")
     list_select_related = ("item", "item__year", "file_type")
