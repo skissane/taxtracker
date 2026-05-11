@@ -5,26 +5,37 @@
 {% block extrahead %}
   {{ block.super }}
   <style>
-    .fidelity-snippet-pre {
-      background: #f8f8f8;
-      border: 1px solid #ccc;
-      color: #1f2937;
-      overflow-x: auto;
-      padding: 1em;
-    }
-    .fidelity-snippet-pre code {
-      color: inherit;
-    }
-    .fidelity-copy-btn {
-      margin-bottom: 0.5em;
-    }
+  .fidelity-snippet-pre {
+    background: #f8f8f8;
+    border: 1px solid #ccc;
+    color: #1f2937;
+    overflow-x: auto;
+    padding: 1em;
+  }
 
-    /* Django admin dark mode uses data-theme="dark" on the root element. */
-    [data-theme="dark"] .fidelity-snippet-pre {
+  .fidelity-snippet-pre code {
+    color: inherit;
+  }
+
+  .fidelity-copy-btn {
+    margin-bottom: 0.5em;
+  }
+
+  /* Explicit dark theme */
+  [data-theme="dark"] .fidelity-snippet-pre {
+    background: #111827;
+    border-color: #374151;
+    color: #e5e7eb;
+  }
+
+  /* Auto theme following system preference */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]):not([data-theme="dark"]) .fidelity-snippet-pre {
       background: #111827;
       border-color: #374151;
       color: #e5e7eb;
     }
+  }
   </style>
 {% endblock extrahead %}
 {% block breadcrumbs %}
