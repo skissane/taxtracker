@@ -1358,6 +1358,17 @@ class ArchiveExtractorTests(TestCase):
         results = extract_from_archive(har_bytes, "export.har")
         self.assertEqual(results, [])
 
+    def test_har_path_traversal_sanitized(self):
+        """A URL suffix with path separators must not escape the output path."""
+        har_bytes = _make_fidelity_har("../../../evil", PDF_MAGIC)
+        results = extract_from_archive(har_bytes, "export.har")
+        self.assertEqual(len(results), 1)
+        name, _ = results[0]
+        # basename only — no directory components
+        self.assertEqual(name, "evil.pdf")
+        self.assertNotIn("..", name)
+        self.assertNotIn("/", name)
+
     def test_invalid_json_raises_unsupported(self):
         with self.assertRaises(UnsupportedArchiveError):
             extract_from_archive(b"not json at all", "export.har")
@@ -1464,3 +1475,39 @@ class ImportArchiveViewTests(TestCase):
         response = self.client.post(self._import_url(), {})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "This field is required")
+
+    # ------------------------------------------------------------------
+    # Permission checks
+    # ------------------------------------------------------------------
+
+    def _limited_client(self, username, *permission_codenames):
+        """Return a Client logged in as a staff user with only the given permissions."""
+        from django.contrib.auth.models import Permission
+
+        user = User.objects.create_user(username, f"{username}@b.com", "pass")
+        user.is_staff = True
+        user.save()
+        for codename in permission_codenames:
+            perm = Permission.objects.get(codename=codename)
+            user.user_permissions.add(perm)
+        client = Client()
+        client.login(username=username, password="pass")
+        return client
+
+    def test_get_requires_item_change_permission(self):
+        """Staff user without change_item permission should get 403."""
+        client = self._limited_client("limited1", "add_attachment")
+        response = client.get(self._import_url())
+        self.assertEqual(response.status_code, 403)
+
+    def test_get_requires_attachment_add_permission(self):
+        """Staff user without add_attachment permission should get 403."""
+        client = self._limited_client("limited2", "change_item")
+        response = client.get(self._import_url())
+        self.assertEqual(response.status_code, 403)
+
+    def test_get_allowed_with_both_permissions(self):
+        """Staff user with both change_item and add_attachment can access view."""
+        client = self._limited_client("limited3", "change_item", "add_attachment")
+        response = client.get(self._import_url())
+        self.assertEqual(response.status_code, 200)

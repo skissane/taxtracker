@@ -18,6 +18,7 @@ Public interface
 import base64
 import binascii
 import json
+from pathlib import Path
 
 __all__ = [
     "UnsupportedArchiveError",
@@ -76,6 +77,8 @@ def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
 
         # Derive filename from the URL suffix after "/c:".
         pdf_name = url[len(FIDELITY_URL_PREFIX) :].split("?")[0].split("#")[0]
+        # Sanitize: take only the basename to prevent path-traversal attacks.
+        pdf_name = Path(pdf_name).name
         if not pdf_name:
             continue
         pdf_filename = pdf_name + ".pdf"

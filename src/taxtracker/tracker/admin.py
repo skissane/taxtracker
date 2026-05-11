@@ -228,6 +228,14 @@ class ItemAdmin(admin.ModelAdmin):
     def import_archive_view(self, request, pk):
         item = get_object_or_404(Item, pk=pk)
 
+        # Check that the requesting user can change this Item and can add
+        # new Attachments — both are required for this view to function.
+        if not self.has_change_permission(request, item):
+            raise PermissionDenied
+        attachment_admin = self.admin_site._registry.get(Attachment)
+        if attachment_admin is None or not attachment_admin.has_add_permission(request):
+            raise PermissionDenied
+
         if request.method == "POST":
             form = ImportArchiveForm(request.POST, request.FILES)
         else:

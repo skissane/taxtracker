@@ -53,6 +53,10 @@ def extract_pdfs(har_path: Path, output_dir: Path) -> int:
         pdf_name = url[len(FIDELITY_URL_PREFIX) :]
         # Strip any query string or fragment.
         pdf_name = pdf_name.split("?")[0].split("#")[0]
+        # Sanitize: take only the basename to prevent path-traversal attacks
+        # (e.g. a crafted URL suffix of "../../../etc/passwd" must not escape
+        # the output directory).
+        pdf_name = Path(pdf_name).name
         if not pdf_name:
             print(
                 f"WARNING: could not determine filename from URL: {url}",
@@ -77,8 +81,16 @@ def extract_pdfs(har_path: Path, output_dir: Path) -> int:
 
         if body_encoding.lower() == "base64":
             # HAR stores the body itself as Base64; decode it first.
-            raw_body = base64.b64decode(body_text)
-            body_str = raw_body.decode("utf-8")
+            try:
+                raw_body = base64.b64decode(body_text)
+                body_str = raw_body.decode("utf-8")
+            except (binascii.Error, UnicodeDecodeError) as exc:
+                print(
+                    f"WARNING: could not decode Base64-encoded body for {url}: "
+                    f"{exc}; skipping",
+                    file=sys.stderr,
+                )
+                continue
         else:
             body_str = body_text
 
