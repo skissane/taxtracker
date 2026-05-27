@@ -117,8 +117,16 @@ class AttachmentInline(admin.TabularInline):
     model = Attachment
     form = AttachmentForm
     extra = 1
-    fields = ("title", "date", "notes", "file_type", "file")
+    fields = ("title", "date", "notes", "file_type", "file", "change_link")
+    readonly_fields = ("change_link",)
     autocomplete_fields = ("file_type",)
+
+    @admin.display(description="Edit")
+    def change_link(self, obj):
+        if not obj.pk:
+            return "—"
+        url = reverse("admin:tracker_attachment_change", args=[obj.pk])
+        return format_html('<a href="{}">Edit</a>', url)
 
 
 class ChildItemInline(admin.TabularInline):
