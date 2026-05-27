@@ -109,6 +109,26 @@ class FileExtensionFormSet(_AtLeastOnePrimaryFormSet):
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _attachment_date_warning(obj):
+    """Return an HTML warning span if *obj*'s date falls outside its financial year."""
+    if not obj.pk or not obj.date or not obj.item_id:
+        return ""
+    fy = obj.item.year
+    if obj.date < fy.start_date or obj.date > fy.end_date:
+        return format_html(
+            '<span title="Date is outside the financial year ({} \u2013 {})"'
+            ">\u26a0\ufe0f</span>",
+            fy.start_date,
+            fy.end_date,
+        )
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # Inlines
 # ---------------------------------------------------------------------------
 
@@ -117,9 +137,16 @@ class AttachmentInline(admin.TabularInline):
     model = Attachment
     form = AttachmentForm
     extra = 1
-    fields = ("title", "date", "notes", "file_type", "file", "change_link")
-    readonly_fields = ("change_link",)
+    fields = ("title", "date", "date_warning", "file_type", "file", "change_link")
+    readonly_fields = ("date_warning", "change_link")
     autocomplete_fields = ("file_type",)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("item__year")
+
+    @admin.display(description="")
+    def date_warning(self, obj):
+        return _attachment_date_warning(obj)
 
     @admin.display(description="Edit")
     def change_link(self, obj):
@@ -304,11 +331,31 @@ class ItemAdmin(admin.ModelAdmin):
 @admin.register(Attachment)
 class AttachmentAdmin(admin.ModelAdmin):
     form = AttachmentForm
-    list_display = ("title", "date", "item", "file_type", "file")
+    list_display = ("title", "date", "date_warning", "item", "file_type", "file")
     list_filter = ("item__year", "file_type")
     search_fields = ("title", "notes", "item__title", "file_type__short_name")
     list_select_related = ("item", "item__year", "file_type")
     autocomplete_fields = ("file_type",)
+    readonly_fields = ("date_warning",)
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "item",
+                    "title",
+                    ("date", "date_warning"),
+                    "notes",
+                    "file_type",
+                    "file",
+                ),
+            },
+        ),
+    )
+
+    @admin.display(description="")
+    def date_warning(self, obj):
+        return _attachment_date_warning(obj)
 
     def get_urls(self):
         custom = [
