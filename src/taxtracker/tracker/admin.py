@@ -2,6 +2,7 @@ import io
 import mimetypes
 import re
 import zipfile
+from pathlib import Path
 from urllib.parse import quote
 
 from django.conf import settings
@@ -14,7 +15,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils.html import format_html
 
-from .archives import UnsupportedArchiveError, extract_from_archive
+from .archives import UnsupportedArchiveError, extract_from_archive_with_skips
 from .forms import AttachmentForm, ImportArchiveForm
 from .models import (
     Attachment,
@@ -282,15 +283,34 @@ class ItemAdmin(admin.ModelAdmin):
             file_bytes = uploaded.read()
             filename = uploaded.name
 
+            had_error = False
             try:
-                extracted = extract_from_archive(file_bytes, filename)
+                extracted, skipped_names = extract_from_archive_with_skips(
+                    file_bytes, filename
+                )
             except UnsupportedArchiveError as exc:
                 messages.error(request, str(exc))
                 extracted = []
+                skipped_names = []
+                had_error = True
 
             if extracted:
+                existing_names = {
+                    Path(file_name).name
+                    for file_name in Attachment.objects.values_list("file", flat=True)
+                    if file_name
+                }
+                importable: list[tuple[str, bytes]] = []
+                for pdf_filename, pdf_bytes in extracted:
+                    base_name = Path(pdf_filename).name
+                    if base_name in existing_names:
+                        skipped_names.append(base_name)
+                        continue
+                    importable.append((base_name, pdf_bytes))
+                    existing_names.add(base_name)
+
                 with transaction.atomic():
-                    for pdf_filename, pdf_bytes in extracted:
+                    for pdf_filename, pdf_bytes in importable:
                         att = Attachment(item=item)
                         # save=False: store the file in the storage backend now
                         # but don't yet write the Attachment row; att.save()
@@ -302,11 +322,20 @@ class ItemAdmin(admin.ModelAdmin):
                             save=False,
                         )
                         att.save()
-                messages.success(
+                if importable:
+                    messages.success(
+                        request,
+                        f"Imported {len(importable)} attachment(s) from '{filename}'.",
+                    )
+
+            if skipped_names:
+                skipped_count = len(dict.fromkeys(skipped_names))
+                skipped_list = ", ".join(dict.fromkeys(skipped_names))
+                messages.warning(
                     request,
-                    f"Imported {len(extracted)} attachment(s) from '{filename}'.",
+                    f"Skipped {skipped_count} file(s): {skipped_list}.",
                 )
-            elif not messages.get_messages(request):
+            elif not had_error and not extracted:
                 messages.warning(
                     request,
                     f"No attachments could be extracted from '{filename}'.",
