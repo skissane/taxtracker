@@ -111,7 +111,6 @@ class Item(models.Model):
             visited.add(current.parent_id)
             current = current.parent
             parts.insert(0, current.title)
-        parts.insert(0, str(self.year))
         return " > ".join(parts)
 
     @property
