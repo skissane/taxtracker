@@ -329,8 +329,9 @@ class ItemAdmin(admin.ModelAdmin):
                     )
 
             if skipped_names:
-                skipped_count = len(dict.fromkeys(skipped_names))
-                skipped_list = ", ".join(dict.fromkeys(skipped_names))
+                unique_skipped = list(dict.fromkeys(skipped_names))
+                skipped_count = len(unique_skipped)
+                skipped_list = ", ".join(unique_skipped)
                 messages.warning(
                     request,
                     f"Skipped {skipped_count} file(s): {skipped_list}.",
