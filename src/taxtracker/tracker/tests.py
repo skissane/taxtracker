@@ -76,10 +76,10 @@ class ItemModelTests(TestCase):
         )
 
     def test_str_root(self):
-        self.assertEqual(str(self.parent), "Income")
+        self.assertEqual(str(self.parent), "FY2024 > Income")
 
     def test_str_child(self):
-        self.assertEqual(str(self.child), "Income > Salary")
+        self.assertEqual(str(self.child), "FY2024 > Income > Salary")
 
     def test_is_done_false(self):
         self.assertFalse(self.parent.is_done)
