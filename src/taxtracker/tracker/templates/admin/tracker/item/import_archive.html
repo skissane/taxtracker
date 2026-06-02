@@ -5,7 +5,7 @@
 {% block extrahead %}
   {{ block.super }}
   <style>
-  .fidelity-snippet-pre {
+  .snippet-pre {
     background: #f8f8f8;
     border: 1px solid #ccc;
     color: #1f2937;
@@ -13,16 +13,16 @@
     padding: 1em;
   }
 
-  .fidelity-snippet-pre code {
+  .snippet-pre code {
     color: inherit;
   }
 
-  .fidelity-copy-btn {
+  .snippet-copy-btn {
     margin-bottom: 0.5em;
   }
 
   /* Explicit dark theme */
-  [data-theme="dark"] .fidelity-snippet-pre {
+  [data-theme="dark"] .snippet-pre {
     background: #111827;
     border-color: #374151;
     color: #e5e7eb;
@@ -30,7 +30,7 @@
 
   /* Auto theme following system preference */
   @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]):not([data-theme="dark"]) .fidelity-snippet-pre {
+    :root:not([data-theme="light"]):not([data-theme="dark"]) .snippet-pre {
       background: #111827;
       border-color: #374151;
       color: #e5e7eb;
@@ -74,17 +74,17 @@
   <hr>
   <h2>Fidelity NetBenefits — Trigger PDF Downloads</h2>
   <p>
-    Paste the following script into the browser console on the <a href="https://nb.fidelity.com/">Fidelity
+    Paste the following script into the browser console on the <a target="_blank" href="https://nb.fidelity.com/">Fidelity
     NetBenefits</a> statements page to automatically click every download icon
     (with a 1-second delay between clicks). After all downloads have finished,
     capture the network traffic as a HAR file and upload it above.
   </p>
   <button type="button"
-          class="fidelity-copy-btn"
+          class="snippet-copy-btn"
           onclick="navigator.clipboard.writeText(document.getElementById('fidelity-snippet').textContent)">
     Copy to clipboard
   </button>
-  <pre class="fidelity-snippet-pre"><code id="fidelity-snippet">(async () => {
+  <pre class="snippet-pre"><code id="fidelity-snippet">(async () => {
   const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms))
   const icons = Array.from(document.querySelectorAll('pvd-icon[pvd-name="action__download"]'))
   console.log(`Found ${icons.length} download icons. Starting clicks...`)
@@ -94,5 +94,53 @@
     await delay(1000)
   }
   console.log('Finished clicking all icons!')
+})()</code></pre>
+  <hr>
+  <h2>Charles Schwab — Trigger PDF Downloads</h2>
+  <p>
+    Paste the following script into the browser console on the <a target="_blank"
+    href="https://client.schwab.com/app/accounts/statements/#/">Charles Schwab</a> statements page to automatically
+    click every download icon (with a 1-second delay between clicks). After all downloads have finished, capture the
+    network traffic as a HAR file and upload it above.
+  </p>
+  <button type="button"
+          class="snippet-copy-btn"
+          onclick="navigator.clipboard.writeText(document.getElementById('schwab-snippet').textContent)">
+    Copy to clipboard
+  </button>
+  <pre class="snippet-pre"><code id="schwab-snippet">(async () => {
+  const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+  const setWithChange = (sel, val) => {
+    const se = document.querySelector(sel)
+    se.value = val
+    const changeEvent = new Event('change', { bubbles: true })
+    se.dispatchEvent(changeEvent)
+  }
+  setWithChange("#date-range-select-id","Last10Years")
+  await delay(100)
+  for (const lbl of ["Tax Forms","Letters","Reports & Plans","Trade Confirms","Search"]) {
+    Array.from(document.querySelectorAll("button")).filter(e=>e.innerText.includes(lbl)).forEach(e=>e.click())
+    await delay(100)
+  }
+  await delay(5000)
+  let pageNumber = 1
+  while (true) {
+    const buttons = Array.from(document.querySelectorAll("button[aria-label='Click to Download PDF']"))
+    console.log(`Page #${pageNumber}: Found ${buttons.length} download buttons. Starting clicks...`)
+    for (let i = 0; i &lt; buttons.length; i++) {
+      buttons[i].click()
+      console.log(`Page #${pageNumber}: Clicked button ${i + 1} of ${buttons.length}. Waiting 1 second...`)
+      await delay(1000)
+    }
+    console.log(`Page #${pageNumber}: Finished clicking all buttons!`)
+    const nextLink = document.querySelector("#pagination-next-link")
+    if (nextLink.parentElement.classList.contains('sdps-hide')) {
+      console.log('No more pages, script exiting')
+      break
+    }
+    pageNumber++
+    nextLink.click()
+    await delay(1000)
+  }
 })()</code></pre>
 {% endblock content %}
