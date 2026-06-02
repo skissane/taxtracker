@@ -121,7 +121,8 @@ def _attachment_date_warning(obj):
     if obj.date < fy.start_date or obj.date > fy.end_date:
         return format_html(
             '<span title="Date is outside the financial year ({} \u2013 {})"'
-            ">\u26a0\ufe0f</span>",
+            ' role="img" aria-label="Date is outside the financial year">'
+            "\u26a0\ufe0f</span>",
             fy.start_date,
             fy.end_date,
         )
