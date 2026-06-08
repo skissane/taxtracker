@@ -147,7 +147,7 @@ def _extract_from_zip(file_bytes: bytes) -> tuple[list[tuple[str, bytes]], list[
             for info in archive.infolist():
                 if info.is_dir():
                     continue
-                entry_name = Path(info.filename).name
+                entry_name = Path(info.filename.replace("\\", "/")).name
                 if not entry_name:
                     continue
                 if not (entry_name.endswith(".pdf") or entry_name.endswith(".PDF")):
@@ -155,7 +155,11 @@ def _extract_from_zip(file_bytes: bytes) -> tuple[list[tuple[str, bytes]], list[
                     continue
                 if entry_name.endswith(".PDF"):
                     entry_name = entry_name[:-4] + ".pdf"
-                results.append((entry_name, archive.read(info)))
+                pdf_bytes = archive.read(info)
+                if not pdf_bytes.startswith(PDF_MAGIC):
+                    skipped.append(entry_name)
+                    continue
+                results.append((entry_name, pdf_bytes))
             return results, skipped
     except zipfile.BadZipFile as exc:
         raise UnsupportedArchiveError(
