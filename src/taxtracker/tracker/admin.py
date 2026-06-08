@@ -843,6 +843,10 @@ class FinancialYearAdmin(admin.ModelAdmin):
         done = sum(1 for i in all_items if i.is_done)
         pending = total - done
 
+        # Fetch previous and next financial years for navigation.
+        prev_fy = FinancialYear.objects.filter(year=fy.year - 1).first()
+        next_fy = FinancialYear.objects.filter(year=fy.year + 1).first()
+
         context = {
             **self.admin_site.each_context(request),
             "title": f"Status Summary – {fy}",
@@ -851,6 +855,8 @@ class FinancialYearAdmin(admin.ModelAdmin):
             "total": total,
             "done": done,
             "pending": pending,
+            "prev_fy": prev_fy,
+            "next_fy": next_fy,
             "opts": self.model._meta,
         }
         return render(request, "admin/tracker/financialyear/summary.html", context)
