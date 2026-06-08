@@ -160,15 +160,15 @@
 {% endblock breadcrumbs %}
 {% block content %}
   {% if prev_fy or next_fy %}
-  <p class="tt-fy-nav">
-    {% if prev_fy %}
-    <a href="{% url 'admin:tracker_financialyear_summary' prev_fy.pk %}">← Previous Year ({{ prev_fy }})</a>
-    {% endif %}
-    {% if next_fy %}
-    {% if prev_fy %}&nbsp;|&nbsp;{% endif %}
-    <a href="{% url 'admin:tracker_financialyear_summary' next_fy.pk %}">Next Year ({{ next_fy }}) →</a>
-    {% endif %}
-  </p>
+    <p class="tt-fy-nav">
+      {% if prev_fy %}
+        <a href="{% url 'admin:tracker_financialyear_summary' prev_fy.pk %}">← Previous Year ({{ prev_fy }})</a>
+      {% endif %}
+      {% if next_fy %}
+        {% if prev_fy %}&nbsp;|&nbsp;{% endif %}
+        <a href="{% url 'admin:tracker_financialyear_summary' next_fy.pk %}">Next Year ({{ next_fy }}) →</a>
+      {% endif %}
+    </p>
   {% endif %}
   <div class="tt-info-box">
     <table class="tt-table">
