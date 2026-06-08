@@ -273,6 +273,7 @@ class AdminViewTests(TestCase):
         Attachment.objects.create(
             item=self.item,
             title="in-year.pdf",
+            # FY2024 spans 1 Jul 2023 - 30 Jun 2024.
             date=datetime.date(2024, 1, 1),
             file=ContentFile(b"in-year", name="in-year.pdf"),
         )
@@ -285,6 +286,7 @@ class AdminViewTests(TestCase):
         movable = Attachment.objects.create(
             item=self.item,
             title="movable.pdf",
+            # Aug 2024 belongs to FY2025, so this can be reassigned.
             date=datetime.date(2024, 8, 1),
             file=ContentFile(b"movable", name="movable.pdf"),
         )
