@@ -131,7 +131,7 @@ def _attachment_date_warning(obj):
 
 
 def _financial_year_number_for_date(date):
-    """Return the Australian FY number for a given date."""
+    """Return FY end-year number for a date (e.g. Aug-2023 -> FY2024)."""
     return date.year if date.month <= 6 else date.year + 1
 
 
@@ -433,10 +433,11 @@ class ItemAdmin(admin.ModelAdmin):
                 target_item = None
                 warning = f"Financial year FY{target_year_num} not found."
             else:
-                target_item = target_cache.get(target_fy.pk)
                 if target_fy.pk not in target_cache:
-                    target_item = _find_equivalent_item(path_signature, target_fy)
-                    target_cache[target_fy.pk] = target_item
+                    target_cache[target_fy.pk] = _find_equivalent_item(
+                        path_signature, target_fy
+                    )
+                target_item = target_cache[target_fy.pk]
                 if target_item is None:
                     warning = f"Equivalent item not found in FY{target_year_num}."
                 else:

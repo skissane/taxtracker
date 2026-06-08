@@ -54,7 +54,7 @@
               {% if row.target_item %}
                 <a href="{% url 'admin:tracker_item_change' row.target_item.pk %}">{{ row.target_item }}</a>
               {% else %}
-                ⚠️ {{ row.warning }}
+                <span role="img" aria-label="Warning">⚠️</span> {{ row.warning }}
               {% endif %}
             </td>
             <td>{{ row.status }}</td>
@@ -98,7 +98,7 @@
                 {% if row.target_item %}
                   <a href="{% url 'admin:tracker_item_change' row.target_item.pk %}">{{ row.target_item }}</a>
                 {% else %}
-                  ⚠️ {{ row.warning }}
+                  <span role="img" aria-label="Warning">⚠️</span> {{ row.warning }}
                 {% endif %}
               </td>
             </tr>
