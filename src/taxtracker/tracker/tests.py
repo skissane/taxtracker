@@ -276,6 +276,12 @@ class AdminViewTests(TestCase):
             date=datetime.date(2024, 1, 1),
             file=ContentFile(b"in-year", name="in-year.pdf"),
         )
+        Attachment.objects.create(
+            item=self.item,
+            title="undated.pdf",
+            date=None,
+            file=ContentFile(b"undated", name="undated.pdf"),
+        )
         movable = Attachment.objects.create(
             item=self.item,
             title="movable.pdf",
@@ -292,8 +298,8 @@ class AdminViewTests(TestCase):
         url = reverse("admin:tracker_item_reassign_attachments", args=[self.item.pk])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Total attachments: 3")
-        self.assertContains(response, "Attachments on correct item: 1")
+        self.assertContains(response, "Total attachments: 4")
+        self.assertContains(response, "Attachments on correct item: 2")
         self.assertContains(response, "Attachments unmovable: 1")
         self.assertContains(response, "Attachments movable: 1")
         self.assertContains(
