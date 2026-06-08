@@ -5,13 +5,13 @@ description = "Tax Return tracker app"
 readme = "README.md"
 requires-python = "~=3.14.0"
 dependencies = [
-    "django==6.0.5",
+    "django==6.0.6",
 ]
 
 [dependency-groups]
 dev = [
-    "djlint>=1.36.4",
-    "ruff==0.15.15",
+    "djlint>=1.39.0",
+    "ruff==0.15.16",
 ]
 
 [tool.ruff]
