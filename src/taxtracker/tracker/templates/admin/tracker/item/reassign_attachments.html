@@ -1,0 +1,121 @@
+{% extends "admin/base_site.html" %}
+
+{% load i18n %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> ›
+    <a href="{% url 'admin:tracker_item_changelist' %}">Items</a> ›
+    <a href="{% url 'admin:tracker_item_change' item.pk %}">{{ item }}</a> ›
+    Reassign Attachments
+  </div>
+{% endblock breadcrumbs %}
+{% block content %}
+  <h1>{{ title }}</h1>
+  <p>
+    This page lists attachments on <strong>{{ item }}</strong> whose dates fall
+    outside <strong>{{ item.year }}</strong>
+    ({{ item.year.start_date }} to {{ item.year.end_date }}).
+  </p>
+  <h2>Initial Summary</h2>
+  <ul>
+    <li>Total attachments: {{ initial_summary.total_attachments }}</li>
+    <li>Attachments on correct item: {{ initial_summary.correct_item_count }}</li>
+    <li>Attachments unmovable: {{ initial_summary.unmovable_count }}</li>
+    <li>Attachments movable: {{ initial_summary.movable_count }}</li>
+  </ul>
+  {% if result_summary %}
+    <h2>Move Results Summary</h2>
+    <ul>
+      <li>Out-of-year attachments reviewed: {{ result_summary.total_out_of_year }}</li>
+      <li>Moved successfully: {{ result_summary.moved_count }}</li>
+      <li>Not selected to move: {{ result_summary.not_selected_count }}</li>
+      <li>Unmovable: {{ result_summary.unmovable_count }}</li>
+    </ul>
+  {% endif %}
+  {% if result_rows %}
+    <table id="result_list">
+      <thead>
+        <tr>
+          <th scope="col">Attachment</th>
+          <th scope="col">Date</th>
+          <th scope="col">Suggested Target</th>
+          <th scope="col">Result</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in result_rows %}
+          <tr>
+            <td>
+              <a href="{% url 'admin:tracker_attachment_change' row.attachment.pk %}">{{ row.attachment.title }}</a>
+            </td>
+            <td>{{ row.attachment.date }}</td>
+            <td>
+              {% if row.target_item %}
+                <a href="{% url 'admin:tracker_item_change' row.target_item.pk %}">{{ row.target_item }}</a>
+              {% else %}
+                ⚠️ {{ row.warning }}
+              {% endif %}
+            </td>
+            <td>{{ row.status }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% elif rows %}
+    <form method="post">
+      {% csrf_token %}
+      <table id="result_list">
+        <thead>
+          <tr>
+            <th scope="col">Move?</th>
+            <th scope="col">Attachment</th>
+            <th scope="col">Date</th>
+            <th scope="col">Current Item</th>
+            <th scope="col">Suggested Target</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td>
+                {% if row.movable %}
+                  <input type="checkbox"
+                         name="move_attachment_ids"
+                         value="{{ row.attachment.pk }}">
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td>
+                <a href="{% url 'admin:tracker_attachment_change' row.attachment.pk %}">{{ row.attachment.title }}</a>
+              </td>
+              <td>{{ row.attachment.date }}</td>
+              <td>
+                <a href="{% url 'admin:tracker_item_change' item.pk %}">{{ item }}</a>
+              </td>
+              <td>
+                {% if row.target_item %}
+                  <a href="{% url 'admin:tracker_item_change' row.target_item.pk %}">{{ row.target_item }}</a>
+                {% else %}
+                  ⚠️ {{ row.warning }}
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="submit-row">
+        <input type="submit" value="Move selected attachments" class="default">
+        <a class="button cancel"
+           href="{% url 'admin:tracker_item_change' item.pk %}">Cancel</a>
+      </div>
+    </form>
+  {% else %}
+    <p>No out-of-year attachments were found for this item.</p>
+  {% endif %}
+  <p class="tt-footer">
+    <a class="button default"
+       href="{% url 'admin:tracker_item_change' item.pk %}">← Back to {{ item }}</a>
+  </p>
+{% endblock content %}

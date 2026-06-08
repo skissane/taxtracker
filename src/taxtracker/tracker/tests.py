@@ -266,6 +266,90 @@ class AdminViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "FY2025")
 
+    def test_reassign_attachments_view_lists_movable_and_unmovable(self):
+        fy2025 = FinancialYear.objects.create(year=2025)
+        Item.objects.create(year=fy2025, title=self.item.title, order=self.item.order)
+
+        Attachment.objects.create(
+            item=self.item,
+            title="in-year.pdf",
+            date=datetime.date(2024, 1, 1),
+            file=ContentFile(b"in-year", name="in-year.pdf"),
+        )
+        movable = Attachment.objects.create(
+            item=self.item,
+            title="movable.pdf",
+            date=datetime.date(2024, 8, 1),
+            file=ContentFile(b"movable", name="movable.pdf"),
+        )
+        Attachment.objects.create(
+            item=self.item,
+            title="no-target-fy.pdf",
+            date=datetime.date(2025, 8, 1),
+            file=ContentFile(b"no-target-fy", name="no-target-fy.pdf"),
+        )
+
+        url = reverse("admin:tracker_item_reassign_attachments", args=[self.item.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Total attachments: 3")
+        self.assertContains(response, "Attachments on correct item: 1")
+        self.assertContains(response, "Attachments unmovable: 1")
+        self.assertContains(response, "Attachments movable: 1")
+        self.assertContains(
+            response,
+            f'value="{movable.pk}"',
+            html=False,
+        )
+        self.assertContains(response, "Financial year FY2026 not found.")
+
+    def test_reassign_attachments_view_moves_selected(self):
+        fy2025 = FinancialYear.objects.create(year=2025)
+        fy2023 = FinancialYear.objects.create(year=2023)
+        target_2025 = Item.objects.create(
+            year=fy2025, title=self.item.title, order=self.item.order
+        )
+        Item.objects.create(year=fy2023, title=self.item.title, order=self.item.order)
+
+        to_move = Attachment.objects.create(
+            item=self.item,
+            title="to-move.pdf",
+            date=datetime.date(2024, 8, 2),
+            file=ContentFile(b"to-move", name="to-move.pdf"),
+        )
+        not_selected = Attachment.objects.create(
+            item=self.item,
+            title="not-selected.pdf",
+            date=datetime.date(2023, 1, 2),
+            file=ContentFile(b"not-selected", name="not-selected.pdf"),
+        )
+        unmovable = Attachment.objects.create(
+            item=self.item,
+            title="unmovable.pdf",
+            date=datetime.date(2025, 8, 2),
+            file=ContentFile(b"unmovable", name="unmovable.pdf"),
+        )
+
+        url = reverse("admin:tracker_item_reassign_attachments", args=[self.item.pk])
+        response = self.client.post(
+            url,
+            data={"move_attachment_ids": [str(to_move.pk)]},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        to_move.refresh_from_db()
+        not_selected.refresh_from_db()
+        unmovable.refresh_from_db()
+        self.assertEqual(to_move.item_id, target_2025.pk)
+        self.assertEqual(not_selected.item_id, self.item.pk)
+        self.assertEqual(unmovable.item_id, self.item.pk)
+
+        self.assertContains(response, "Moved successfully: 1")
+        self.assertContains(response, "Not selected to move: 1")
+        self.assertContains(response, "Unmovable: 1")
+        self.assertContains(response, "FY2025")
+        self.assertContains(response, "FY2023")
+
 
 class ItemChildInlineTests(TestCase):
     """Tests for child-item year-inheritance fixes in ItemAdmin."""
