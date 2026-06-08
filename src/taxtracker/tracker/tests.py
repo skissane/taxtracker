@@ -12,7 +12,11 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from .archives import UnsupportedArchiveError, extract_from_archive
+from .archives import (
+    UnsupportedArchiveError,
+    extract_from_archive,
+    extract_from_archive_with_skips,
+)
 from .forms import AttachmentForm, FlexibleDateField
 from .models import (
     Attachment,
@@ -1306,6 +1310,15 @@ def _make_fidelity_har(
     return json.dumps(har).encode()
 
 
+def _make_zip_archive(entries):
+    """Build ZIP bytes from (name, bytes) pairs."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w") as zf:
+        for name, data in entries:
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
 class ArchiveExtractorTests(TestCase):
     """Unit tests for the archives.extract_from_archive helper."""
 
@@ -1369,6 +1382,30 @@ class ArchiveExtractorTests(TestCase):
         self.assertNotIn("..", name)
         self.assertNotIn("/", name)
 
+    def test_zip_extracts_pdf_names_and_normalises_uppercase_extension(self):
+        zip_bytes = _make_zip_archive(
+            [
+                ("folder/statement.PDF", PDF_MAGIC),
+                ("nested/sub/report.pdf", PDF_MAGIC),
+                ("ignored.txt", b"text"),
+            ]
+        )
+        results = extract_from_archive(zip_bytes, "export.zip")
+        self.assertEqual(
+            [name for name, _ in results],
+            ["statement.pdf", "report.pdf"],
+        )
+
+    def test_zip_reports_non_pdf_entries_as_skipped(self):
+        zip_bytes = _make_zip_archive(
+            [
+                ("folder/statement.pdf", PDF_MAGIC),
+                ("ignored.txt", b"text"),
+            ]
+        )
+        _, skipped = extract_from_archive_with_skips(zip_bytes, "export.zip")
+        self.assertEqual(skipped, ["ignored.txt"])
+
     def test_invalid_json_raises_unsupported(self):
         with self.assertRaises(UnsupportedArchiveError):
             extract_from_archive(b"not json at all", "export.har")
@@ -1379,7 +1416,7 @@ class ArchiveExtractorTests(TestCase):
 
     def test_unknown_extension_raises(self):
         with self.assertRaises(UnsupportedArchiveError):
-            extract_from_archive(b"anything", "archive.zip")
+            extract_from_archive(b"anything", "archive.7z")
 
     def test_no_extension_raises(self):
         with self.assertRaises(UnsupportedArchiveError):
@@ -1462,13 +1499,73 @@ class ImportArchiveViewTests(TestCase):
 
     def test_post_unsupported_format_shows_error(self):
         upload = io.BytesIO(b"anything")
-        upload.name = "archive.zip"
+        upload.name = "archive.7z"
         response = self.client.post(
             self._import_url(),
             {"archive": upload},
             follow=True,
         )
         self.assertContains(response, "Unrecognised archive format")
+
+    def test_post_zip_skips_non_pdf_files_and_shows_warning(self):
+        zip_bytes = _make_zip_archive(
+            [
+                ("folder/statement.PDF", PDF_MAGIC),
+                ("nested/report.pdf", PDF_MAGIC),
+                ("ignored.txt", b"text"),
+            ]
+        )
+        upload = io.BytesIO(zip_bytes)
+        upload.name = "archive.zip"
+        response = self.client.post(
+            self._import_url(),
+            {"archive": upload},
+            follow=True,
+        )
+        self.assertContains(response, "Imported 2 attachment(s)")
+        self.assertContains(response, "Skipped 1 file(s): ignored.txt")
+        self.assertTrue(
+            Attachment.objects.filter(
+                item=self.item, file__endswith="/statement.pdf"
+            ).exists()
+        )
+        self.assertTrue(
+            Attachment.objects.filter(
+                item=self.item, file__endswith="/report.pdf"
+            ).exists()
+        )
+
+    def test_post_zip_skips_existing_filename_any_item_and_warns(self):
+        other_item = Item.objects.create(year=self.fy, title="Other Item", order=2)
+        existing = Attachment(item=other_item)
+        existing.file.save("existing.pdf", ContentFile(PDF_MAGIC), save=False)
+        existing.save()
+
+        zip_bytes = _make_zip_archive(
+            [
+                ("existing.pdf", PDF_MAGIC),
+                ("new.pdf", PDF_MAGIC),
+            ]
+        )
+        upload = io.BytesIO(zip_bytes)
+        upload.name = "archive.zip"
+        response = self.client.post(
+            self._import_url(),
+            {"archive": upload},
+            follow=True,
+        )
+        self.assertContains(response, "Imported 1 attachment(s)")
+        self.assertContains(response, "Skipped 1 file(s): existing.pdf")
+        self.assertTrue(
+            Attachment.objects.filter(
+                item=self.item, file__endswith="/new.pdf"
+            ).exists()
+        )
+        self.assertFalse(
+            Attachment.objects.filter(
+                item=self.item, file__endswith="/existing.pdf"
+            ).exists()
+        )
 
     def test_post_missing_file_shows_form_error(self):
         """Posting without a file should re-render the form with an error."""
