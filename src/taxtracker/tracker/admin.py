@@ -158,8 +158,7 @@ def _find_equivalent_item(path_signature, target_fy):
                 parent_id=parent_id,
                 title=title,
                 order=order,
-            )
-            .order_by("pk")[:2]
+            ).order_by("pk")[:2]
         )
         if len(matches) != 1:
             return None
