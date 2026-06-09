@@ -152,18 +152,18 @@ def _find_equivalent_item(path_signature, target_fy):
     parent_id = None
     current = None
     for title, order in path_signature:
-        current = (
+        matches = list(
             Item.objects.filter(
                 year=target_fy,
                 parent_id=parent_id,
                 title=title,
                 order=order,
             )
-            .order_by("pk")
-            .first()
+            .order_by("pk")[:2]
         )
-        if current is None:
+        if len(matches) != 1:
             return None
+        current = matches[0]
         parent_id = current.pk
     return current
 
