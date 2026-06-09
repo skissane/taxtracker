@@ -130,6 +130,43 @@ def _attachment_date_warning(obj):
     return ""
 
 
+def _financial_year_number_for_date(date):
+    """Return FY end-year number for a date (e.g. Aug-2023 -> FY2024)."""
+    return date.year if date.month <= 6 else date.year + 1
+
+
+def _item_path_signature(item):
+    """Return root→leaf signature for an item path as ``[(title, order), ...]``."""
+    signature = []
+    current = item
+    visited = set()
+    while current is not None and current.pk not in visited:
+        visited.add(current.pk)
+        signature.append((current.title, current.order))
+        current = current.parent
+    return list(reversed(signature))
+
+
+def _find_equivalent_item(path_signature, target_fy):
+    """Find the equivalent item in ``target_fy`` by matching title/order path."""
+    parent_id = None
+    current = None
+    for title, order in path_signature:
+        matches = list(
+            Item.objects.filter(
+                year=target_fy,
+                parent_id=parent_id,
+                title=title,
+                order=order,
+            ).order_by("pk")[:2]
+        )
+        if len(matches) != 1:
+            return None
+        current = matches[0]
+        parent_id = current.pk
+    return current
+
+
 # ---------------------------------------------------------------------------
 # Inlines
 # ---------------------------------------------------------------------------
@@ -193,6 +230,11 @@ class ItemAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.import_archive_view),
                 name="tracker_item_import_archive",
             ),
+            path(
+                "<int:pk>/reassign-attachments/",
+                self.admin_site.admin_view(self.reassign_attachments_view),
+                name="tracker_item_reassign_attachments",
+            ),
         ]
         return custom + super().get_urls()
 
@@ -255,6 +297,9 @@ class ItemAdmin(admin.ModelAdmin):
         extra_context = extra_context or {}
         extra_context["import_archive_url"] = reverse(
             "admin:tracker_item_import_archive", args=[object_id]
+        )
+        extra_context["reassign_attachments_url"] = reverse(
+            "admin:tracker_item_reassign_attachments", args=[object_id]
         )
         return super().change_view(request, object_id, form_url, extra_context)
 
@@ -352,6 +397,119 @@ class ItemAdmin(admin.ModelAdmin):
             "opts": self.model._meta,
         }
         return render(request, "admin/tracker/item/import_archive.html", context)
+
+    # ------------------------------------------------------------------
+    # Reassign out-of-year attachments view
+    # ------------------------------------------------------------------
+
+    def reassign_attachments_view(self, request, pk):
+        item = get_object_or_404(Item.objects.select_related("year", "parent"), pk=pk)
+
+        if not self.has_change_permission(request, item):
+            raise PermissionDenied
+        attachment_admin = self.admin_site._registry.get(Attachment)
+        if attachment_admin is None or not attachment_admin.has_change_permission(
+            request
+        ):
+            raise PermissionDenied
+
+        attachments = list(item.attachments.all().order_by("date", "title", "pk"))
+        path_signature = _item_path_signature(item)
+        target_cache = {}
+        rows = []
+
+        for attachment in attachments:
+            if (
+                attachment.date is None
+                or item.year.start_date <= attachment.date <= item.year.end_date
+            ):
+                continue
+
+            target_year_num = _financial_year_number_for_date(attachment.date)
+            target_fy = FinancialYear.objects.filter(year=target_year_num).first()
+
+            if target_fy is None:
+                target_item = None
+                warning = f"Financial year FY{target_year_num} not found."
+            else:
+                if target_fy.pk not in target_cache:
+                    target_cache[target_fy.pk] = _find_equivalent_item(
+                        path_signature, target_fy
+                    )
+                target_item = target_cache[target_fy.pk]
+                if target_item is None:
+                    warning = f"Equivalent item not found in FY{target_year_num}."
+                else:
+                    warning = ""
+
+            rows.append(
+                {
+                    "attachment": attachment,
+                    "target_year_num": target_year_num,
+                    "target_item": target_item,
+                    "warning": warning,
+                    "movable": target_item is not None,
+                }
+            )
+
+        initial_summary = {
+            "total_attachments": len(attachments),
+            "correct_item_count": len(attachments) - len(rows),
+            "unmovable_count": sum(1 for row in rows if not row["movable"]),
+            "movable_count": sum(1 for row in rows if row["movable"]),
+        }
+
+        result_rows = []
+        result_summary = None
+        if request.method == "POST":
+            selected_ids = {
+                int(v)
+                for v in request.POST.getlist("move_attachment_ids")
+                if v.isdigit()
+            }
+            with transaction.atomic():
+                for row in rows:
+                    attachment = row["attachment"]
+                    if row["movable"] and attachment.pk in selected_ids:
+                        attachment.item = row["target_item"]
+                        attachment.save(update_fields=["item"])
+                        status = "Moved"
+                    elif row["movable"]:
+                        status = "Not selected"
+                    else:
+                        status = "Unmovable"
+
+                    result_rows.append(
+                        {
+                            **row,
+                            "status": status,
+                        }
+                    )
+
+            result_summary = {
+                "total_out_of_year": len(rows),
+                "moved_count": sum(
+                    1 for row in result_rows if row.get("status") == "Moved"
+                ),
+                "not_selected_count": sum(
+                    1 for row in result_rows if row.get("status") == "Not selected"
+                ),
+                "unmovable_count": sum(
+                    1 for row in result_rows if row.get("status") == "Unmovable"
+                ),
+            }
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": f"Reassign Attachments — {item}",
+            "item": item,
+            "rows": rows,
+            "initial_summary": initial_summary,
+            "result_rows": result_rows,
+            "result_summary": result_summary,
+            "opts": self.model._meta,
+        }
+        return render(request, "admin/tracker/item/reassign_attachments.html", context)
 
 
 # ---------------------------------------------------------------------------
@@ -684,6 +842,10 @@ class FinancialYearAdmin(admin.ModelAdmin):
         done = sum(1 for i in all_items if i.is_done)
         pending = total - done
 
+        # Fetch previous and next financial years for navigation.
+        prev_fy = FinancialYear.objects.filter(year=fy.year - 1).first()
+        next_fy = FinancialYear.objects.filter(year=fy.year + 1).first()
+
         context = {
             **self.admin_site.each_context(request),
             "title": f"Status Summary – {fy}",
@@ -692,6 +854,8 @@ class FinancialYearAdmin(admin.ModelAdmin):
             "total": total,
             "done": done,
             "pending": pending,
+            "prev_fy": prev_fy,
+            "next_fy": next_fy,
             "opts": self.model._meta,
         }
         return render(request, "admin/tracker/financialyear/summary.html", context)
