@@ -107,9 +107,10 @@ def eml_to_zip(eml_file_path: str, output_zip_path: str):
                     continue
 
             filename = f"{get_email_date_prefix(part)}{filename}"
-            filename = filename.removesuffix(".eml")
+            file_ext = filename.rsplit(".")[-1] if "." in filename else ""
+            filename = filename.removesuffix(f".{file_ext}") if file_ext else filename
             filename = "-".join(re.sub(r"[^A-Za-z0-9]", " ", filename).lower().split())
-            filename = f"{filename}.eml"
+            filename = f"{filename}.{file_ext}" if file_ext else filename
 
             # 4. Extract the payload (the actual file data)
             payload = get_attachment_payload(part)
