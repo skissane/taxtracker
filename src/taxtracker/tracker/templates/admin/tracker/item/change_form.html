@@ -2,6 +2,15 @@
 
 {% load i18n %}
 
+{% block extrastyle %}
+  {{ block.super }}
+  <style>
+  #id-notes {
+    font-family: monospace;
+    white-space: pre;
+  }
+  </style>
+{% endblock extrastyle %}
 {% block object-tools-items %}
   {% if original %}
     <li>
