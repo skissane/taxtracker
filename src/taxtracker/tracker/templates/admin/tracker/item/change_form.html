@@ -5,12 +5,29 @@
 {% block extrastyle %}
   {{ block.super }}
   <style>
-  #id-notes {
+  .tt-item-nav {
+    margin: 0 0 1em;
+  }
+
+  #id_notes {
     font-family: monospace;
-    white-space: pre;
   }
   </style>
 {% endblock extrastyle %}
+{% block content %}
+  {% if prev_item or next_item %}
+    <p class="tt-item-nav">
+      {% if prev_item %}
+        <a href="{% url 'admin:tracker_item_change' prev_item.pk %}">← Previous Year ({{ prev_item.year }})</a>
+      {% endif %}
+      {% if next_item %}
+        {% if prev_item %}&nbsp;|&nbsp;{% endif %}
+        <a href="{% url 'admin:tracker_item_change' next_item.pk %}">Next Year ({{ next_item.year }}) →</a>
+      {% endif %}
+    </p>
+  {% endif %}
+  {{ block.super }}
+{% endblock content %}
 {% block object-tools-items %}
   {% if original %}
     <li>
