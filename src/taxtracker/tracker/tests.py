@@ -246,7 +246,10 @@ class AdminViewTests(TestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/x-sqlite3")
-        self.assertIn("db-backup.sqlite3", response["Content-Disposition"])
+        self.assertRegex(
+            response["Content-Disposition"],
+            r"db-backup\.\d{4}-\d{2}-\d{2}\.\d{2}\.\d{2}\.\d{2}\.sqlite3",
+        )
         # Content should be a valid SQLite database (starts with the magic header)
         self.assertTrue(response.content[:16].startswith(b"SQLite format 3\x00"))
 

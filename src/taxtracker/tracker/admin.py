@@ -13,6 +13,7 @@ from django.forms import BaseInlineFormSet
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
+from django.utils import timezone
 from django.utils.html import format_html
 
 from .archives import UnsupportedArchiveError, extract_from_archive_with_skips
@@ -897,8 +898,12 @@ class FinancialYearAdmin(admin.ModelAdmin):
         with connections["default"].cursor() as cursor:
             backup_bytes = cursor.connection.serialize()
 
+        # Generate timestamp in the format: YYYY-MM-DD.HH.MM.SS
+        timestamp = timezone.now().strftime("%Y-%m-%d.%H.%M.%S")
+        filename = f"db-backup.{timestamp}.sqlite3"
+
         response = HttpResponse(backup_bytes, content_type="application/x-sqlite3")
-        response["Content-Disposition"] = 'attachment; filename="db-backup.sqlite3"'
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
 
     # ------------------------------------------------------------------
