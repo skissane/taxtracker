@@ -246,7 +246,10 @@ class AdminViewTests(TestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/x-sqlite3")
-        self.assertIn("db-backup.sqlite3", response["Content-Disposition"])
+        self.assertRegex(
+            response["Content-Disposition"],
+            r"db-backup\.\d{4}-\d{2}-\d{2}\.\d{2}\.\d{2}\.\d{2}\.sqlite3",
+        )
         # Content should be a valid SQLite database (starts with the magic header)
         self.assertTrue(response.content[:16].startswith(b"SQLite format 3\x00"))
 
@@ -310,6 +313,49 @@ class AdminViewTests(TestCase):
             html=False,
         )
         self.assertContains(response, "Financial year FY2026 not found.")
+
+    def test_item_change_view_links_to_equivalent_prev_and_next_items(self):
+        prev_fy = FinancialYear.objects.create(year=2023)
+        next_fy = FinancialYear.objects.create(year=2025)
+
+        prev_root = Item.objects.create(year=prev_fy, title="Parent", order=1)
+        prev_item = Item.objects.create(
+            year=prev_fy,
+            parent=prev_root,
+            title="Test Item",
+            order=1,
+        )
+
+        current_root = Item.objects.create(year=self.fy, title="Parent", order=1)
+        current_item = Item.objects.create(
+            year=self.fy,
+            parent=current_root,
+            title="Test Item",
+            order=1,
+        )
+
+        next_root = Item.objects.create(year=next_fy, title="Parent", order=1)
+        next_item = Item.objects.create(
+            year=next_fy,
+            parent=next_root,
+            title="Test Item",
+            order=1,
+        )
+
+        url = reverse("admin:tracker_item_change", args=[current_item.pk])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            reverse("admin:tracker_item_change", args=[prev_item.pk]),
+        )
+        self.assertContains(response, "← Previous Year (FY2023)")
+        self.assertContains(
+            response,
+            reverse("admin:tracker_item_change", args=[next_item.pk]),
+        )
+        self.assertContains(response, "Next Year (FY2025) →")
 
     def test_reassign_attachments_view_moves_selected(self):
         fy2025 = FinancialYear.objects.create(year=2025)

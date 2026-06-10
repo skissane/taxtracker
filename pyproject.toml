@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = "~=3.14.0"
 dependencies = [
     "django==6.0.6",
+    "pdfkit>=1.0.0",
 ]
 
 [dependency-groups]
@@ -30,3 +31,4 @@ ignore = []
 profile = "django"
 indent = 2
 blank_line_after_tag = "load,extends"
+ignore = "H030,H031"
