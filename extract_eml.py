@@ -75,7 +75,7 @@ def get_unique_filename(filename: str, used_filenames: dict[str, int]) -> str:
     return f"{stem}_{index}"
 
 
-def eml_to_zip(eml_file_path: str, output_zip_path: str):
+def eml_to_zip(eml_file_path: str, output_zip_path: str, prefix: str = "") -> None:
     """
     Extracts all attachments from a .eml file and writes them directly into a .zip file.
     """
@@ -105,6 +105,9 @@ def eml_to_zip(eml_file_path: str, output_zip_path: str):
                 else:
                     # Not an attachment, skip
                     continue
+
+            if prefix:
+                filename = f"{prefix}-{filename}"
 
             filename = f"{get_email_date_prefix(part)}{filename}"
             file_ext = filename.rsplit(".")[-1] if "." in filename else ""
@@ -139,8 +142,14 @@ def main() -> None:
     )
     parser.add_argument("eml_file", help="Path to the .eml file to process")
     parser.add_argument("output_zip", help="Path to the output .zip file")
+    parser.add_argument(
+        "--prefix",
+        type=str,
+        default="",
+        help="Optional prefix for all extracted filenames",
+    )
     args = parser.parse_args()
-    eml_to_zip(args.eml_file, args.output_zip)
+    eml_to_zip(args.eml_file, args.output_zip, args.prefix)
 
 
 if __name__ == "__main__":
