@@ -2,12 +2,13 @@
 """Process ISO 8601 dates, sort, deduplicate, and group by Australian Financial Year."""
 
 import argparse
+import re
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
 
 
-def get_financial_year(date_obj):
+def get_financial_year(date_obj: datetime) -> int:
     """
     Returns the Australian financial year for a given date.
     The Australian FY ends on June 30.
@@ -28,6 +29,16 @@ def main():
         default=0,
         help="Number of days to add to each input date (default: 0)",
     )
+    parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="Only show per-financial year summary",
+    )
+    parser.add_argument(
+        "--year",
+        type=int,
+        help="Only show dates from given financial year (e.g., 2024 for FY2024)",
+    )
     args = parser.parse_args()
 
     processed_dates: set[datetime] = set()
@@ -41,15 +52,22 @@ def main():
             continue
 
         try:
-            # Validate strict ISO 8601 format (YYYY-MM-DD)
+            # First, attempt to validate strict ISO 8601 format (YYYY-MM-DD)
             parsed_date = datetime.strptime(clean_line, "%Y-%m-%d").date()
         except ValueError:
-            print(
-                f"Error: Invalid syntax on line {line_num}: {clean_line!r}",
-                file=sys.stderr,
-            )
-            print("Expected format is strictly YYYY-MM-DD", file=sys.stderr)
-            sys.exit(1)
+            try:
+                # If ISO 8601 fails, try 'November 20th 2024' format.
+                # Use regex to safely strip ordinal suffixes
+                clean_line_no_suffix = re.sub(r"(?<=\d)(st|nd|rd|th)\b", "", clean_line)
+
+                # Parse the cleaned string (e.g., 'November 20 2024')
+                parsed_date = datetime.strptime(clean_line_no_suffix, "%B %d %Y").date()
+            except ValueError:
+                print(
+                    f"ERROR: Unexpected date format on line {line_num}: {clean_line!r}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
         # Apply the --add-days offset
         adjusted_date = parsed_date + timedelta(days=args.add_days)
@@ -70,12 +88,16 @@ def main():
     # Output in GitHub-Flavored Markdown
     first_group = True
     for fy in sorted(fy_groups.keys()):
+        if args.year and fy != args.year:
+            continue  # Skip financial years that don't match the --year filter
         if not first_group:
             print()  # Add a blank line between tables for cleaner markdown rendering
         first_group = False
 
         fy_days = len(fy_groups[fy])
         print(f"# FY{fy} ({fy_days} date{'s' if fy_days != 1 else ''})")
+        if args.summary:
+            continue  # Skip detailed tables if only summary is requested
         print()
         print("| Date       | Day |")
         print("|------------|-----|")
