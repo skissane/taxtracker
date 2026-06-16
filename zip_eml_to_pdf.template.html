@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+
+    .header-box {
+      border-bottom: 2px solid #ccc;
+      padding-bottom: 15px;
+      margin-bottom: 25px;
+      background-color: #f9f9f9;
+      padding: 15px;
+      border-radius: 5px;
+    }
+
+    .header-item {
+      margin: 5px 0;
+      font-size: 14px;
+    }
+
+    .email-body {
+      margin-top: 20px;
+    }
+    </style>
+    <title>${subject} (${date})</title>
+  </head>
+  <body>
+    <div class="header-box">
+      <div class="header-item"><strong>From:</strong> ${sender}</div>
+      <div class="header-item"><strong>To:</strong> ${recipient}</div>
+      <div class="header-item"><strong>Date:</strong> ${date}</div>
+      <div class="header-item"><strong>Subject:</strong> ${subject}</div>
+    </div>
+    <div class="email-body">${body}</div>
+  </body>
+</html>

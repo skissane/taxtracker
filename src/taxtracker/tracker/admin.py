@@ -12,7 +12,9 @@ from django.db import connections, transaction
 from django.forms import BaseInlineFormSet
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.response import TemplateResponse
 from django.urls import path, reverse
+from django.utils import timezone
 from django.utils.html import format_html
 
 from .archives import UnsupportedArchiveError, extract_from_archive_with_skips
@@ -294,14 +296,31 @@ class ItemAdmin(admin.ModelAdmin):
             obj.delete()
 
     def change_view(self, request, object_id, form_url="", extra_context=None):
-        extra_context = extra_context or {}
-        extra_context["import_archive_url"] = reverse(
+        response = super().change_view(request, object_id, form_url, extra_context)
+        if not isinstance(response, TemplateResponse):
+            return response
+
+        item = response.context_data.get("original")
+        if item is None:
+            return response
+
+        path_signature = _item_path_signature(item)
+        prev_fy = FinancialYear.objects.filter(year=item.year.year - 1).first()
+        next_fy = FinancialYear.objects.filter(year=item.year.year + 1).first()
+
+        response.context_data["import_archive_url"] = reverse(
             "admin:tracker_item_import_archive", args=[object_id]
         )
-        extra_context["reassign_attachments_url"] = reverse(
+        response.context_data["reassign_attachments_url"] = reverse(
             "admin:tracker_item_reassign_attachments", args=[object_id]
         )
-        return super().change_view(request, object_id, form_url, extra_context)
+        response.context_data["prev_item"] = (
+            _find_equivalent_item(path_signature, prev_fy) if prev_fy else None
+        )
+        response.context_data["next_item"] = (
+            _find_equivalent_item(path_signature, next_fy) if next_fy else None
+        )
+        return response
 
     # ------------------------------------------------------------------
     # Import archive view
@@ -887,8 +906,12 @@ class FinancialYearAdmin(admin.ModelAdmin):
         with connections["default"].cursor() as cursor:
             backup_bytes = cursor.connection.serialize()
 
+        # Generate timestamp in the format: YYYY-MM-DD.HH.MM.SS
+        timestamp = timezone.now().strftime("%Y-%m-%d.%H.%M.%S")
+        filename = f"db-backup.{timestamp}.sqlite3"
+
         response = HttpResponse(backup_bytes, content_type="application/x-sqlite3")
-        response["Content-Disposition"] = 'attachment; filename="db-backup.sqlite3"'
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
 
     # ------------------------------------------------------------------
