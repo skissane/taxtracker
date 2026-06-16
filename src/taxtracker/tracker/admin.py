@@ -12,6 +12,7 @@ from django.db import connections, transaction
 from django.forms import BaseInlineFormSet
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
@@ -296,7 +297,7 @@ class ItemAdmin(admin.ModelAdmin):
 
     def change_view(self, request, object_id, form_url="", extra_context=None):
         response = super().change_view(request, object_id, form_url, extra_context)
-        if not hasattr(response, "context_data"):
+        if not isinstance(response, TemplateResponse):
             return response
 
         item = response.context_data.get("original")
