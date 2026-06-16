@@ -295,24 +295,31 @@ class ItemAdmin(admin.ModelAdmin):
             obj.delete()
 
     def change_view(self, request, object_id, form_url="", extra_context=None):
-        extra_context = extra_context or {}
-        item = get_object_or_404(Item.objects.select_related("year"), pk=object_id)
+        response = super().change_view(request, object_id, form_url, extra_context)
+        if not hasattr(response, "context_data"):
+            return response
+
+        item = response.context_data.get("original")
+        if item is None:
+            return response
+
         path_signature = _item_path_signature(item)
         prev_fy = FinancialYear.objects.filter(year=item.year.year - 1).first()
         next_fy = FinancialYear.objects.filter(year=item.year.year + 1).first()
 
-        prev_item = _find_equivalent_item(path_signature, prev_fy) if prev_fy else None
-        next_item = _find_equivalent_item(path_signature, next_fy) if next_fy else None
-
-        extra_context["import_archive_url"] = reverse(
+        response.context_data["import_archive_url"] = reverse(
             "admin:tracker_item_import_archive", args=[object_id]
         )
-        extra_context["reassign_attachments_url"] = reverse(
+        response.context_data["reassign_attachments_url"] = reverse(
             "admin:tracker_item_reassign_attachments", args=[object_id]
         )
-        extra_context["prev_item"] = prev_item
-        extra_context["next_item"] = next_item
-        return super().change_view(request, object_id, form_url, extra_context)
+        response.context_data["prev_item"] = (
+            _find_equivalent_item(path_signature, prev_fy) if prev_fy else None
+        )
+        response.context_data["next_item"] = (
+            _find_equivalent_item(path_signature, next_fy) if next_fy else None
+        )
+        return response
 
     # ------------------------------------------------------------------
     # Import archive view

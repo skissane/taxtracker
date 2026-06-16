@@ -357,6 +357,11 @@ class AdminViewTests(TestCase):
         )
         self.assertContains(response, "Next Year (FY2025) →")
 
+    def test_item_change_view_missing_object_uses_admin_redirect(self):
+        url = reverse("admin:tracker_item_change", args=[999999])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+
     def test_reassign_attachments_view_moves_selected(self):
         fy2025 = FinancialYear.objects.create(year=2025)
         fy2023 = FinancialYear.objects.create(year=2023)

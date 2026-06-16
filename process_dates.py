@@ -5,10 +5,10 @@ import argparse
 import re
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 
-def get_financial_year(date_obj: datetime) -> int:
+def get_financial_year(date_obj: date) -> int:
     """
     Returns the Australian financial year for a given date.
     The Australian FY ends on June 30.
@@ -41,7 +41,7 @@ def main():
     )
     args = parser.parse_args()
 
-    processed_dates: set[datetime] = set()
+    processed_dates: set[date] = set()
 
     # Read and parse dates from stdin
     for line_num, line in enumerate(sys.stdin, 1):
@@ -77,10 +77,10 @@ def main():
         return
 
     # Sort dates chronologically (deduplication is already handled by the set)
-    sorted_dates: list[datetime] = sorted(processed_dates)
+    sorted_dates: list[date] = sorted(processed_dates)
 
     # Group by Australian Financial Year
-    fy_groups: defaultdict[int, list[datetime]] = defaultdict(list)
+    fy_groups: defaultdict[int, list[date]] = defaultdict(list)
     for d in sorted_dates:
         fy = get_financial_year(d)
         fy_groups[fy].append(d)

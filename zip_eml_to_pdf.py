@@ -27,7 +27,7 @@ def main():
     print(f"Writing to: {args.output_zip}")
 
     # Options to suppress command line output from wkhtmltopdf
-    options = {"quiet": "", "enable-local-file-access": ""}
+    options = {"quiet": ""}
 
     # 2. Open both ZIP files simultaneously (read one, write to the other)
     with (
@@ -55,18 +55,21 @@ def main():
 
             # 4. Extract the email body (Targeting HTML)
             body = ""
+            body_is_html = False
             if msg.is_multipart():
                 for part in msg.walk():
                     content_type = part.get_content_type()
                     # Grab HTML if available
                     if content_type == "text/html":
                         body = part.get_content()
+                        body_is_html = True
                         break
                     # Fallback to plain text if no HTML exists
                     elif content_type == "text/plain" and not body:
                         body = part.get_content()
             else:
                 body = msg.get_content()
+                body_is_html = msg.get_content_type() == "text/html"
 
             # 5. Build a clean HTML structure combining headers and body
             html_template = (
@@ -77,7 +80,7 @@ def main():
                 sender=escape(sender),
                 recipient=escape(recipient),
                 date=escape(date),
-                body=body,
+                body=body if body_is_html else f"<pre>{escape(body)}</pre>",
             )
 
             # 6. Convert the combined HTML into PDF bytes
