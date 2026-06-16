@@ -241,6 +241,44 @@ class AdminViewTests(TestCase):
         with zipfile.ZipFile(buf) as zf:
             self.assertIn("index.md", zf.namelist())
 
+    def test_download_zip_spaces_replaced_with_underscores(self):
+        """Spaces in item titles must become underscores in ZIP paths."""
+        item = Item.objects.create(year=self.fy, title="My Item With Spaces", order=2)
+        Attachment.objects.create(
+            item=item,
+            title="doc.pdf",
+            file=ContentFile(b"data", name="doc.pdf"),
+        )
+        url = reverse("admin:tracker_financialyear_download_zip", args=[self.fy.pk])
+        response = self.client.get(url)
+        buf = io.BytesIO(response.content)
+        with zipfile.ZipFile(buf) as zf:
+            names = zf.namelist()
+            # No path component should contain a space.
+            for name in names:
+                self.assertNotIn(" ", name, f"Space found in ZIP path: {name!r}")
+            # The item's folder should use underscores.
+            self.assertTrue(
+                any("My_Item_With_Spaces" in n for n in names),
+                f"Expected underscore path not found in {names}",
+            )
+
+    def test_download_zip_notes_only_item_in_index(self):
+        """Items with notes but no attachments must still appear in index.md."""
+        Item.objects.create(
+            year=self.fy,
+            title="Notes Only Item",
+            notes="This is an important note.",
+            order=2,
+        )
+        url = reverse("admin:tracker_financialyear_download_zip", args=[self.fy.pk])
+        response = self.client.get(url)
+        buf = io.BytesIO(response.content)
+        with zipfile.ZipFile(buf) as zf:
+            index_content = zf.read("index.md").decode()
+        self.assertIn("Notes_Only_Item", index_content)
+        self.assertIn("This is an important note.", index_content)
+
     def test_download_db_backup_view(self):
         url = reverse("admin:tracker_financialyear_download_db_backup")
         response = self.client.get(url)

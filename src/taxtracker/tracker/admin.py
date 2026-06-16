@@ -625,10 +625,11 @@ def _build_zip(fy):
         """Sanitize a title for safe use as a ZIP path component.
 
         Prevents Zip Slip by replacing path separators and eliminating ``..``
-        traversal sequences.
+        traversal sequences.  Spaces are replaced with underscores.
         """
         safe = title.replace("/", "_").replace("\\", "_")
-        safe = safe.strip(". ")
+        safe = safe.replace(" ", "_")
+        safe = safe.strip("._")
         safe = re.sub(r"\.{2,}", ".", safe)
         return safe or "_"
 
@@ -654,7 +655,7 @@ def _build_zip(fy):
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for item in items:
             attachments = list(item.attachments.all())
-            if not attachments:
+            if not attachments and not item.notes:
                 continue
             fp = folder_path(item)
             index_lines.append(f"## {fp}\n")
