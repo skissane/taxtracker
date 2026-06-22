@@ -13,7 +13,10 @@
   {% if error %}
     <p class="errornote">{{ error }}</p>
   {% endif %}
-  <p>Select the financial years to include in the ZIP. Each year will appear as a top-level directory.</p>
+  <p>
+    Select the financial years to include. Use <em>Download ZIP</em> to get the full archive,
+    or <em>View Index (Markdown)</em> to preview the combined attachment index in a new tab.
+  </p>
   <form method="post">
     {% csrf_token %}
     <ul>
@@ -29,7 +32,16 @@
       {% endfor %}
     </ul>
     <div>
-      <input type="submit" value="Download ZIP" class="button default">
+      <button type="submit"
+              name="action"
+              value="zip"
+              onclick="this.form.target=''"
+              class="button default">Download ZIP</button>
+      <button type="submit"
+              name="action"
+              value="view_index"
+              onclick="this.form.target='_blank'"
+              class="button">View Index (Markdown)</button>
       <a class="button cancel"
          href="{% url 'admin:tracker_financialyear_changelist' %}">Cancel</a>
     </div>

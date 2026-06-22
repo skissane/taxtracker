@@ -713,6 +713,59 @@ def _build_multi_zip(fys):
     return buf
 
 
+def _build_fy_index_md(fy, prefix=""):
+    """Return the index.md content string for one FinancialYear (no ZIP writing)."""
+    items = list(
+        fy.items.select_related("parent")
+        .prefetch_related("attachments")
+        .order_by("order", "title")
+    )
+    item_map = {item.pk: item for item in items}
+
+    index_lines = [
+        f"# {fy} – Attachment Index\n",
+        f"**Period:** {fy.start_date} to {fy.end_date}\n",
+        f"**Lodgement date:** {fy.effective_lodgement_date}"
+        + (" (default)" if fy.lodgement_date_override is None else " (agent override)")
+        + "\n\n",
+    ]
+
+    for item in items:
+        attachments = list(item.attachments.all())
+        if not attachments and not item.notes:
+            continue
+        fp = _folder_path(item, item_map)
+        index_lines.append(f"## {fp}\n")
+        if item.notes:
+            adjusted_notes = _adjust_notes_headings(item.notes, 2)
+            index_lines.append(f"{adjusted_notes}\n\n")
+        for attachment in attachments:
+            safe_name = attachment.file.name.split("/")[-1]
+            zip_path = f"{prefix}{fp}/{safe_name}"
+            try:
+                attachment.file.open("rb").close()
+            except OSError, DBStoredFile.DoesNotExist, ValueError:
+                safe_name = f"[MISSING] {safe_name}"
+                zip_path = None
+            index_lines.append(f"- **{attachment.title}**")
+            if attachment.file_type:
+                index_lines[-1] += f" ({attachment.file_type})"
+            if zip_path:
+                index_lines[-1] += f" → `{zip_path}`"
+            index_lines[-1] += "\n"
+            if attachment.notes:
+                index_lines.append(f"  {attachment.notes}\n")
+        index_lines.append("\n")
+
+    return "".join(index_lines)
+
+
+def _build_multi_index_md(fys):
+    """Concatenate index.md content for each FY, separated by horizontal rules."""
+    parts = [_build_fy_index_md(fy, prefix=f"{fy}/") for fy in fys]
+    return "\n\n---\n\n".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # FileType Admin
 # ---------------------------------------------------------------------------
@@ -937,6 +990,11 @@ class FinancialYearAdmin(admin.ModelAdmin):
             )
             if not selected_fys:
                 error = "Please select at least one financial year."
+            elif request.POST.get("action") == "view_index":
+                content = _build_multi_index_md(selected_fys)
+                return HttpResponse(
+                    content, content_type="text/markdown; charset=utf-8"
+                )
             else:
                 buf = _build_multi_zip(selected_fys)
                 years = sorted(fy.year for fy in selected_fys)
