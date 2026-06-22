@@ -1,0 +1,49 @@
+{% extends "admin/base_site.html" %}
+
+{% load i18n %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> ›
+    <a href="{% url 'admin:tracker_financialyear_changelist' %}">Financial Years</a> ›
+    Download Multi-Year ZIP
+  </div>
+{% endblock breadcrumbs %}
+{% block content %}
+  {% if error %}
+    <p class="errornote">{{ error }}</p>
+  {% endif %}
+  <p>
+    Select the financial years to include. Use <em>Download ZIP</em> to get the full archive,
+    or <em>View Index (Markdown)</em> to preview the combined attachment index in a new tab.
+  </p>
+  <form method="post">
+    {% csrf_token %}
+    <ul>
+      {% for fy in all_fys %}
+        <li>
+          <label>
+            <input type="checkbox" name="fy_ids" value="{{ fy.pk }}" checked>
+            {{ fy }}
+          </label>
+        </li>
+      {% empty %}
+        <li>No financial years exist yet.</li>
+      {% endfor %}
+    </ul>
+    <div>
+      <button type="submit"
+              name="action"
+              value="zip"
+              onclick="this.form.target=''"
+              class="button default">Download ZIP</button>
+      <button type="submit"
+              name="action"
+              value="view_index"
+              onclick="this.form.target='_blank'"
+              class="button">View Index (Markdown)</button>
+      <a class="button cancel"
+         href="{% url 'admin:tracker_financialyear_changelist' %}">Cancel</a>
+    </div>
+  </form>
+{% endblock content %}
