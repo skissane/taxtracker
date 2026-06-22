@@ -651,6 +651,7 @@ def _write_fy_to_zip(zf, fy, prefix=""):
         .order_by("order", "title")
     )
     item_map = {item.pk: item for item in items}
+    items.sort(key=lambda item: _folder_path(item, item_map).lower())
 
     index_lines = [
         f"# {fy} – Attachment Index\n",
@@ -724,6 +725,7 @@ def _build_fy_index_md(fy, prefix=""):
         .order_by("order", "title")
     )
     item_map = {item.pk: item for item in items}
+    items.sort(key=lambda item: _folder_path(item, item_map).lower())
 
     index_lines = [
         f"# {fy} – Attachment Index\n",
