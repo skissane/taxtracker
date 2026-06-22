@@ -654,7 +654,8 @@ def _build_fy_index_md(fy, prefix="", zf=None):
         .order_by("order", "title")
     )
     item_map = {item.pk: item for item in items}
-    items.sort(key=lambda item: _folder_path(item, item_map).lower())
+    folder_paths = {item.pk: _folder_path(item, item_map) for item in items}
+    items.sort(key=lambda item: folder_paths[item.pk].lower())
 
     index_lines = [
         f"# {fy} – Attachment Index\n",
@@ -668,7 +669,7 @@ def _build_fy_index_md(fy, prefix="", zf=None):
         attachments = list(item.attachments.all())
         if not attachments and not item.notes:
             continue
-        fp = _folder_path(item, item_map)
+        fp = folder_paths[item.pk]
         index_lines.append(f"## {fp}\n")
         for attachment in attachments:
             safe_name = _safe_component(attachment.file.name.split("/")[-1])
