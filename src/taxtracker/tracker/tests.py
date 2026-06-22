@@ -12,6 +12,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from .admin import _adjust_notes_headings
 from .archives import (
     UnsupportedArchiveError,
     extract_from_archive,
@@ -1442,6 +1443,98 @@ class FileTypePrimaryValidationTests(TestCase):
             "A file type must have at least one file extension",
         )
         self.assertFalse(FileType.objects.filter(short_name="TST").exists())
+
+
+# ---------------------------------------------------------------------------
+# _adjust_notes_headings unit tests
+# ---------------------------------------------------------------------------
+
+
+class AdjustNotesHeadingsTests(TestCase):
+    def test_no_headings_unchanged(self):
+        notes = "Just some plain text.\nNo headings here."
+        self.assertEqual(_adjust_notes_headings(notes, 2), notes)
+
+    def test_single_h1_becomes_h3(self):
+        notes = "# My Heading\nSome text."
+        result = _adjust_notes_headings(notes, 2)
+        self.assertIn("### My Heading", result)
+        self.assertNotRegex(result, r"(?m)^# My Heading")
+
+    def test_min_level_not_one(self):
+        # Min is ##, so ## → ### and ### → ####
+        notes = "## Section\n### Subsection"
+        result = _adjust_notes_headings(notes, 2)
+        self.assertIn("### Section", result)
+        self.assertIn("#### Subsection", result)
+
+    def test_mixed_levels_scaled_correctly(self):
+        notes = "# Top\n## Second\n### Third"
+        result = _adjust_notes_headings(notes, 2)
+        self.assertIn("### Top", result)
+        self.assertIn("#### Second", result)
+        self.assertIn("##### Third", result)
+
+    def test_heading_capped_at_h6(self):
+        # item_heading_level=2 → target_base=3; min=1, so h5 → h5-1+3=h7 → capped h6
+        notes = "# H1\n##### H5"
+        result = _adjust_notes_headings(notes, 2)
+        self.assertIn("### H1", result)
+        self.assertIn("###### H5", result)
+
+    def test_body_text_preserved(self):
+        notes = "# Heading\n\nSome **bold** text.\n\n- item"
+        result = _adjust_notes_headings(notes, 2)
+        self.assertIn("Some **bold** text.", result)
+        self.assertIn("- item", result)
+
+    def test_hash_in_body_not_treated_as_heading(self):
+        # Only lines where # is at the start are headings
+        notes = "# Real heading\nThis has a # in the middle"
+        result = _adjust_notes_headings(notes, 2)
+        self.assertIn("### Real heading", result)
+        self.assertIn("This has a # in the middle", result)
+
+
+class ZipIndexHeadingAdjustmentTests(TestCase):
+    """Integration: headings in item notes are re-levelled in the ZIP index."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin", "admin@example.com", "pass")
+        self.client = Client()
+        self.client.login(username="admin", password="pass")
+        self.fy = FinancialYear.objects.create(year=2024)
+
+    def _get_index(self):
+        url = reverse("admin:tracker_financialyear_download_zip", args=[self.fy.pk])
+        response = self.client.get(url)
+        buf = io.BytesIO(response.content)
+        with zipfile.ZipFile(buf) as zf:
+            return zf.read("index.md").decode()
+
+    def test_h1_in_notes_becomes_h3_in_index(self):
+        Item.objects.create(
+            year=self.fy,
+            title="Coworking",
+            notes="Intro text.\n\n# FY2024 (2 dates)\n\nSome detail.",
+            order=1,
+        )
+        index = self._get_index()
+        self.assertIn("### FY2024 (2 dates)", index)
+        # The raw # heading must not appear at level 1 or 2
+        self.assertNotIn("\n# FY2024", index)
+        self.assertNotIn("\n## FY2024", index)
+
+    def test_h2_min_in_notes_becomes_h3_in_index(self):
+        Item.objects.create(
+            year=self.fy,
+            title="Section",
+            notes="## Overview\n### Detail",
+            order=1,
+        )
+        index = self._get_index()
+        self.assertIn("### Overview", index)
+        self.assertIn("#### Detail", index)
 
 
 # ---------------------------------------------------------------------------

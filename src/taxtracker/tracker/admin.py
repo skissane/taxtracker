@@ -602,6 +602,22 @@ class AttachmentAdmin(admin.ModelAdmin):
 # ---------------------------------------------------------------------------
 
 
+def _adjust_notes_headings(notes: str, item_heading_level: int) -> str:
+    """Re-level ATX headings in *notes* so shallowest becomes item_heading_level+1."""
+    atx_re = re.compile(r"^(#{1,6}) (.+)", re.MULTILINE)
+    matches = list(atx_re.finditer(notes))
+    if not matches:
+        return notes
+    min_level = min(len(m.group(1)) for m in matches)
+    target_base = item_heading_level + 1
+
+    def _reheader(m):
+        new_level = len(m.group(1)) - min_level + target_base
+        return "#" * min(new_level, 6) + " " + m.group(2)
+
+    return atx_re.sub(_reheader, notes)
+
+
 def _build_zip(fy):
     """Build a ZIP file for all attachments of a FinancialYear.
 
@@ -660,7 +676,8 @@ def _build_zip(fy):
             fp = folder_path(item)
             index_lines.append(f"## {fp}\n")
             if item.notes:
-                index_lines.append(f"{item.notes}\n\n")
+                adjusted_notes = _adjust_notes_headings(item.notes, 2)
+                index_lines.append(f"{adjusted_notes}\n\n")
             for attachment in attachments:
                 # Sanitise filename.
                 safe_name = attachment.file.name.split("/")[-1]
