@@ -618,47 +618,39 @@ def _adjust_notes_headings(notes: str, item_heading_level: int) -> str:
     return atx_re.sub(_reheader, notes)
 
 
-def _build_zip(fy):
-    """Build a ZIP file for all attachments of a FinancialYear.
+def _safe_component(title):
+    """Sanitize a title for safe use as a ZIP path component.
 
-    The ZIP contains:
-    - A folder hierarchy mirroring the item hierarchy.
-    - An ``index.md`` at the root summarising everything.
+    Prevents Zip Slip by replacing path separators and eliminating ``..``
+    traversal sequences.  Spaces are replaced with underscores.
     """
-    buf = io.BytesIO()
+    safe = title.replace("/", "_").replace("\\", "_")
+    safe = safe.replace(" ", "_")
+    safe = safe.strip("._")
+    safe = re.sub(r"\.{2,}", ".", safe)
+    return safe or "_"
 
-    # Pre-fetch all items and attachments for this year.
+
+def _folder_path(item, item_map):
+    """Return a POSIX path string representing the item hierarchy."""
+    parts = []
+    current = item
+    while True:
+        parts.insert(0, _safe_component(current.title))
+        if current.parent_id is None:
+            break
+        current = item_map.get(current.parent_id, current.parent)
+    return "/".join(parts)
+
+
+def _write_fy_to_zip(zf, fy, prefix=""):
+    """Write one FY's files into an open ZipFile, placing paths under *prefix*."""
     items = list(
         fy.items.select_related("parent")
         .prefetch_related("attachments")
         .order_by("order", "title")
     )
-
-    # Build an id → item dict for quick lookup.
     item_map = {item.pk: item for item in items}
-
-    def safe_component(title):
-        """Sanitize a title for safe use as a ZIP path component.
-
-        Prevents Zip Slip by replacing path separators and eliminating ``..``
-        traversal sequences.  Spaces are replaced with underscores.
-        """
-        safe = title.replace("/", "_").replace("\\", "_")
-        safe = safe.replace(" ", "_")
-        safe = safe.strip("._")
-        safe = re.sub(r"\.{2,}", ".", safe)
-        return safe or "_"
-
-    def folder_path(item):
-        """Return a POSIX path string representing the item hierarchy."""
-        parts = []
-        current = item
-        while True:
-            parts.insert(0, safe_component(current.title))
-            if current.parent_id is None:
-                break
-            current = item_map.get(current.parent_id, current.parent)
-        return "/".join(parts)
 
     index_lines = [
         f"# {fy} – Attachment Index\n",
@@ -668,41 +660,55 @@ def _build_zip(fy):
         + "\n\n",
     ]
 
+    for item in items:
+        attachments = list(item.attachments.all())
+        if not attachments and not item.notes:
+            continue
+        fp = _folder_path(item, item_map)
+        index_lines.append(f"## {fp}\n")
+        if item.notes:
+            adjusted_notes = _adjust_notes_headings(item.notes, 2)
+            index_lines.append(f"{adjusted_notes}\n\n")
+        for attachment in attachments:
+            safe_name = attachment.file.name.split("/")[-1]
+            zip_path = f"{prefix}{fp}/{safe_name}"
+            try:
+                with attachment.file.open("rb") as fh:
+                    zf.writestr(zip_path, fh.read())
+            except OSError, DBStoredFile.DoesNotExist, ValueError:
+                # File missing or stored blob reference is invalid/corrupt –
+                # skip but record in index.
+                safe_name = f"[MISSING] {safe_name}"
+                zip_path = None
+
+            index_lines.append(f"- **{attachment.title}**")
+            if attachment.file_type:
+                index_lines[-1] += f" ({attachment.file_type})"
+            if zip_path:
+                index_lines[-1] += f" → `{zip_path}`"
+            index_lines[-1] += "\n"
+            if attachment.notes:
+                index_lines.append(f"  {attachment.notes}\n")
+        index_lines.append("\n")
+
+    zf.writestr(f"{prefix}index.md", "".join(index_lines))
+
+
+def _build_zip(fy):
+    """Build a ZIP file for all attachments of a FinancialYear."""
+    buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for item in items:
-            attachments = list(item.attachments.all())
-            if not attachments and not item.notes:
-                continue
-            fp = folder_path(item)
-            index_lines.append(f"## {fp}\n")
-            if item.notes:
-                adjusted_notes = _adjust_notes_headings(item.notes, 2)
-                index_lines.append(f"{adjusted_notes}\n\n")
-            for attachment in attachments:
-                # Sanitise filename.
-                safe_name = attachment.file.name.split("/")[-1]
-                zip_path = f"{fp}/{safe_name}"
-                try:
-                    with attachment.file.open("rb") as fh:
-                        zf.writestr(zip_path, fh.read())
-                except OSError, DBStoredFile.DoesNotExist, ValueError:
-                    # File missing or stored blob reference is invalid/corrupt –
-                    # skip but record in index.
-                    safe_name = f"[MISSING] {safe_name}"
-                    zip_path = None
+        _write_fy_to_zip(zf, fy)
+    buf.seek(0)
+    return buf
 
-                index_lines.append(f"- **{attachment.title}**")
-                if attachment.file_type:
-                    index_lines[-1] += f" ({attachment.file_type})"
-                if zip_path:
-                    index_lines[-1] += f" → `{zip_path}`"
-                index_lines[-1] += "\n"
-                if attachment.notes:
-                    index_lines.append(f"  {attachment.notes}\n")
-            index_lines.append("\n")
 
-        zf.writestr("index.md", "".join(index_lines))
-
+def _build_multi_zip(fys):
+    """Build a ZIP with each FinancialYear under its own top-level directory."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fy in fys:
+            _write_fy_to_zip(zf, fy, prefix=f"{fy}/")
     buf.seek(0)
     return buf
 
@@ -798,6 +804,11 @@ class FinancialYearAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.download_db_backup_view),
                 name="tracker_financialyear_download_db_backup",
             ),
+            path(
+                "download-multi-zip/",
+                self.admin_site.admin_view(self.download_multi_zip_view),
+                name="tracker_financialyear_download_multi_zip",
+            ),
         ]
         return custom + super().get_urls()
 
@@ -846,6 +857,9 @@ class FinancialYearAdmin(admin.ModelAdmin):
         extra_context = extra_context or {}
         extra_context["download_db_backup_url"] = reverse(
             "admin:tracker_financialyear_download_db_backup"
+        )
+        extra_context["download_multi_zip_url"] = reverse(
+            "admin:tracker_financialyear_download_multi_zip"
         )
         return super().changelist_view(request, extra_context)
 
@@ -907,6 +921,45 @@ class FinancialYearAdmin(admin.ModelAdmin):
         response = HttpResponse(buf.getvalue(), content_type="application/zip")
         response["Content-Disposition"] = f'attachment; filename="{fy}_attachments.zip"'
         return response
+
+    # ------------------------------------------------------------------
+    # Multi-year ZIP download view
+    # ------------------------------------------------------------------
+
+    def download_multi_zip_view(self, request):
+        all_fys = list(FinancialYear.objects.order_by("-year"))
+        error = None
+
+        if request.method == "POST":
+            selected_pks = request.POST.getlist("fy_ids")
+            selected_fys = list(
+                FinancialYear.objects.filter(pk__in=selected_pks).order_by("-year")
+            )
+            if not selected_fys:
+                error = "Please select at least one financial year."
+            else:
+                buf = _build_multi_zip(selected_fys)
+                years = sorted(fy.year for fy in selected_fys)
+                if len(years) == 1:
+                    fname = f"FY{years[0]}_attachments.zip"
+                else:
+                    fname = f"FY{years[0]}-FY{years[-1]}_multi_attachments.zip"
+                response = HttpResponse(buf.getvalue(), content_type="application/zip")
+                response["Content-Disposition"] = f'attachment; filename="{fname}"'
+                return response
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Download Multi-Year ZIP",
+            "all_fys": all_fys,
+            "error": error,
+            "opts": self.model._meta,
+        }
+        return render(
+            request,
+            "admin/tracker/financialyear/download_multi_zip.html",
+            context,
+        )
 
     # ------------------------------------------------------------------
     # DB backup download view
