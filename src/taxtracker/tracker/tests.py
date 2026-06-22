@@ -291,6 +291,47 @@ class AdminViewTests(TestCase):
         self.assertIn("Notes_Only_Item", index_content)
         self.assertIn("This is an important note.", index_content)
 
+    def test_download_zip_index_sections_sorted_by_folder_path(self):
+        parent = Item.objects.create(year=self.fy, title="Brokerage accounts", order=2)
+        child = Item.objects.create(
+            year=self.fy,
+            parent=parent,
+            title="AAA Fidelity",
+            order=1,
+        )
+        zeta = Item.objects.create(year=self.fy, title="Zeta top", order=1)
+        Attachment.objects.create(
+            item=parent,
+            title="parent.pdf",
+            file=ContentFile(b"parent", name="parent.pdf"),
+        )
+        Attachment.objects.create(
+            item=child,
+            title="child.pdf",
+            file=ContentFile(b"child", name="child.pdf"),
+        )
+        Attachment.objects.create(
+            item=zeta,
+            title="zeta.pdf",
+            file=ContentFile(b"zeta", name="zeta.pdf"),
+        )
+
+        url = reverse("admin:tracker_financialyear_download_zip", args=[self.fy.pk])
+        response = self.client.get(url)
+        buf = io.BytesIO(response.content)
+        with zipfile.ZipFile(buf) as zf:
+            index_content = zf.read("index.md").decode()
+
+        parent_heading = "## Brokerage_accounts\n"
+        child_heading = "## Brokerage_accounts/AAA_Fidelity\n"
+        zeta_heading = "## Zeta_top\n"
+        self.assertLess(
+            index_content.index(parent_heading), index_content.index(child_heading)
+        )
+        self.assertLess(
+            index_content.index(child_heading), index_content.index(zeta_heading)
+        )
+
     def test_download_multi_zip_get(self):
         """GET renders the multi-year ZIP selection form."""
         url = reverse("admin:tracker_financialyear_download_multi_zip")

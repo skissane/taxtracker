@@ -643,14 +643,19 @@ def _folder_path(item, item_map):
     return "/".join(parts)
 
 
-def _write_fy_to_zip(zf, fy, prefix=""):
-    """Write one FY's files into an open ZipFile, placing paths under *prefix*."""
+def _build_fy_index_md(fy, prefix="", zf=None):
+    """Return the index.md content string for one FinancialYear.
+
+    If *zf* is given, each attachment is also written into that ZipFile.
+    """
     items = list(
         fy.items.select_related("parent")
         .prefetch_related("attachments")
         .order_by("order", "title")
     )
     item_map = {item.pk: item for item in items}
+    folder_paths = {item.pk: _folder_path(item, item_map) for item in items}
+    items.sort(key=lambda item: folder_paths[item.pk].lower())
 
     index_lines = [
         f"# {fy} – Attachment Index\n",
@@ -664,21 +669,23 @@ def _write_fy_to_zip(zf, fy, prefix=""):
         attachments = list(item.attachments.all())
         if not attachments and not item.notes:
             continue
-        fp = _folder_path(item, item_map)
+        fp = folder_paths[item.pk]
         index_lines.append(f"## {fp}\n")
         for attachment in attachments:
             safe_name = _safe_component(attachment.file.name.split("/")[-1])
             zip_path = f"{prefix}{fp}/{safe_name}"
             missing = False
             try:
-                with attachment.file.open("rb") as fh:
-                    zf.writestr(zip_path, fh.read())
+                if zf is not None:
+                    with attachment.file.open("rb") as fh:
+                        zf.writestr(zip_path, fh.read())
+                else:
+                    attachment.file.open("rb").close()
             except OSError, DBStoredFile.DoesNotExist, ValueError:
                 # File missing or stored blob reference is invalid/corrupt –
                 # skip but record in index.
                 missing = True
                 zip_path = None
-
             index_lines.append(f"- **{attachment.title}**")
             if attachment.file_type:
                 index_lines[-1] += f" ({attachment.file_type})"
@@ -694,7 +701,13 @@ def _write_fy_to_zip(zf, fy, prefix=""):
             index_lines.append(f"\n{adjusted_notes}\n\n")
         index_lines.append("\n")
 
-    zf.writestr(f"{prefix}index.md", "".join(index_lines))
+    return "".join(index_lines)
+
+
+def _write_fy_to_zip(zf, fy, prefix=""):
+    """Write one FY's files and index.md into an open ZipFile under *prefix*."""
+    index_md = _build_fy_index_md(fy, prefix=prefix, zf=zf)
+    zf.writestr(f"{prefix}index.md", index_md)
 
 
 def _build_zip(fy):
@@ -714,56 +727,6 @@ def _build_multi_zip(fys):
             _write_fy_to_zip(zf, fy, prefix=f"{fy}/")
     buf.seek(0)
     return buf
-
-
-def _build_fy_index_md(fy, prefix=""):
-    """Return the index.md content string for one FinancialYear (no ZIP writing)."""
-    items = list(
-        fy.items.select_related("parent")
-        .prefetch_related("attachments")
-        .order_by("order", "title")
-    )
-    item_map = {item.pk: item for item in items}
-
-    index_lines = [
-        f"# {fy} – Attachment Index\n",
-        f"**Period:** {fy.start_date} to {fy.end_date}\n",
-        f"**Lodgement date:** {fy.effective_lodgement_date}"
-        + (" (default)" if fy.lodgement_date_override is None else " (agent override)")
-        + "\n\n",
-    ]
-
-    for item in items:
-        attachments = list(item.attachments.all())
-        if not attachments and not item.notes:
-            continue
-        fp = _folder_path(item, item_map)
-        index_lines.append(f"## {fp}\n")
-        for attachment in attachments:
-            safe_name = _safe_component(attachment.file.name.split("/")[-1])
-            zip_path = f"{prefix}{fp}/{safe_name}"
-            missing = False
-            try:
-                attachment.file.open("rb").close()
-            except OSError, DBStoredFile.DoesNotExist, ValueError:
-                missing = True
-                zip_path = None
-            index_lines.append(f"- **{attachment.title}**")
-            if attachment.file_type:
-                index_lines[-1] += f" ({attachment.file_type})"
-            if zip_path:
-                index_lines[-1] += f" → `{zip_path}`"
-            elif missing:
-                index_lines[-1] += " [MISSING]"
-            index_lines[-1] += "\n"
-            if attachment.notes:
-                index_lines.append(f"  {attachment.notes}\n")
-        if item.notes:
-            adjusted_notes = _adjust_notes_headings(item.notes, 2)
-            index_lines.append(f"\n{adjusted_notes}\n\n")
-        index_lines.append("\n")
-
-    return "".join(index_lines)
 
 
 def _build_multi_index_md(fys):
