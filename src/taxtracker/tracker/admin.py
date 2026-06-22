@@ -739,9 +739,6 @@ def _build_fy_index_md(fy, prefix=""):
             continue
         fp = _folder_path(item, item_map)
         index_lines.append(f"## {fp}\n")
-        if item.notes:
-            adjusted_notes = _adjust_notes_headings(item.notes, 2)
-            index_lines.append(f"{adjusted_notes}\n\n")
         for attachment in attachments:
             safe_name = _safe_component(attachment.file.name.split("/")[-1])
             zip_path = f"{prefix}{fp}/{safe_name}"
@@ -761,6 +758,9 @@ def _build_fy_index_md(fy, prefix=""):
             index_lines[-1] += "\n"
             if attachment.notes:
                 index_lines.append(f"  {attachment.notes}\n")
+        if item.notes:
+            adjusted_notes = _adjust_notes_headings(item.notes, 2)
+            index_lines.append(f"\n{adjusted_notes}\n\n")
         index_lines.append("\n")
 
     return "".join(index_lines)
