@@ -243,16 +243,22 @@ class AdminViewTests(TestCase):
             self.assertIn("index.md", zf.namelist())
 
     def test_download_zip_spaces_replaced_with_underscores(self):
-        """Spaces in item titles must become underscores in ZIP paths."""
+        """Spaces in item titles/filenames must become underscores in ZIP paths."""
         item = Item.objects.create(year=self.fy, title="My Item With Spaces", order=2)
         Attachment.objects.create(
             item=item,
-            title="doc.pdf",
-            file=ContentFile(b"data", name="doc.pdf"),
+            title="my doc",
+            file=ContentFile(b"data", name="my doc.pdf"),
         )
         url = reverse("admin:tracker_financialyear_download_zip", args=[self.fy.pk])
         response = self.client.get(url)
-        buf = io.BytesIO(response.content)
+        buf = io.BytesIO(
+            b"".join(
+                response.streaming_content
+                if hasattr(response, "streaming_content")
+                else [response.content]
+            )
+        )
         with zipfile.ZipFile(buf) as zf:
             names = zf.namelist()
             # No path component should contain a space.
@@ -262,6 +268,11 @@ class AdminViewTests(TestCase):
             self.assertTrue(
                 any("My_Item_With_Spaces" in n for n in names),
                 f"Expected underscore path not found in {names}",
+            )
+            # The attachment filename should also use underscores.
+            self.assertTrue(
+                any("my_doc.pdf" in n for n in names),
+                f"Expected sanitized filename not found in {names}",
             )
 
     def test_download_zip_notes_only_item_in_index(self):
@@ -279,6 +290,62 @@ class AdminViewTests(TestCase):
             index_content = zf.read("index.md").decode()
         self.assertIn("Notes_Only_Item", index_content)
         self.assertIn("This is an important note.", index_content)
+
+    def test_download_multi_zip_get(self):
+        """GET renders the multi-year ZIP selection form."""
+        url = reverse("admin:tracker_financialyear_download_multi_zip")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "FY2024")
+
+    def test_download_multi_zip_post_returns_zip(self):
+        """POST with action=zip returns a ZIP with a per-year top-level prefix."""
+        fy2025 = FinancialYear.objects.create(year=2025)
+        item2025 = Item.objects.create(year=fy2025, title="Item 2025", order=1)
+        Attachment.objects.create(
+            item=item2025,
+            title="doc2025.pdf",
+            file=ContentFile(b"data", name="doc2025.pdf"),
+        )
+        url = reverse("admin:tracker_financialyear_download_multi_zip")
+        response = self.client.post(
+            url,
+            {"fy_ids": [self.fy.pk, fy2025.pk], "action": "zip"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/zip")
+        buf = io.BytesIO(
+            b"".join(
+                response.streaming_content
+                if hasattr(response, "streaming_content")
+                else [response.content]
+            )
+        )
+        with zipfile.ZipFile(buf) as zf:
+            names = zf.namelist()
+            # Each FY should have its own top-level prefix.
+            self.assertTrue(
+                any(n.startswith("FY2024/") for n in names),
+                f"FY2024/ prefix missing in {names}",
+            )
+            self.assertTrue(
+                any(n.startswith("FY2025/") for n in names),
+                f"FY2025/ prefix missing in {names}",
+            )
+
+    def test_download_multi_zip_post_view_index(self):
+        """POST with action=view_index returns markdown containing FY headers."""
+        fy2025 = FinancialYear.objects.create(year=2025)
+        url = reverse("admin:tracker_financialyear_download_multi_zip")
+        response = self.client.post(
+            url,
+            {"fy_ids": [self.fy.pk, fy2025.pk], "action": "view_index"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/markdown", response["Content-Type"])
+        content = response.content.decode()
+        self.assertIn("FY2024", content)
+        self.assertIn("FY2025", content)
 
     def test_download_db_backup_view(self):
         url = reverse("admin:tracker_financialyear_download_db_backup")

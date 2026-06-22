@@ -667,15 +667,16 @@ def _write_fy_to_zip(zf, fy, prefix=""):
         fp = _folder_path(item, item_map)
         index_lines.append(f"## {fp}\n")
         for attachment in attachments:
-            safe_name = attachment.file.name.split("/")[-1]
+            safe_name = _safe_component(attachment.file.name.split("/")[-1])
             zip_path = f"{prefix}{fp}/{safe_name}"
+            missing = False
             try:
                 with attachment.file.open("rb") as fh:
                     zf.writestr(zip_path, fh.read())
             except OSError, DBStoredFile.DoesNotExist, ValueError:
                 # File missing or stored blob reference is invalid/corrupt –
                 # skip but record in index.
-                safe_name = f"[MISSING] {safe_name}"
+                missing = True
                 zip_path = None
 
             index_lines.append(f"- **{attachment.title}**")
@@ -683,6 +684,8 @@ def _write_fy_to_zip(zf, fy, prefix=""):
                 index_lines[-1] += f" ({attachment.file_type})"
             if zip_path:
                 index_lines[-1] += f" → `{zip_path}`"
+            elif missing:
+                index_lines[-1] += " [MISSING]"
             index_lines[-1] += "\n"
             if attachment.notes:
                 index_lines.append(f"  {attachment.notes}\n")
@@ -740,18 +743,21 @@ def _build_fy_index_md(fy, prefix=""):
             adjusted_notes = _adjust_notes_headings(item.notes, 2)
             index_lines.append(f"{adjusted_notes}\n\n")
         for attachment in attachments:
-            safe_name = attachment.file.name.split("/")[-1]
+            safe_name = _safe_component(attachment.file.name.split("/")[-1])
             zip_path = f"{prefix}{fp}/{safe_name}"
+            missing = False
             try:
                 attachment.file.open("rb").close()
             except OSError, DBStoredFile.DoesNotExist, ValueError:
-                safe_name = f"[MISSING] {safe_name}"
+                missing = True
                 zip_path = None
             index_lines.append(f"- **{attachment.title}**")
             if attachment.file_type:
                 index_lines[-1] += f" ({attachment.file_type})"
             if zip_path:
                 index_lines[-1] += f" → `{zip_path}`"
+            elif missing:
+                index_lines[-1] += " [MISSING]"
             index_lines[-1] += "\n"
             if attachment.notes:
                 index_lines.append(f"  {attachment.notes}\n")
@@ -980,6 +986,8 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # ------------------------------------------------------------------
 
     def download_multi_zip_view(self, request):
+        if not self.has_view_permission(request):
+            raise PermissionDenied
         all_fys = list(FinancialYear.objects.order_by("year"))
         error = None
 
