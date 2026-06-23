@@ -55,6 +55,12 @@ class FinancialYear(models.Model):
     def __str__(self):
         return f"FY{self.year}"
 
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        instance._loaded_status = instance.status
+        return instance
+
     @property
     def start_date(self):
         return datetime.date(self.year - 1, 7, 1)
@@ -78,6 +84,21 @@ class FinancialYear(models.Model):
 
     @property
     def current_status_transitioned_at(self):
+        if (
+            hasattr(self, "_prefetched_objects_cache")
+            and "status_history" in self._prefetched_objects_cache
+        ):
+            matching = [
+                history
+                for history in self._prefetched_objects_cache["status_history"]
+                if history.to_status == self.status
+            ]
+            if not matching:
+                return None
+            return max(
+                matching,
+                key=lambda history: (history.transitioned_at, history.pk),
+            ).transitioned_at
         latest = (
             self.status_history.filter(to_status=self.status)
             .order_by("-transitioned_at", "-pk")
@@ -87,10 +108,12 @@ class FinancialYear(models.Model):
 
     def save(self, *args, **kwargs):
         previous_status = None
-        if self.pk is not None:
-            previous_status = (
-                FinancialYear.objects.only("status").get(pk=self.pk).status
-            )
+        if not self._state.adding:
+            previous_status = getattr(self, "_loaded_status", None)
+            if previous_status is None and self.pk is not None:
+                previous_status = (
+                    FinancialYear.objects.only("status").get(pk=self.pk).status
+                )
         super().save(*args, **kwargs)
         if previous_status != self.status:
             FinancialYearStatusHistory.objects.create(
@@ -98,6 +121,7 @@ class FinancialYear(models.Model):
                 from_status=previous_status,
                 to_status=self.status,
             )
+        self._loaded_status = self.status
 
 
 class FinancialYearStatusHistory(models.Model):

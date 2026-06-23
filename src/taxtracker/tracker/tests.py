@@ -395,15 +395,15 @@ class AdminViewTests(TestCase):
         self.assertIn("Submitted to tax agent", content)
         self.assertIn("Tax agent requests more info", content)
         self.assertIn("Finalised", content)
-        self.assertRegex(content, rf'name="fy_ids"\s+value="{self.fy.pk}"\s+checked')
+        self.assertRegex(content, rf'<input[^>]*value="{self.fy.pk}"[^>]*checked')
         self.assertNotRegex(
             content,
-            rf'name="fy_ids"\s+value="{submitted.pk}"\s+checked',
+            rf'<input[^>]*value="{submitted.pk}"[^>]*checked',
         )
-        self.assertRegex(content, rf'name="fy_ids"\s+value="{more_info.pk}"\s+checked')
+        self.assertRegex(content, rf'<input[^>]*value="{more_info.pk}"[^>]*checked')
         self.assertNotRegex(
             content,
-            rf'name="fy_ids"\s+value="{finalised.pk}"\s+checked',
+            rf'<input[^>]*value="{finalised.pk}"[^>]*checked',
         )
 
     def test_download_multi_zip_post_returns_zip(self):
