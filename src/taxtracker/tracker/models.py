@@ -14,12 +14,28 @@ from django.utils.deconstruct import deconstructible
 class FinancialYear(models.Model):
     """Australian financial year (FY) ending June 30 of the given year."""
 
+    STATUS_PENDING_SUBMISSION = "pending_submission"
+    STATUS_SUBMITTED = "submitted"
+    STATUS_MORE_INFO_REQUESTED = "more_info_requested"
+    STATUS_FINALISED = "finalised"
+    STATUS_CHOICES = [
+        (STATUS_PENDING_SUBMISSION, "Pending submission to tax agent"),
+        (STATUS_SUBMITTED, "Submitted to tax agent"),
+        (STATUS_MORE_INFO_REQUESTED, "Tax agent requests more info"),
+        (STATUS_FINALISED, "Finalised"),
+    ]
+
     year = models.PositiveSmallIntegerField(
         unique=True,
         help_text=(
             "The year in which the FY ends, e.g. 2024 for FY2024 "
             "(1 July 2023 – 30 June 2024)."
         ),
+    )
+    status = models.CharField(
+        max_length=30,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING_SUBMISSION,
     )
     notes = models.TextField(blank=True)
     lodgement_date_override = models.DateField(
@@ -59,6 +75,66 @@ class FinancialYear(models.Model):
     def days_until_lodgement(self):
         today = timezone.now().date()
         return (self.effective_lodgement_date - today).days
+
+    @property
+    def current_status_transitioned_at(self):
+        latest = (
+            self.status_history.filter(to_status=self.status)
+            .order_by("-transitioned_at", "-pk")
+            .first()
+        )
+        return latest.transitioned_at if latest else None
+
+    def save(self, *args, **kwargs):
+        previous_status = None
+        if self.pk is not None:
+            previous_status = (
+                FinancialYear.objects.only("status").get(pk=self.pk).status
+            )
+        super().save(*args, **kwargs)
+        if previous_status != self.status:
+            FinancialYearStatusHistory.objects.create(
+                financial_year=self,
+                from_status=previous_status,
+                to_status=self.status,
+            )
+
+
+class FinancialYearStatusHistory(models.Model):
+    """History of financial year status transitions."""
+
+    financial_year = models.ForeignKey(
+        FinancialYear,
+        on_delete=models.CASCADE,
+        related_name="status_history",
+    )
+    from_status = models.CharField(
+        max_length=30,
+        choices=FinancialYear.STATUS_CHOICES,
+        null=True,
+        blank=True,
+    )
+    to_status = models.CharField(
+        max_length=30,
+        choices=FinancialYear.STATUS_CHOICES,
+    )
+    transitioned_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-transitioned_at", "-pk"]
+        verbose_name = "Financial Year Status Transition"
+        verbose_name_plural = "Financial Year Status Transitions"
+
+    def __str__(self):
+        if self.from_status:
+            return (
+                f"{self.financial_year}: {self.get_from_status_display()} → "
+                f"{self.get_to_status_display()} @ {self.transitioned_at}"
+            )
+        return (
+            f"{self.financial_year}: {self.get_to_status_display()} @ "
+            f"{self.transitioned_at}"
+        )
 
 
 class Item(models.Model):

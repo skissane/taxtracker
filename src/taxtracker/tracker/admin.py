@@ -25,6 +25,7 @@ from .models import (
     FileExtension,
     FileType,
     FinancialYear,
+    FinancialYearStatusHistory,
     Item,
     MimeType,
 )
@@ -787,6 +788,12 @@ class FileExtensionAdmin(admin.ModelAdmin):
     list_select_related = ("file_type",)
 
 
+class FinancialYearStatusHistoryInline(admin.TabularInline):
+    model = FinancialYearStatusHistory
+    extra = 0
+    ordering = ("-transitioned_at", "-pk")
+
+
 @admin.register(FinancialYear)
 class FinancialYearAdmin(admin.ModelAdmin):
     list_display = (
@@ -797,8 +804,9 @@ class FinancialYearAdmin(admin.ModelAdmin):
         "summary_link",
         "download_zip_link",
     )
-    fields = ("year", "notes", "lodgement_date_override")
+    fields = ("year", "status", "notes", "lodgement_date_override")
     search_fields = ("year",)
+    inlines = [FinancialYearStatusHistoryInline]
 
     # ------------------------------------------------------------------
     # Custom URLs
@@ -951,7 +959,9 @@ class FinancialYearAdmin(admin.ModelAdmin):
     def download_multi_zip_view(self, request):
         if not self.has_view_permission(request):
             raise PermissionDenied
-        all_fys = list(FinancialYear.objects.order_by("year"))
+        all_fys = list(
+            FinancialYear.objects.order_by("year").prefetch_related("status_history")
+        )
         error = None
 
         if request.method == "POST":
@@ -981,6 +991,10 @@ class FinancialYearAdmin(admin.ModelAdmin):
             **self.admin_site.each_context(request),
             "title": "Download Multi-Year ZIP",
             "all_fys": all_fys,
+            "default_selected_statuses": {
+                FinancialYear.STATUS_PENDING_SUBMISSION,
+                FinancialYear.STATUS_MORE_INFO_REQUESTED,
+            },
             "error": error,
             "opts": self.model._meta,
         }
