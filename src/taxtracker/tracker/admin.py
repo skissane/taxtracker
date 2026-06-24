@@ -1083,6 +1083,14 @@ class FinancialYearAdmin(admin.ModelAdmin):
         extra_context["copy_to_new_year_url"] = reverse(
             "admin:tracker_financialyear_copy_to_new_year", args=[object_id]
         )
+        fy = FinancialYear.objects.filter(pk=object_id).first()
+        if fy:
+            extra_context["prev_fy"] = FinancialYear.objects.filter(
+                year=fy.year - 1
+            ).first()
+            extra_context["next_fy"] = FinancialYear.objects.filter(
+                year=fy.year + 1
+            ).first()
         return super().change_view(request, object_id, form_url, extra_context)
 
 
