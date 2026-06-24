@@ -8,12 +8,14 @@ from django.db import migrations, models
 def create_initial_status_history(apps, schema_editor):
     FinancialYear = apps.get_model("tracker", "FinancialYear")
     FinancialYearStatusHistory = apps.get_model("tracker", "FinancialYearStatusHistory")
-    for fy in FinancialYear.objects.all():
-        FinancialYearStatusHistory.objects.create(
+    FinancialYearStatusHistory.objects.bulk_create([
+        FinancialYearStatusHistory(
             financial_year=fy,
             from_status=None,
             to_status=fy.status,
         )
+        for fy in FinancialYear.objects.all()
+    ])
 
 
 def delete_initial_status_history(apps, schema_editor):

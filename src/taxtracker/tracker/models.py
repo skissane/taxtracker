@@ -107,21 +107,24 @@ class FinancialYear(models.Model):
         return latest.transitioned_at if latest else None
 
     def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        status_being_saved = update_fields is None or "status" in update_fields
         previous_status = None
-        if not self._state.adding:
+        if not self._state.adding and status_being_saved:
             previous_status = getattr(self, "_loaded_status", None)
             if previous_status is None and self.pk is not None:
                 previous_status = (
                     FinancialYear.objects.only("status").get(pk=self.pk).status
                 )
         super().save(*args, **kwargs)
-        if previous_status != self.status:
-            FinancialYearStatusHistory.objects.create(
-                financial_year=self,
-                from_status=previous_status,
-                to_status=self.status,
-            )
-        self._loaded_status = self.status
+        if status_being_saved:
+            if previous_status != self.status:
+                FinancialYearStatusHistory.objects.create(
+                    financial_year=self,
+                    from_status=previous_status,
+                    to_status=self.status,
+                )
+            self._loaded_status = self.status
 
 
 class FinancialYearStatusHistory(models.Model):
