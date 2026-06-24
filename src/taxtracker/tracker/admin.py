@@ -801,6 +801,8 @@ class FinancialYearAdmin(admin.ModelAdmin):
         "period",
         "lodgement_date_display",
         "days_until_lodgement_display",
+        "status_display",
+        "status_since_display",
         "summary_link",
         "download_zip_link",
     )
@@ -878,6 +880,25 @@ class FinancialYearAdmin(admin.ModelAdmin):
     def download_zip_link(self, obj):
         url = reverse("admin:tracker_financialyear_download_zip", args=[obj.pk])
         return format_html('<a href="{}">Download ZIP</a>', url)
+
+    _STATUS_SHORT_LABELS = {
+        FinancialYear.STATUS_PENDING_SUBMISSION: "Pending",
+        FinancialYear.STATUS_SUBMITTED: "Submitted",
+        FinancialYear.STATUS_MORE_INFO_REQUESTED: "More Info Requested",
+        FinancialYear.STATUS_FINALISED: "Finalised",
+    }
+
+    @admin.display(description="Status")
+    def status_display(self, obj):
+        return self._STATUS_SHORT_LABELS.get(obj.status, obj.get_status_display())
+
+    @admin.display(description="Status Since")
+    def status_since_display(self, obj):
+        dt = obj.current_status_transitioned_at
+        return dt.date() if dt else "—"
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("status_history")
 
     # ------------------------------------------------------------------
     # Changelist view override (inject backup URL)
