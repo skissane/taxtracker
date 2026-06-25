@@ -16,3 +16,17 @@
   {% endif %}
   {{ block.super }}
 {% endblock object-tools-items %}
+{% block content %}
+  {% if prev_fy or next_fy %}
+    <p class="tt-fy-nav">
+      {% if prev_fy %}
+        <a href="{% url 'admin:tracker_financialyear_change' prev_fy.pk %}">← Previous Year ({{ prev_fy }})</a>
+      {% endif %}
+      {% if prev_fy and next_fy %}&nbsp;|&nbsp;{% endif %}
+      {% if next_fy %}
+        <a href="{% url 'admin:tracker_financialyear_change' next_fy.pk %}">Next Year ({{ next_fy }}) →</a>
+      {% endif %}
+    </p>
+  {% endif %}
+  {{ block.super }}
+{% endblock content %}

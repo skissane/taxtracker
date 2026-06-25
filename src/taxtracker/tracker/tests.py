@@ -25,6 +25,7 @@ from .models import (
     FileExtension,
     FileType,
     FinancialYear,
+    FinancialYearStatusHistory,
     Item,
     MimeType,
     _extract_date_from_filename,
@@ -60,6 +61,38 @@ class FinancialYearModelTests(TestCase):
         today = timezone.now().date()
         expected = (self.fy.effective_lodgement_date - today).days
         self.assertEqual(self.fy.days_until_lodgement, expected)
+
+    def test_default_status_is_pending_submission(self):
+        self.assertEqual(self.fy.status, FinancialYear.STATUS_PENDING_SUBMISSION)
+
+    def test_create_adds_initial_status_history(self):
+        history = FinancialYearStatusHistory.objects.filter(financial_year=self.fy)
+        self.assertEqual(history.count(), 1)
+        self.assertIsNone(history.first().from_status)
+        self.assertEqual(
+            history.first().to_status,
+            FinancialYear.STATUS_PENDING_SUBMISSION,
+        )
+
+    def test_status_change_adds_history(self):
+        self.fy.status = FinancialYear.STATUS_SUBMITTED
+        self.fy.save()
+
+        latest = self.fy.status_history.order_by("-transitioned_at", "-pk").first()
+        self.assertEqual(latest.from_status, FinancialYear.STATUS_PENDING_SUBMISSION)
+        self.assertEqual(latest.to_status, FinancialYear.STATUS_SUBMITTED)
+
+    def test_status_change_can_be_reversed(self):
+        self.fy.status = FinancialYear.STATUS_SUBMITTED
+        self.fy.save()
+        self.fy.status = FinancialYear.STATUS_MORE_INFO_REQUESTED
+        self.fy.save()
+        self.fy.status = FinancialYear.STATUS_SUBMITTED
+        self.fy.save()
+
+        latest = self.fy.status_history.order_by("-transitioned_at", "-pk").first()
+        self.assertEqual(latest.from_status, FinancialYear.STATUS_MORE_INFO_REQUESTED)
+        self.assertEqual(latest.to_status, FinancialYear.STATUS_SUBMITTED)
 
     def test_ordering(self):
         fy2025 = FinancialYear.objects.create(year=2025)
@@ -338,6 +371,40 @@ class AdminViewTests(TestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "FY2024")
+
+    def test_download_multi_zip_get_default_selection_uses_status(self):
+        submitted = FinancialYear.objects.create(
+            year=2025,
+            status=FinancialYear.STATUS_SUBMITTED,
+        )
+        more_info = FinancialYear.objects.create(
+            year=2026,
+            status=FinancialYear.STATUS_MORE_INFO_REQUESTED,
+        )
+        finalised = FinancialYear.objects.create(
+            year=2027,
+            status=FinancialYear.STATUS_FINALISED,
+        )
+
+        url = reverse("admin:tracker_financialyear_download_multi_zip")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+
+        self.assertIn("Pending submission to tax agent", content)
+        self.assertIn("Submitted to tax agent", content)
+        self.assertIn("Tax agent requests more info", content)
+        self.assertIn("Finalised", content)
+        self.assertRegex(content, rf'<input[^>]*value="{self.fy.pk}"[^>]*checked')
+        self.assertNotRegex(
+            content,
+            rf'<input[^>]*value="{submitted.pk}"[^>]*checked',
+        )
+        self.assertRegex(content, rf'<input[^>]*value="{more_info.pk}"[^>]*checked')
+        self.assertNotRegex(
+            content,
+            rf'<input[^>]*value="{finalised.pk}"[^>]*checked',
+        )
 
     def test_download_multi_zip_post_returns_zip(self):
         """POST with action=zip returns a ZIP with a per-year top-level prefix."""

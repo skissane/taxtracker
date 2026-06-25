@@ -23,8 +23,14 @@
       {% for fy in all_fys %}
         <li>
           <label>
-            <input type="checkbox" name="fy_ids" value="{{ fy.pk }}" checked>
-            {{ fy }}
+            <input type="checkbox"
+                   name="fy_ids"
+                   value="{{ fy.pk }}"
+                   {% if fy.status in default_selected_statuses %}checked{% endif %}>
+            {{ fy }} — {{ fy.get_status_display }}
+            {% if fy.current_status_transitioned_at %}
+              (since {{ fy.current_status_transitioned_at|date:"Y-m-d" }})
+            {% endif %}
           </label>
         </li>
       {% empty %}

@@ -25,6 +25,7 @@ from .models import (
     FileExtension,
     FileType,
     FinancialYear,
+    FinancialYearStatusHistory,
     Item,
     MimeType,
 )
@@ -787,6 +788,12 @@ class FileExtensionAdmin(admin.ModelAdmin):
     list_select_related = ("file_type",)
 
 
+class FinancialYearStatusHistoryInline(admin.TabularInline):
+    model = FinancialYearStatusHistory
+    extra = 0
+    ordering = ("-transitioned_at", "-pk")
+
+
 @admin.register(FinancialYear)
 class FinancialYearAdmin(admin.ModelAdmin):
     list_display = (
@@ -794,11 +801,14 @@ class FinancialYearAdmin(admin.ModelAdmin):
         "period",
         "lodgement_date_display",
         "days_until_lodgement_display",
+        "status_display",
+        "status_since_display",
         "summary_link",
         "download_zip_link",
     )
-    fields = ("year", "notes", "lodgement_date_override")
+    fields = ("year", "status", "notes", "lodgement_date_override")
     search_fields = ("year",)
+    inlines = [FinancialYearStatusHistoryInline]
 
     # ------------------------------------------------------------------
     # Custom URLs
@@ -870,6 +880,25 @@ class FinancialYearAdmin(admin.ModelAdmin):
     def download_zip_link(self, obj):
         url = reverse("admin:tracker_financialyear_download_zip", args=[obj.pk])
         return format_html('<a href="{}">Download ZIP</a>', url)
+
+    _STATUS_SHORT_LABELS = {
+        FinancialYear.STATUS_PENDING_SUBMISSION: "Pending",
+        FinancialYear.STATUS_SUBMITTED: "Submitted",
+        FinancialYear.STATUS_MORE_INFO_REQUESTED: "More Info Requested",
+        FinancialYear.STATUS_FINALISED: "Finalised",
+    }
+
+    @admin.display(description="Status")
+    def status_display(self, obj):
+        return self._STATUS_SHORT_LABELS.get(obj.status, obj.get_status_display())
+
+    @admin.display(description="Status Since")
+    def status_since_display(self, obj):
+        dt = obj.current_status_transitioned_at
+        return dt.date() if dt else "—"
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("status_history")
 
     # ------------------------------------------------------------------
     # Changelist view override (inject backup URL)
@@ -951,7 +980,9 @@ class FinancialYearAdmin(admin.ModelAdmin):
     def download_multi_zip_view(self, request):
         if not self.has_view_permission(request):
             raise PermissionDenied
-        all_fys = list(FinancialYear.objects.order_by("year"))
+        all_fys = list(
+            FinancialYear.objects.order_by("year").prefetch_related("status_history")
+        )
         error = None
 
         if request.method == "POST":
@@ -981,6 +1012,10 @@ class FinancialYearAdmin(admin.ModelAdmin):
             **self.admin_site.each_context(request),
             "title": "Download Multi-Year ZIP",
             "all_fys": all_fys,
+            "default_selected_statuses": {
+                FinancialYear.STATUS_PENDING_SUBMISSION,
+                FinancialYear.STATUS_MORE_INFO_REQUESTED,
+            },
             "error": error,
             "opts": self.model._meta,
         }
@@ -1069,6 +1104,14 @@ class FinancialYearAdmin(admin.ModelAdmin):
         extra_context["copy_to_new_year_url"] = reverse(
             "admin:tracker_financialyear_copy_to_new_year", args=[object_id]
         )
+        fy = FinancialYear.objects.filter(pk=object_id).first()
+        if fy:
+            extra_context["prev_fy"] = FinancialYear.objects.filter(
+                year=fy.year - 1
+            ).first()
+            extra_context["next_fy"] = FinancialYear.objects.filter(
+                year=fy.year + 1
+            ).first()
         return super().change_view(request, object_id, form_url, extra_context)
 
 
