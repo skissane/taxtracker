@@ -11,7 +11,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "djlint>=1.39.2",
+    "djlint>=1.40.1",
     "ruff==0.15.20",
 ]
 
