@@ -40,11 +40,11 @@ fmt-templates:
 
 # Run the Django test suite
 test:
-    uv run python manage.py test taxtracker.tracker --verbosity=2
+    uv run python manage.py test lifetracker.tracker --verbosity=2
 
 # Run the test suite under coverage, print a report, and write coverage.xml
 coverage:
-    uv run --group dev coverage run manage.py test taxtracker.tracker --verbosity=2
+    uv run --group dev coverage run manage.py test lifetracker.tracker --verbosity=2
     uv run --group dev coverage report
     uv run --group dev coverage xml
 
