@@ -23,20 +23,25 @@ jobs:
       - name: Set up Python
         run: uv python install 3.14.3
 
+      - name: Install just
+        uses: extractions/setup-just@v3
+        with:
+          just-version: "1.21.0"
+
       - name: Install dependencies
-        run: uv sync --group dev
+        run: just sync
 
       - name: Lint with ruff
-        run: uv run --group dev ruff check .
+        run: just lint
 
       - name: Check formatting with ruff
-        run: uv run --group dev ruff format --check .
+        run: just fmt-check
 
       - name: Lint with djlint
-        run: uv run --group dev djlint --lint .
+        run: just lint-templates
 
       - name: Check formatting with djlint
-        run: uv run --group dev djlint --check .
+        run: just fmt-check-templates
 
       - name: Run tests
-        run: uv run python manage.py test taxtracker.tracker --verbosity=2
+        run: just test
