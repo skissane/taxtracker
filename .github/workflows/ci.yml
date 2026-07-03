@@ -43,5 +43,5 @@ jobs:
       - name: Check formatting with djlint
         run: just fmt-check-templates
 
-      - name: Run tests
-        run: just test
+      - name: Run tests with coverage
+        run: just coverage

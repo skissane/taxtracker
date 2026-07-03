@@ -38,6 +38,11 @@ fmt-templates:
 test:
     uv run python manage.py test taxtracker.tracker --verbosity=2
 
+# Run the test suite under coverage and print a report
+coverage:
+    uv run --group dev coverage run manage.py test taxtracker.tracker --verbosity=2
+    uv run --group dev coverage report
+
 # Run every ruff/djlint lint and format-check step (no fixes, no tests)
 check: lint fmt-check lint-templates fmt-check-templates
 
@@ -45,4 +50,4 @@ check: lint fmt-check lint-templates fmt-check-templates
 fix: lint-fix fmt fmt-templates
 
 # Run everything the CI workflow runs
-ci: sync check test
+ci: sync check coverage

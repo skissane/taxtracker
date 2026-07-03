@@ -6,7 +6,7 @@ This file provides guidance to AI coding assistants working with code in this re
 
 CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run
 everything CI runs, or `just --list` to see individual recipes (`lint`, `fmt-check`,
-`lint-templates`, `fmt-check-templates`, `test`, `sync`). `just ci` drifts from
+`lint-templates`, `fmt-check-templates`, `coverage`, `sync`). `just ci` drifts from
 `ci.yml` if the workflow changes without a matching justfile edit; `run_workflow_local.py`
 avoids that by parsing the workflow YAML directly and running its `run:` steps as written
 (see its docstring for what it does and doesn't support).
@@ -21,6 +21,9 @@ uv run python manage.py test taxtracker.tracker
 # Run a single test class or method
 uv run python manage.py test taxtracker.tracker.tests.ItemModelTests
 uv run python manage.py test taxtracker.tracker.tests.ItemModelTests.test_str_root
+
+# Run tests under coverage and print a report (no minimum enforced)
+just coverage
 
 # Lint
 uv run ruff check src/
