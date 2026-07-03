@@ -28,6 +28,9 @@ jobs:
         with:
           just-version: "1.21.0"
 
+      - name: Check lockfile is up to date
+        run: just lock-check
+
       - name: Install dependencies
         run: just sync
 

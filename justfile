@@ -2,6 +2,10 @@
 default:
     @just --list
 
+# Check that uv.lock is up to date with pyproject.toml
+lock-check:
+    uv lock --check
+
 # Sync dependencies (including dev group)
 sync:
     uv sync --group dev
@@ -50,4 +54,4 @@ check: lint fmt-check lint-templates fmt-check-templates
 fix: lint-fix fmt fmt-templates
 
 # Run everything the CI workflow runs
-ci: sync check coverage
+ci: lock-check sync check coverage
