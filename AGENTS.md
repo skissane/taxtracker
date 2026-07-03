@@ -27,9 +27,9 @@ uv run python manage.py test taxtracker.tracker.tests.ItemModelTests.test_str_ro
 # Run tests under coverage, print a report, and write coverage.xml (no minimum enforced)
 just coverage
 
-# Lint
-uv run ruff check src/
-uv run ruff format src/
+# Lint (matches `just lint`/`just fmt-check`, which check the whole repo root)
+uv run ruff check .
+uv run ruff format .
 
 # Template lint
 uv run djlint --check src/taxtracker/tracker/templates/

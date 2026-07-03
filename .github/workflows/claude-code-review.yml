@@ -6,10 +6,12 @@ on:
 
 jobs:
   claude-review:
-    # Only run on PR comments (not plain issues) containing the trigger phrase
+    # Only run on PR comments (not plain issues) containing the trigger phrase,
+    # and only for commenters trusted enough to grant write-scoped access to the token
     if: |
       github.event.issue.pull_request &&
-      contains(github.event.comment.body, '@claude review')
+      contains(github.event.comment.body, '@claude review') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
 
     runs-on: ubuntu-latest
     permissions:
