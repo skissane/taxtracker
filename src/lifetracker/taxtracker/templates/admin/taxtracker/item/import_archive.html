@@ -41,8 +41,8 @@
 {% block breadcrumbs %}
   <div class="breadcrumbs">
     <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> ›
-    <a href="{% url 'admin:tracker_item_changelist' %}">Items</a> ›
-    <a href="{% url 'admin:tracker_item_change' item.pk %}">{{ item }}</a> ›
+    <a href="{% url 'admin:taxtracker_item_changelist' %}">Items</a> ›
+    <a href="{% url 'admin:taxtracker_item_change' item.pk %}">{{ item }}</a> ›
     Import Archive
   </div>
 {% endblock breadcrumbs %}
@@ -68,7 +68,7 @@
     <div class="submit-row">
       <input type="submit" value="Import" class="default">
       <a class="button cancel"
-         href="{% url 'admin:tracker_item_change' item.pk %}">Cancel</a>
+         href="{% url 'admin:taxtracker_item_change' item.pk %}">Cancel</a>
     </div>
   </form>
   <hr>

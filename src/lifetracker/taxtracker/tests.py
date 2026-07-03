@@ -8,9 +8,14 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.management import call_command
+from django.core.management.base import CommandError
+from django.db import connection
+from django.db.migrations.recorder import MigrationRecorder
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
+
+from lifetracker.core.models import DBStoredFile, FileExtension, FileType
 
 from .admin import _adjust_notes_headings
 from .archives import (
@@ -21,13 +26,9 @@ from .archives import (
 from .forms import AttachmentForm, FlexibleDateField
 from .models import (
     Attachment,
-    DBStoredFile,
-    FileExtension,
-    FileType,
     FinancialYear,
     FinancialYearStatusHistory,
     Item,
-    MimeType,
     _extract_date_from_filename,
 )
 
@@ -212,7 +213,9 @@ class CopyItemsTests(TestCase):
 
     def test_copy_to_new_year_creates_items(self):
         client = self._create_superuser_client()
-        url = reverse("admin:tracker_financialyear_copy_to_new_year", args=[self.fy.pk])
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
         response = client.post(url)
         self.assertEqual(response.status_code, 302)
 
@@ -231,7 +234,9 @@ class CopyItemsTests(TestCase):
     def test_copy_existing_year_shows_error(self):
         FinancialYear.objects.create(year=2025)
         client = self._create_superuser_client()
-        url = reverse("admin:tracker_financialyear_copy_to_new_year", args=[self.fy.pk])
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
         response = client.post(url)
         # Should redirect back with error message
         self.assertEqual(response.status_code, 302)
@@ -249,19 +254,19 @@ class AdminViewTests(TestCase):
         self.item = Item.objects.create(year=self.fy, title="Test Item", order=1)
 
     def test_changelist(self):
-        url = reverse("admin:tracker_financialyear_changelist")
+        url = reverse("admin:taxtracker_financialyear_changelist")
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
 
     def test_summary_view(self):
-        url = reverse("admin:tracker_financialyear_summary", args=[self.fy.pk])
+        url = reverse("admin:taxtracker_financialyear_summary", args=[self.fy.pk])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "FY2024")
         self.assertContains(response, "Test Item")
 
     def test_download_zip_view(self):
-        url = reverse("admin:tracker_financialyear_download_zip", args=[self.fy.pk])
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/zip")
@@ -283,7 +288,7 @@ class AdminViewTests(TestCase):
             title="my doc",
             file=ContentFile(b"data", name="my doc.pdf"),
         )
-        url = reverse("admin:tracker_financialyear_download_zip", args=[self.fy.pk])
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
         response = self.client.get(url)
         buf = io.BytesIO(
             b"".join(
@@ -316,7 +321,7 @@ class AdminViewTests(TestCase):
             notes="This is an important note.",
             order=2,
         )
-        url = reverse("admin:tracker_financialyear_download_zip", args=[self.fy.pk])
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
         response = self.client.get(url)
         buf = io.BytesIO(response.content)
         with zipfile.ZipFile(buf) as zf:
@@ -349,7 +354,7 @@ class AdminViewTests(TestCase):
             file=ContentFile(b"zeta", name="zeta.pdf"),
         )
 
-        url = reverse("admin:tracker_financialyear_download_zip", args=[self.fy.pk])
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
         response = self.client.get(url)
         buf = io.BytesIO(response.content)
         with zipfile.ZipFile(buf) as zf:
@@ -367,7 +372,7 @@ class AdminViewTests(TestCase):
 
     def test_download_multi_zip_get(self):
         """GET renders the multi-year ZIP selection form."""
-        url = reverse("admin:tracker_financialyear_download_multi_zip")
+        url = reverse("admin:taxtracker_financialyear_download_multi_zip")
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "FY2024")
@@ -386,7 +391,7 @@ class AdminViewTests(TestCase):
             status=FinancialYear.STATUS_FINALISED,
         )
 
-        url = reverse("admin:tracker_financialyear_download_multi_zip")
+        url = reverse("admin:taxtracker_financialyear_download_multi_zip")
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
@@ -415,7 +420,7 @@ class AdminViewTests(TestCase):
             title="doc2025.pdf",
             file=ContentFile(b"data", name="doc2025.pdf"),
         )
-        url = reverse("admin:tracker_financialyear_download_multi_zip")
+        url = reverse("admin:taxtracker_financialyear_download_multi_zip")
         response = self.client.post(
             url,
             {"fy_ids": [self.fy.pk, fy2025.pk], "action": "zip"},
@@ -444,7 +449,7 @@ class AdminViewTests(TestCase):
     def test_download_multi_zip_post_view_index(self):
         """POST with action=view_index returns markdown containing FY headers."""
         fy2025 = FinancialYear.objects.create(year=2025)
-        url = reverse("admin:tracker_financialyear_download_multi_zip")
+        url = reverse("admin:taxtracker_financialyear_download_multi_zip")
         response = self.client.post(
             url,
             {"fy_ids": [self.fy.pk, fy2025.pk], "action": "view_index"},
@@ -456,7 +461,7 @@ class AdminViewTests(TestCase):
         self.assertIn("FY2025", content)
 
     def test_download_db_backup_view(self):
-        url = reverse("admin:tracker_financialyear_download_db_backup")
+        url = reverse("admin:taxtracker_financialyear_download_db_backup")
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/x-sqlite3")
@@ -473,12 +478,14 @@ class AdminViewTests(TestCase):
         non_super.save()
         client = Client()
         client.login(username="regular", password="pass")
-        url = reverse("admin:tracker_financialyear_download_db_backup")
+        url = reverse("admin:taxtracker_financialyear_download_db_backup")
         response = client.get(url)
         self.assertEqual(response.status_code, 403)
 
     def test_copy_to_new_year_get(self):
-        url = reverse("admin:tracker_financialyear_copy_to_new_year", args=[self.fy.pk])
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "FY2025")
@@ -514,7 +521,7 @@ class AdminViewTests(TestCase):
             file=ContentFile(b"no-target-fy", name="no-target-fy.pdf"),
         )
 
-        url = reverse("admin:tracker_item_reassign_attachments", args=[self.item.pk])
+        url = reverse("admin:taxtracker_item_reassign_attachments", args=[self.item.pk])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Total attachments: 4")
@@ -556,23 +563,23 @@ class AdminViewTests(TestCase):
             order=1,
         )
 
-        url = reverse("admin:tracker_item_change", args=[current_item.pk])
+        url = reverse("admin:taxtracker_item_change", args=[current_item.pk])
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(
             response,
-            reverse("admin:tracker_item_change", args=[prev_item.pk]),
+            reverse("admin:taxtracker_item_change", args=[prev_item.pk]),
         )
         self.assertContains(response, "← Previous Year (FY2023)")
         self.assertContains(
             response,
-            reverse("admin:tracker_item_change", args=[next_item.pk]),
+            reverse("admin:taxtracker_item_change", args=[next_item.pk]),
         )
         self.assertContains(response, "Next Year (FY2025) →")
 
     def test_item_change_view_missing_object_uses_admin_redirect(self):
-        url = reverse("admin:tracker_item_change", args=[999999])
+        url = reverse("admin:taxtracker_item_change", args=[999999])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 302)
 
@@ -603,7 +610,7 @@ class AdminViewTests(TestCase):
             file=ContentFile(b"unmovable", name="unmovable.pdf"),
         )
 
-        url = reverse("admin:tracker_item_reassign_attachments", args=[self.item.pk])
+        url = reverse("admin:taxtracker_item_reassign_attachments", args=[self.item.pk])
         response = self.client.post(
             url,
             data={"move_attachment_ids": [str(to_move.pk)]},
@@ -635,7 +642,7 @@ class ItemChildInlineTests(TestCase):
         self.parent_item = Item.objects.create(year=self.fy, title="Parent", order=1)
 
     def _item_change_url(self, item):
-        return reverse("admin:tracker_item_change", args=[item.pk])
+        return reverse("admin:taxtracker_item_change", args=[item.pk])
 
     def test_inline_child_inherits_year_on_save(self):
         """Saving a new inline sub-item must not raise IntegrityError."""
@@ -764,7 +771,7 @@ class ItemParentCycleTests(TestCase):
             c.clean()
 
     def _item_change_url(self, item):
-        return reverse("admin:tracker_item_change", args=[item.pk])
+        return reverse("admin:taxtracker_item_change", args=[item.pk])
 
     def test_admin_form_rejects_direct_cycle(self):
         """Admin form shows a form error (not RecursionError) for self-parent."""
@@ -965,147 +972,6 @@ class EnsureSuperuserCommandTests(TestCase):
         self.assertEqual(len(printed_password), 32)
         user.refresh_from_db()
         self.assertTrue(user.check_password(printed_password))
-
-
-class FileTypeModelTests(TestCase):
-    """Tests for FileType, MimeType, and FileExtension models."""
-
-    def setUp(self):
-        self.ft = FileType.objects.create(short_name="PDF", full_name="PDF Document")
-
-    def test_filetype_str(self):
-        self.assertEqual(str(self.ft), "PDF")
-
-    def test_filetype_short_name_unique(self):
-        from django.db import IntegrityError
-
-        with self.assertRaises(IntegrityError):
-            FileType.objects.create(short_name="PDF", full_name="Other PDF")
-
-    def test_filetype_full_name_unique(self):
-        from django.db import IntegrityError
-
-        with self.assertRaises(IntegrityError):
-            FileType.objects.create(short_name="PDF2", full_name="PDF Document")
-
-    # ------------------------------------------------------------------
-    # MimeType tests
-    # ------------------------------------------------------------------
-
-    def test_mimetype_str(self):
-        mt = MimeType.objects.create(
-            file_type=self.ft, mime_type="application/pdf", is_primary=True
-        )
-        self.assertEqual(str(mt), "application/pdf")
-
-    def test_mimetype_valid_formats(self):
-        valid = [
-            "application/pdf",
-            "image/jpeg",
-            "text/plain",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "application/x-pdf",
-        ]
-        for mt_str in valid:
-            mt = MimeType(file_type=self.ft, mime_type=mt_str)
-            mt.clean()  # should not raise
-
-    def test_mimetype_invalid_no_slash(self):
-        mt = MimeType(file_type=self.ft, mime_type="applicationpdf")
-        with self.assertRaises(ValidationError):
-            mt.clean()
-
-    def test_mimetype_invalid_two_slashes(self):
-        mt = MimeType(file_type=self.ft, mime_type="application/pdf/extra")
-        with self.assertRaises(ValidationError):
-            mt.clean()
-
-    def test_mimetype_invalid_with_space(self):
-        mt = MimeType(file_type=self.ft, mime_type="application /pdf")
-        with self.assertRaises(ValidationError):
-            mt.clean()
-
-    def test_mimetype_globally_unique(self):
-        from django.db import IntegrityError
-
-        ft2 = FileType.objects.create(short_name="PDF2", full_name="PDF 2")
-        MimeType.objects.create(
-            file_type=self.ft, mime_type="application/pdf", is_primary=True
-        )
-        with self.assertRaises(IntegrityError):
-            MimeType.objects.create(
-                file_type=ft2, mime_type="application/pdf", is_primary=False
-            )
-
-    def test_at_most_one_primary_mime_type_per_file_type(self):
-        from django.db import IntegrityError
-
-        MimeType.objects.create(
-            file_type=self.ft, mime_type="application/pdf", is_primary=True
-        )
-        with self.assertRaises(IntegrityError):
-            MimeType.objects.create(
-                file_type=self.ft, mime_type="application/x-pdf", is_primary=True
-            )
-
-    # ------------------------------------------------------------------
-    # FileExtension tests
-    # ------------------------------------------------------------------
-
-    def test_extension_str(self):
-        ext = FileExtension.objects.create(
-            file_type=self.ft, extension="pdf", is_primary=True
-        )
-        self.assertEqual(str(ext), "pdf")
-
-    def test_extension_forced_lowercase_on_save(self):
-        ext = FileExtension(file_type=self.ft, extension="PDF", is_primary=True)
-        ext.save()
-        ext.refresh_from_db()
-        self.assertEqual(ext.extension, "pdf")
-
-    def test_extension_forced_lowercase_in_clean(self):
-        ext = FileExtension(file_type=self.ft, extension="PDF")
-        ext.clean()
-        self.assertEqual(ext.extension, "pdf")
-
-    def test_extension_invalid_with_dot(self):
-        ext = FileExtension(file_type=self.ft, extension=".pdf")
-        with self.assertRaises(ValidationError):
-            ext.clean()
-
-    def test_extension_invalid_with_slash(self):
-        ext = FileExtension(file_type=self.ft, extension="pd/f")
-        with self.assertRaises(ValidationError):
-            ext.clean()
-
-    def test_extension_invalid_with_space(self):
-        ext = FileExtension(file_type=self.ft, extension="p df")
-        with self.assertRaises(ValidationError):
-            ext.clean()
-
-    def test_extension_globally_unique(self):
-        from django.db import IntegrityError
-
-        ft2 = FileType.objects.create(short_name="PDF2", full_name="PDF 2")
-        FileExtension.objects.create(
-            file_type=self.ft, extension="pdf", is_primary=True
-        )
-        with self.assertRaises(IntegrityError):
-            FileExtension.objects.create(
-                file_type=ft2, extension="pdf", is_primary=False
-            )
-
-    def test_at_most_one_primary_extension_per_file_type(self):
-        from django.db import IntegrityError
-
-        FileExtension.objects.create(
-            file_type=self.ft, extension="pdf", is_primary=True
-        )
-        with self.assertRaises(IntegrityError):
-            FileExtension.objects.create(
-                file_type=self.ft, extension="pdff", is_primary=True
-            )
 
 
 class AttachmentTitleTests(TestCase):
@@ -1409,216 +1275,6 @@ class DatabaseStorageTests(TestCase):
         att.refresh_from_db()
         self.assertEqual(att.file_type, ft2)
 
-    # ------------------------------------------------------------------
-    # File serving view
-    # ------------------------------------------------------------------
-
-    def test_serve_file_view(self):
-        """The serve_file_view should return the correct file content."""
-        User.objects.create_superuser("admin", "a@b.com", "pass")
-        client = Client()
-        client.login(username="admin", password="pass")
-
-        content = b"Hello attachment content"
-        att = Attachment(item=self.item, file=self._simple_file("served.txt", content))
-        att.save()
-        pk = att.file.storage._name_to_pk(att.file.name)
-
-        url = reverse("admin:tracker_attachment_serve_file", args=[pk])
-        response = client.get(url)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content, content)
-        self.assertIn("served.txt", response.get("Content-Disposition", ""))
-
-    def test_serve_file_view_requires_login(self):
-        """Unauthenticated requests to the serve view should redirect to login."""
-        att = Attachment(item=self.item, file=self._simple_file("secret.pdf"))
-        att.save()
-        pk = att.file.storage._name_to_pk(att.file.name)
-        url = reverse("admin:tracker_attachment_serve_file", args=[pk])
-        response = Client().get(url)
-        # Django admin redirects unauthenticated users to the login page
-        self.assertEqual(response.status_code, 302)
-        self.assertIn("/login/", response["Location"])
-
-
-class FileTypePrimaryValidationTests(TestCase):
-    """Tests for the 'at least one primary' admin formset validation."""
-
-    def setUp(self):
-        self.user = User.objects.create_superuser("admin", "a@b.com", "pass")
-        self.client = Client()
-        self.client.login(username="admin", password="pass")
-
-    def _post_filetype(self, mime_types=None, extensions=None):
-        """POST to FileType add view with inline mime types and extensions."""
-        data = {
-            "short_name": "TST",
-            "full_name": "Test Type",
-            # Management forms
-            "mime_types-TOTAL_FORMS": str(len(mime_types or [])),
-            "mime_types-INITIAL_FORMS": "0",
-            "mime_types-MIN_NUM_FORMS": "0",
-            "mime_types-MAX_NUM_FORMS": "1000",
-            "file_extensions-TOTAL_FORMS": str(len(extensions or [])),
-            "file_extensions-INITIAL_FORMS": "0",
-            "file_extensions-MIN_NUM_FORMS": "0",
-            "file_extensions-MAX_NUM_FORMS": "1000",
-        }
-        for i, mt in enumerate(mime_types or []):
-            data[f"mime_types-{i}-mime_type"] = mt["mime_type"]
-            data[f"mime_types-{i}-is_primary"] = "on" if mt.get("is_primary") else ""
-            data[f"mime_types-{i}-id"] = ""
-            data[f"mime_types-{i}-file_type"] = ""
-        for i, ext in enumerate(extensions or []):
-            data[f"file_extensions-{i}-extension"] = ext["extension"]
-            data[f"file_extensions-{i}-is_primary"] = (
-                "on" if ext.get("is_primary") else ""
-            )
-            data[f"file_extensions-{i}-id"] = ""
-            data[f"file_extensions-{i}-file_type"] = ""
-        url = reverse("admin:tracker_filetype_add")
-        return self.client.post(url, data)
-
-    # ------------------------------------------------------------------
-    # Auto-set primary (single row, not marked primary)
-    # ------------------------------------------------------------------
-
-    def test_single_mime_type_without_primary_auto_sets_primary(self):
-        """Exactly one MIME type with is_primary unchecked should be auto-set."""
-        response = self._post_filetype(
-            mime_types=[{"mime_type": "application/tst", "is_primary": False}],
-            extensions=[{"extension": "tst", "is_primary": True}],
-        )
-        self.assertEqual(response.status_code, 302)
-        ft = FileType.objects.get(short_name="TST")
-        self.assertTrue(ft.mime_types.get().is_primary)
-
-    def test_single_extension_without_primary_auto_sets_primary(self):
-        """Exactly one extension with is_primary unchecked should be auto-set."""
-        response = self._post_filetype(
-            mime_types=[{"mime_type": "application/tst", "is_primary": True}],
-            extensions=[{"extension": "tst", "is_primary": False}],
-        )
-        self.assertEqual(response.status_code, 302)
-        ft = FileType.objects.get(short_name="TST")
-        self.assertTrue(ft.file_extensions.get().is_primary)
-
-    # ------------------------------------------------------------------
-    # Multiple rows — primary required, or error
-    # ------------------------------------------------------------------
-
-    def test_multiple_mime_types_none_primary_fails(self):
-        """Multiple MIME types with none marked primary must fail validation."""
-        response = self._post_filetype(
-            mime_types=[
-                {"mime_type": "application/tst", "is_primary": False},
-                {"mime_type": "application/x-tst", "is_primary": False},
-            ]
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(
-            response, "At least one MIME type must be marked as primary"
-        )
-        self.assertFalse(FileType.objects.filter(short_name="TST").exists())
-
-    def test_multiple_extensions_none_primary_fails(self):
-        """Multiple extensions with none marked primary must fail validation."""
-        response = self._post_filetype(
-            mime_types=[{"mime_type": "application/tst", "is_primary": True}],
-            extensions=[
-                {"extension": "tst", "is_primary": False},
-                {"extension": "ts2", "is_primary": False},
-            ],
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(
-            response, "At least one file extension must be marked as primary"
-        )
-        self.assertFalse(FileType.objects.filter(short_name="TST").exists())
-
-    # ------------------------------------------------------------------
-    # Multiple primaries — validation error instead of IntegrityError
-    # ------------------------------------------------------------------
-
-    def test_multiple_primary_mime_types_shows_validation_error(self):
-        """Multiple MIME types all marked primary must produce a validation error."""
-        response = self._post_filetype(
-            mime_types=[
-                {"mime_type": "application/tst", "is_primary": True},
-                {"mime_type": "application/x-tst", "is_primary": True},
-            ]
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Only one MIME type may be marked as primary")
-        self.assertFalse(FileType.objects.filter(short_name="TST").exists())
-
-    def test_multiple_primary_extensions_shows_validation_error(self):
-        """Multiple extensions all marked primary must produce a validation error."""
-        response = self._post_filetype(
-            mime_types=[{"mime_type": "application/tst", "is_primary": True}],
-            extensions=[
-                {"extension": "tst", "is_primary": True},
-                {"extension": "ts2", "is_primary": True},
-            ],
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(
-            response, "Only one file extension may be marked as primary"
-        )
-        self.assertFalse(FileType.objects.filter(short_name="TST").exists())
-
-    # ------------------------------------------------------------------
-    # Successful saves
-    # ------------------------------------------------------------------
-
-    def test_with_primary_set_saves_successfully(self):
-        """FileType with at least one primary mime type and extension should save."""
-        response = self._post_filetype(
-            mime_types=[{"mime_type": "application/tst", "is_primary": True}],
-            extensions=[{"extension": "tst", "is_primary": True}],
-        )
-        self.assertEqual(response.status_code, 302)
-        self.assertTrue(FileType.objects.filter(short_name="TST").exists())
-
-    def test_only_extensions_no_mime_types_fails(self):
-        """FileType with only file extensions (no MIME types) must fail validation."""
-        response = self._post_filetype(
-            extensions=[{"extension": "tst", "is_primary": True}]
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "A file type must have at least one MIME type")
-        self.assertFalse(FileType.objects.filter(short_name="TST").exists())
-
-    def test_only_mime_types_no_extensions_fails(self):
-        """FileType with only MIME types (no file extensions) must fail validation."""
-        response = self._post_filetype(
-            mime_types=[{"mime_type": "application/tst", "is_primary": True}]
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(
-            response, "A file type must have at least one file extension"
-        )
-        self.assertFalse(FileType.objects.filter(short_name="TST").exists())
-
-    # ------------------------------------------------------------------
-    # At-least-one independent requirement
-    # ------------------------------------------------------------------
-
-    def test_no_mime_or_extension_fails_validation(self):
-        """Saving a FileType with no MIME types and no extensions must fail."""
-        response = self._post_filetype()
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(
-            response,
-            "A file type must have at least one MIME type",
-        )
-        self.assertContains(
-            response,
-            "A file type must have at least one file extension",
-        )
-        self.assertFalse(FileType.objects.filter(short_name="TST").exists())
-
 
 # ---------------------------------------------------------------------------
 # _adjust_notes_headings unit tests
@@ -1681,7 +1337,7 @@ class ZipIndexHeadingAdjustmentTests(TestCase):
         self.fy = FinancialYear.objects.create(year=2024)
 
     def _get_index(self):
-        url = reverse("admin:tracker_financialyear_download_zip", args=[self.fy.pk])
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
         response = self.client.get(url)
         buf = io.BytesIO(response.content)
         with zipfile.ZipFile(buf) as zf:
@@ -1888,7 +1544,7 @@ class ImportArchiveViewTests(TestCase):
         self.item = Item.objects.create(year=self.fy, title="Test Item", order=1)
 
     def _import_url(self):
-        return reverse("admin:tracker_item_import_archive", args=[self.item.pk])
+        return reverse("admin:taxtracker_item_import_archive", args=[self.item.pk])
 
     # ------------------------------------------------------------------
     # GET — show upload form
@@ -1901,7 +1557,7 @@ class ImportArchiveViewTests(TestCase):
         self.assertContains(response, "Test Item")
 
     def test_change_form_has_import_archive_link(self):
-        url = reverse("admin:tracker_item_change", args=[self.item.pk])
+        url = reverse("admin:taxtracker_item_change", args=[self.item.pk])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Import Archive")
@@ -1922,7 +1578,7 @@ class ImportArchiveViewTests(TestCase):
         )
         self.assertRedirects(
             response,
-            reverse("admin:tracker_item_change", args=[self.item.pk]),
+            reverse("admin:taxtracker_item_change", args=[self.item.pk]),
         )
         self.assertEqual(Attachment.objects.filter(item=self.item).count(), before + 1)
 
@@ -2057,3 +1713,153 @@ class ImportArchiveViewTests(TestCase):
         client = self._limited_client("limited3", "change_item", "add_attachment")
         response = client.get(self._import_url())
         self.assertEqual(response.status_code, 200)
+
+
+# ---------------------------------------------------------------------------
+# upgrade_legacy_db management command tests
+# ---------------------------------------------------------------------------
+
+
+class LegacyUpgradeCommandTests(TestCase):
+    """Tests for the upgrade_legacy_db management command.
+
+    Each test first inverts the fresh core/taxtracker test schema back into
+    the pre-rename 'tracker' shape, mimicking a database created before the
+    lifetracker/core split, then exercises the command against it.
+    """
+
+    TABLE_RENAMES = {
+        "core_filetype": "tracker_filetype",
+        "core_mimetype": "tracker_mimetype",
+        "core_fileextension": "tracker_fileextension",
+        "core_dbstoredfile": "tracker_dbstoredfile",
+        "taxtracker_financialyear": "tracker_financialyear",
+        "taxtracker_financialyearstatushistory": ("tracker_financialyearstatushistory"),
+        "taxtracker_item": "tracker_item",
+        "taxtracker_attachment": "tracker_attachment",
+    }
+    CORE_MODELS = ["filetype", "mimetype", "fileextension", "dbstoredfile"]
+    TAXTRACKER_MODELS = [
+        "financialyear",
+        "financialyearstatushistory",
+        "item",
+        "attachment",
+    ]
+    LEGACY_MIGRATION_NAMES = [
+        "0001_initial",
+        "0002_filetype_model",
+        "0003_dbstoredfile_alter_attachment_file",
+        "0004_attachment_date",
+        "0005_financialyear_status_financialyearstatushistory",
+    ]
+
+    def _revert_to_legacy_schema(self):
+        with connection.cursor() as cursor:
+            for new_name, old_name in self.TABLE_RENAMES.items():
+                cursor.execute(
+                    f"ALTER TABLE {connection.ops.quote_name(new_name)} "
+                    f"RENAME TO {connection.ops.quote_name(old_name)}"
+                )
+            core_placeholders = ", ".join(["%s"] * len(self.CORE_MODELS))
+            cursor.execute(
+                "UPDATE django_content_type SET app_label = 'tracker' "
+                f"WHERE app_label = 'core' AND model IN ({core_placeholders})",
+                self.CORE_MODELS,
+            )
+            taxtracker_placeholders = ", ".join(["%s"] * len(self.TAXTRACKER_MODELS))
+            cursor.execute(
+                "UPDATE django_content_type SET app_label = 'tracker' "
+                "WHERE app_label = 'taxtracker' AND model IN "
+                f"({taxtracker_placeholders})",
+                self.TAXTRACKER_MODELS,
+            )
+            cursor.execute(
+                "DELETE FROM django_migrations WHERE app IN ('core', 'taxtracker')"
+            )
+        recorder = MigrationRecorder(connection)
+        for name in self.LEGACY_MIGRATION_NAMES:
+            recorder.record_applied("tracker", name)
+
+    def _call(self):
+        from io import StringIO
+
+        out = StringIO()
+        call_command("upgrade_legacy_db", stdout=out)
+        return out.getvalue()
+
+    def test_upgrade_renames_tables_and_data_survives(self):
+        fy = FinancialYear.objects.create(year=2024)
+        item = Item.objects.create(year=fy, title="Income", order=1)
+        self._revert_to_legacy_schema()
+
+        self._call()
+
+        tables = set(connection.introspection.table_names())
+        for new_name in self.TABLE_RENAMES:
+            self.assertIn(new_name, tables)
+        for old_name in self.TABLE_RENAMES.values():
+            self.assertNotIn(old_name, tables)
+
+        fy.refresh_from_db()
+        item.refresh_from_db()
+        self.assertEqual(fy.year, 2024)
+        self.assertEqual(item.title, "Income")
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) FROM django_content_type WHERE app_label = 'tracker'"
+            )
+            self.assertEqual(cursor.fetchone()[0], 0)
+            cursor.execute(
+                "SELECT app, name FROM django_migrations "
+                "WHERE app IN ('core', 'taxtracker')"
+            )
+            rows = {(r[0], r[1]) for r in cursor.fetchall()}
+        self.assertEqual(
+            rows, {("core", "0001_initial"), ("taxtracker", "0001_initial")}
+        )
+
+    def test_upgrade_preserves_content_type_primary_keys(self):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id, app_label, model FROM django_content_type "
+                "WHERE app_label IN ('core', 'taxtracker')"
+            )
+            before = {(row[1], row[2]): row[0] for row in cursor.fetchall()}
+
+        self._revert_to_legacy_schema()
+        self._call()
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id, app_label, model FROM django_content_type "
+                "WHERE app_label IN ('core', 'taxtracker')"
+            )
+            after = {(row[1], row[2]): row[0] for row in cursor.fetchall()}
+        self.assertEqual(before, after)
+
+    def test_second_run_is_a_no_op(self):
+        self._revert_to_legacy_schema()
+        self._call()
+        output = self._call()
+        self.assertIn("nothing to do", output)
+
+    def test_fresh_state_is_a_no_op(self):
+        output = self._call()
+        self.assertIn("nothing to do", output)
+
+    def test_partial_legacy_state_raises(self):
+        """A database with only some legacy tables renamed is refused."""
+        self._revert_to_legacy_schema()
+        with connection.cursor() as cursor:
+            cursor.execute("ALTER TABLE tracker_filetype RENAME TO core_filetype")
+        with self.assertRaises(CommandError):
+            self._call()
+
+    def test_mixed_state_raises(self):
+        """Legacy tables present alongside an already-existing target table."""
+        self._revert_to_legacy_schema()
+        with connection.cursor() as cursor:
+            cursor.execute("CREATE TABLE core_filetype (id integer primary key)")
+        with self.assertRaises(CommandError):
+            self._call()

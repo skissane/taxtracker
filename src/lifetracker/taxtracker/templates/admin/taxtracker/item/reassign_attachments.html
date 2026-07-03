@@ -5,8 +5,8 @@
 {% block breadcrumbs %}
   <div class="breadcrumbs">
     <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> ›
-    <a href="{% url 'admin:tracker_item_changelist' %}">Items</a> ›
-    <a href="{% url 'admin:tracker_item_change' item.pk %}">{{ item }}</a> ›
+    <a href="{% url 'admin:taxtracker_item_changelist' %}">Items</a> ›
+    <a href="{% url 'admin:taxtracker_item_change' item.pk %}">{{ item }}</a> ›
     Reassign Attachments
   </div>
 {% endblock breadcrumbs %}
@@ -46,12 +46,12 @@
         {% for row in result_rows %}
           <tr>
             <td>
-              <a href="{% url 'admin:tracker_attachment_change' row.attachment.pk %}">{{ row.attachment.title }}</a>
+              <a href="{% url 'admin:taxtracker_attachment_change' row.attachment.pk %}">{{ row.attachment.title }}</a>
             </td>
             <td>{{ row.attachment.date }}</td>
             <td>
               {% if row.target_item %}
-                <a href="{% url 'admin:tracker_item_change' row.target_item.pk %}">{{ row.target_item }}</a>
+                <a href="{% url 'admin:taxtracker_item_change' row.target_item.pk %}">{{ row.target_item }}</a>
               {% else %}
                 <span role="img" aria-label="Warning">⚠️</span> {{ row.warning }}
               {% endif %}
@@ -87,15 +87,15 @@
                 {% endif %}
               </td>
               <td>
-                <a href="{% url 'admin:tracker_attachment_change' row.attachment.pk %}">{{ row.attachment.title }}</a>
+                <a href="{% url 'admin:taxtracker_attachment_change' row.attachment.pk %}">{{ row.attachment.title }}</a>
               </td>
               <td>{{ row.attachment.date }}</td>
               <td>
-                <a href="{% url 'admin:tracker_item_change' item.pk %}">{{ item }}</a>
+                <a href="{% url 'admin:taxtracker_item_change' item.pk %}">{{ item }}</a>
               </td>
               <td>
                 {% if row.target_item %}
-                  <a href="{% url 'admin:tracker_item_change' row.target_item.pk %}">{{ row.target_item }}</a>
+                  <a href="{% url 'admin:taxtracker_item_change' row.target_item.pk %}">{{ row.target_item }}</a>
                 {% else %}
                   <span role="img" aria-label="Warning">⚠️</span> {{ row.warning }}
                 {% endif %}
@@ -107,7 +107,7 @@
       <div class="submit-row">
         <input type="submit" value="Move selected attachments" class="default">
         <a class="button cancel"
-           href="{% url 'admin:tracker_item_change' item.pk %}">Cancel</a>
+           href="{% url 'admin:taxtracker_item_change' item.pk %}">Cancel</a>
       </div>
     </form>
   {% else %}
@@ -115,6 +115,6 @@
   {% endif %}
   <p class="tt-footer">
     <a class="button default"
-       href="{% url 'admin:tracker_item_change' item.pk %}">← Back to {{ item }}</a>
+       href="{% url 'admin:taxtracker_item_change' item.pk %}">← Back to {{ item }}</a>
   </p>
 {% endblock content %}

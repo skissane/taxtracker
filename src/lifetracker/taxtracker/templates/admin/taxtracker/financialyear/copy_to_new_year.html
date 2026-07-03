@@ -5,8 +5,8 @@
 {% block breadcrumbs %}
   <div class="breadcrumbs">
     <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> ›
-    <a href="{% url 'admin:tracker_financialyear_changelist' %}">Financial Years</a> ›
-    <a href="{% url 'admin:tracker_financialyear_change' fy.pk %}">{{ fy }}</a> ›
+    <a href="{% url 'admin:taxtracker_financialyear_changelist' %}">Financial Years</a> ›
+    <a href="{% url 'admin:taxtracker_financialyear_change' fy.pk %}">{{ fy }}</a> ›
     Copy to New Year
   </div>
 {% endblock breadcrumbs %}
@@ -23,7 +23,7 @@
              value="Confirm — Create FY{{ new_year_num }}"
              class="button default">
       <a class="button cancel"
-         href="{% url 'admin:tracker_financialyear_change' fy.pk %}">Cancel</a>
+         href="{% url 'admin:taxtracker_financialyear_change' fy.pk %}">Cancel</a>
     </div>
   </form>
 {% endblock content %}

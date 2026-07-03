@@ -1,15 +1,12 @@
 import io
-import mimetypes
 import re
 import zipfile
 from pathlib import Path
-from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib import admin, messages
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import PermissionDenied
 from django.db import connections, transaction
-from django.forms import BaseInlineFormSet
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.response import TemplateResponse
@@ -17,100 +14,16 @@ from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
 
+from lifetracker.core.models import DBStoredFile
+
 from .archives import UnsupportedArchiveError, extract_from_archive_with_skips
 from .forms import AttachmentForm, ImportArchiveForm
 from .models import (
     Attachment,
-    DBStoredFile,
-    FileExtension,
-    FileType,
     FinancialYear,
     FinancialYearStatusHistory,
     Item,
-    MimeType,
 )
-
-# ---------------------------------------------------------------------------
-# Formsets — "at least one primary" validation
-# ---------------------------------------------------------------------------
-
-
-class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
-    """Base formset that enforces exactly one row is marked is_primary=True.
-
-    Rules:
-    - If _nonempty_error is set and there are no non-deleted rows, raise it.
-    - If exactly one non-deleted row exists and none is marked primary,
-      automatically mark it as primary (and persist the change).
-    - If multiple rows exist and none is marked primary, raise ValidationError.
-    - If multiple rows are marked primary, raise ValidationError (prevents
-      IntegrityError from the unique DB constraint).
-    """
-
-    _primary_label = "item"
-    _nonempty_error = None  # if set, raised when there are no non-deleted rows
-    _auto_primary_form = None  # set in clean() when auto-setting a single row
-
-    def clean(self):
-        super().clean()
-        if any(self.errors):
-            return
-        non_deleted_forms = [
-            f
-            for f in self.forms
-            if f.cleaned_data and not f.cleaned_data.get("DELETE", False)
-        ]
-        if not non_deleted_forms:
-            if self._nonempty_error:
-                raise ValidationError(self._nonempty_error)
-            return
-        primary_forms = [
-            f for f in non_deleted_forms if f.cleaned_data.get("is_primary")
-        ]
-        if len(primary_forms) > 1:
-            raise ValidationError(
-                f"Only one {self._primary_label} may be marked as primary."
-            )
-        if not primary_forms:
-            if len(non_deleted_forms) == 1:
-                # Exactly one row — auto-set it as primary.
-                # We update both cleaned_data (used if the form itself is saved
-                # via form.save()) and instance.is_primary (used as a fallback for
-                # unchanged existing rows that form.save() may skip).
-                non_deleted_forms[0].cleaned_data["is_primary"] = True
-                non_deleted_forms[0].instance.is_primary = True
-                self._auto_primary_form = non_deleted_forms[0]
-            else:
-                raise ValidationError(
-                    f"At least one {self._primary_label} must be marked as primary."
-                )
-
-    def save(self, commit=True):
-        instances = super().save(commit=commit)
-        # For the auto-set-primary case, ensure the DB is updated even when the
-        # form was not otherwise "changed" (e.g. an existing row already in the DB
-        # whose is_primary was False and the user didn't explicitly tick the box).
-        if commit and self._auto_primary_form is not None:
-            inst = self._auto_primary_form.instance
-            # clean() sets inst.is_primary = True in memory, so that value cannot
-            # be used to decide whether persistence is needed. For existing rows,
-            # unconditionally issue the UPDATE so unchanged forms are persisted.
-            # New rows are already saved by super().save() with is_primary=True.
-            if inst.pk:
-                self.model.objects.filter(pk=inst.pk).update(is_primary=True)
-            inst.is_primary = True
-        return instances
-
-
-class MimeTypeFormSet(_AtLeastOnePrimaryFormSet):
-    _primary_label = "MIME type"
-    _nonempty_error = "A file type must have at least one MIME type."
-
-
-class FileExtensionFormSet(_AtLeastOnePrimaryFormSet):
-    _primary_label = "file extension"
-    _nonempty_error = "A file type must have at least one file extension."
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -124,9 +37,9 @@ def _attachment_date_warning(obj):
     fy = obj.item.year
     if obj.date < fy.start_date or obj.date > fy.end_date:
         return format_html(
-            '<span title="Date is outside the financial year ({} \u2013 {})"'
+            '<span title="Date is outside the financial year ({} – {})"'
             ' role="img" aria-label="Date is outside the financial year">'
-            "\u26a0\ufe0f</span>",
+            "⚠️</span>",
             fy.start_date,
             fy.end_date,
         )
@@ -194,7 +107,7 @@ class AttachmentInline(admin.TabularInline):
     def change_link(self, obj):
         if not obj.pk:
             return "—"
-        url = reverse("admin:tracker_attachment_change", args=[obj.pk])
+        url = reverse("admin:taxtracker_attachment_change", args=[obj.pk])
         return format_html('<a href="{}">Edit</a>', url)
 
 
@@ -231,19 +144,19 @@ class ItemAdmin(admin.ModelAdmin):
             path(
                 "<int:pk>/import-archive/",
                 self.admin_site.admin_view(self.import_archive_view),
-                name="tracker_item_import_archive",
+                name="taxtracker_item_import_archive",
             ),
             path(
                 "<int:pk>/reassign-attachments/",
                 self.admin_site.admin_view(self.reassign_attachments_view),
-                name="tracker_item_reassign_attachments",
+                name="taxtracker_item_reassign_attachments",
             ),
         ]
         return custom + super().get_urls()
 
     @admin.display(description="Year")
     def year_link(self, obj):
-        url = reverse("admin:tracker_financialyear_change", args=[obj.year_id])
+        url = reverse("admin:taxtracker_financialyear_change", args=[obj.year_id])
         return format_html('<a href="{}">{}</a>', url, obj.year)
 
     def get_queryset(self, request):
@@ -310,10 +223,10 @@ class ItemAdmin(admin.ModelAdmin):
         next_fy = FinancialYear.objects.filter(year=item.year.year + 1).first()
 
         response.context_data["import_archive_url"] = reverse(
-            "admin:tracker_item_import_archive", args=[object_id]
+            "admin:taxtracker_item_import_archive", args=[object_id]
         )
         response.context_data["reassign_attachments_url"] = reverse(
-            "admin:tracker_item_reassign_attachments", args=[object_id]
+            "admin:taxtracker_item_reassign_attachments", args=[object_id]
         )
         response.context_data["prev_item"] = (
             _find_equivalent_item(path_signature, prev_fy) if prev_fy else None
@@ -407,7 +320,7 @@ class ItemAdmin(admin.ModelAdmin):
                     f"No attachments could be extracted from '{filename}'.",
                 )
 
-            return redirect(reverse("admin:tracker_item_change", args=[item.pk]))
+            return redirect(reverse("admin:taxtracker_item_change", args=[item.pk]))
 
         context = {
             **self.admin_site.each_context(request),
@@ -416,7 +329,7 @@ class ItemAdmin(admin.ModelAdmin):
             "form": form,
             "opts": self.model._meta,
         }
-        return render(request, "admin/tracker/item/import_archive.html", context)
+        return render(request, "admin/taxtracker/item/import_archive.html", context)
 
     # ------------------------------------------------------------------
     # Reassign out-of-year attachments view
@@ -529,7 +442,9 @@ class ItemAdmin(admin.ModelAdmin):
             "result_summary": result_summary,
             "opts": self.model._meta,
         }
-        return render(request, "admin/tracker/item/reassign_attachments.html", context)
+        return render(
+            request, "admin/taxtracker/item/reassign_attachments.html", context
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -565,37 +480,6 @@ class AttachmentAdmin(admin.ModelAdmin):
     @admin.display(description="")
     def date_warning(self, obj):
         return _attachment_date_warning(obj)
-
-    def get_urls(self):
-        custom = [
-            path(
-                "file/<int:pk>/",
-                self.admin_site.admin_view(self.serve_file_view),
-                name="tracker_attachment_serve_file",
-            ),
-        ]
-        return custom + super().get_urls()
-
-    def serve_file_view(self, request, pk):
-        obj = get_object_or_404(DBStoredFile, pk=pk)
-        content = bytes(obj.content)
-        content_type, _ = mimetypes.guess_type(obj.filename)
-        if not content_type:
-            content_type = "application/octet-stream"
-        response = HttpResponse(content, content_type=content_type)
-        filename_encoded = quote(obj.filename, safe="")
-        filename_ascii = (
-            obj.filename.encode("ascii", errors="ignore")
-            .decode("ascii")
-            .replace("\\", "\\\\")
-            .replace('"', '\\"')
-        )
-        cd = (
-            f'inline; filename="{filename_ascii}";'
-            f" filename*=UTF-8''{filename_encoded}"
-        )
-        response["Content-Disposition"] = cd
-        return response
 
 
 # ---------------------------------------------------------------------------
@@ -736,58 +620,6 @@ def _build_multi_index_md(fys):
     return "\n\n---\n\n".join(parts)
 
 
-# ---------------------------------------------------------------------------
-# FileType Admin
-# ---------------------------------------------------------------------------
-
-
-class MimeTypeInline(admin.TabularInline):
-    model = MimeType
-    extra = 1
-    fields = ("mime_type", "is_primary")
-    formset = MimeTypeFormSet
-
-
-class FileExtensionInline(admin.TabularInline):
-    model = FileExtension
-    extra = 1
-    fields = ("extension", "is_primary")
-    formset = FileExtensionFormSet
-
-
-@admin.register(FileType)
-class FileTypeAdmin(admin.ModelAdmin):
-    list_display = ("short_name", "full_name", "primary_mime_type", "primary_extension")
-    search_fields = ("short_name", "full_name")
-    inlines = [MimeTypeInline, FileExtensionInline]
-
-    @admin.display(description="Primary MIME Type")
-    def primary_mime_type(self, obj):
-        mt = obj.mime_types.filter(is_primary=True).first()
-        return mt.mime_type if mt else "—"
-
-    @admin.display(description="Primary Extension")
-    def primary_extension(self, obj):
-        ext = obj.file_extensions.filter(is_primary=True).first()
-        return ext.extension if ext else "—"
-
-
-@admin.register(MimeType)
-class MimeTypeAdmin(admin.ModelAdmin):
-    list_display = ("mime_type", "file_type", "is_primary")
-    list_filter = ("file_type", "is_primary")
-    search_fields = ("mime_type",)
-    list_select_related = ("file_type",)
-
-
-@admin.register(FileExtension)
-class FileExtensionAdmin(admin.ModelAdmin):
-    list_display = ("extension", "file_type", "is_primary")
-    list_filter = ("file_type", "is_primary")
-    search_fields = ("extension",)
-    list_select_related = ("file_type",)
-
-
 class FinancialYearStatusHistoryInline(admin.TabularInline):
     model = FinancialYearStatusHistory
     extra = 0
@@ -819,27 +651,27 @@ class FinancialYearAdmin(admin.ModelAdmin):
             path(
                 "<int:pk>/summary/",
                 self.admin_site.admin_view(self.summary_view),
-                name="tracker_financialyear_summary",
+                name="taxtracker_financialyear_summary",
             ),
             path(
                 "<int:pk>/download-zip/",
                 self.admin_site.admin_view(self.download_zip_view),
-                name="tracker_financialyear_download_zip",
+                name="taxtracker_financialyear_download_zip",
             ),
             path(
                 "<int:pk>/copy-to-new-year/",
                 self.admin_site.admin_view(self.copy_to_new_year_view),
-                name="tracker_financialyear_copy_to_new_year",
+                name="taxtracker_financialyear_copy_to_new_year",
             ),
             path(
                 "download-db-backup/",
                 self.admin_site.admin_view(self.download_db_backup_view),
-                name="tracker_financialyear_download_db_backup",
+                name="taxtracker_financialyear_download_db_backup",
             ),
             path(
                 "download-multi-zip/",
                 self.admin_site.admin_view(self.download_multi_zip_view),
-                name="tracker_financialyear_download_multi_zip",
+                name="taxtracker_financialyear_download_multi_zip",
             ),
         ]
         return custom + super().get_urls()
@@ -873,12 +705,12 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
     @admin.display(description="Summary")
     def summary_link(self, obj):
-        url = reverse("admin:tracker_financialyear_summary", args=[obj.pk])
+        url = reverse("admin:taxtracker_financialyear_summary", args=[obj.pk])
         return format_html('<a href="{}">View Summary</a>', url)
 
     @admin.display(description="Download")
     def download_zip_link(self, obj):
-        url = reverse("admin:tracker_financialyear_download_zip", args=[obj.pk])
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[obj.pk])
         return format_html('<a href="{}">Download ZIP</a>', url)
 
     _STATUS_SHORT_LABELS = {
@@ -907,10 +739,10 @@ class FinancialYearAdmin(admin.ModelAdmin):
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
         extra_context["download_db_backup_url"] = reverse(
-            "admin:tracker_financialyear_download_db_backup"
+            "admin:taxtracker_financialyear_download_db_backup"
         )
         extra_context["download_multi_zip_url"] = reverse(
-            "admin:tracker_financialyear_download_multi_zip"
+            "admin:taxtracker_financialyear_download_multi_zip"
         )
         return super().changelist_view(request, extra_context)
 
@@ -960,7 +792,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
             "next_fy": next_fy,
             "opts": self.model._meta,
         }
-        return render(request, "admin/tracker/financialyear/summary.html", context)
+        return render(request, "admin/taxtracker/financialyear/summary.html", context)
 
     # ------------------------------------------------------------------
     # ZIP download view
@@ -1021,7 +853,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
         }
         return render(
             request,
-            "admin/tracker/financialyear/download_multi_zip.html",
+            "admin/taxtracker/financialyear/download_multi_zip.html",
             context,
         )
 
@@ -1036,7 +868,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
         engine = settings.DATABASES["default"]["ENGINE"]
         if engine != "django.db.backends.sqlite3":
             messages.error(request, "DB backup is only available for SQLite databases.")
-            return redirect(reverse("admin:tracker_financialyear_changelist"))
+            return redirect(reverse("admin:taxtracker_financialyear_changelist"))
 
         with connections["default"].cursor() as cursor:
             backup_bytes = cursor.connection.serialize()
@@ -1062,7 +894,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
                 request,
                 f"FY{new_year_num} already exists.",
             )
-            return redirect(reverse("admin:tracker_financialyear_changelist"))
+            return redirect(reverse("admin:taxtracker_financialyear_changelist"))
 
         if request.method == "POST":
             with transaction.atomic():
@@ -1073,7 +905,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
                 f"Created FY{new_year_num} with items copied from {fy}.",
             )
             return redirect(
-                reverse("admin:tracker_financialyear_change", args=[new_fy.pk])
+                reverse("admin:taxtracker_financialyear_change", args=[new_fy.pk])
             )
 
         context = {
@@ -1085,7 +917,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
         }
         return render(
             request,
-            "admin/tracker/financialyear/copy_to_new_year.html",
+            "admin/taxtracker/financialyear/copy_to_new_year.html",
             context,
         )
 
@@ -1096,13 +928,13 @@ class FinancialYearAdmin(admin.ModelAdmin):
     def change_view(self, request, object_id, form_url="", extra_context=None):
         extra_context = extra_context or {}
         extra_context["summary_url"] = reverse(
-            "admin:tracker_financialyear_summary", args=[object_id]
+            "admin:taxtracker_financialyear_summary", args=[object_id]
         )
         extra_context["download_zip_url"] = reverse(
-            "admin:tracker_financialyear_download_zip", args=[object_id]
+            "admin:taxtracker_financialyear_download_zip", args=[object_id]
         )
         extra_context["copy_to_new_year_url"] = reverse(
-            "admin:tracker_financialyear_copy_to_new_year", args=[object_id]
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[object_id]
         )
         fy = FinancialYear.objects.filter(pk=object_id).first()
         if fy:
