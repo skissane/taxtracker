@@ -19,6 +19,11 @@ build/
 dist/
 *.egg-info/
 
+# Coverage
+.coverage
+htmlcov/
+coverage.xml
+
 # Environments
 .env
 .env.*

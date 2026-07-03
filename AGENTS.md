@@ -4,6 +4,15 @@ This file provides guidance to AI coding assistants working with code in this re
 
 ## Commands
 
+CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run
+everything CI runs, or `just --list` to see individual recipes (`lint`, `fmt-check`,
+`lint-templates`, `fmt-check-templates`, `coverage`, `sync`, `lock-check`). `just ci` drifts from
+`ci.yml` if the workflow changes without a matching justfile edit; `run_workflow_local.py`
+avoids that by parsing the workflow YAML directly and running its `run:` steps as written
+(see its docstring for what it does and doesn't support). After `just coverage` runs, CI uploads
+`coverage.xml` to Codecov (`codecov/codecov-action`); this step needs a `CODECOV_TOKEN` repo
+secret from codecov.io and is skipped by `run_workflow_local.py` since it's a `uses:` step.
+
 ```bash
 # Start the app (sync deps, migrate, create superuser, runserver)
 ./run.sh
@@ -15,9 +24,12 @@ uv run python manage.py test taxtracker.tracker
 uv run python manage.py test taxtracker.tracker.tests.ItemModelTests
 uv run python manage.py test taxtracker.tracker.tests.ItemModelTests.test_str_root
 
-# Lint
-uv run ruff check src/
-uv run ruff format src/
+# Run tests under coverage, print a report, and write coverage.xml (no minimum enforced)
+just coverage
+
+# Lint (matches `just lint`/`just fmt-check`, which check the whole repo root)
+uv run ruff check .
+uv run ruff format .
 
 # Template lint
 uv run djlint --check src/taxtracker/tracker/templates/

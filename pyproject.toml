@@ -5,14 +5,16 @@ description = "Tax Return tracker app"
 readme = "README.md"
 requires-python = "~=3.14.0"
 dependencies = [
-    "django==6.0.6",
+    "django>=6.0.6",
     "pdfkit>=1.0.0",
 ]
 
 [dependency-groups]
 dev = [
+    "coverage>=7.6",
     "djlint>=1.40.1",
-    "ruff==0.15.20",
+    "pyyaml>=6.0",
+    "ruff>=0.15.20",
 ]
 
 [tool.ruff]
@@ -32,3 +34,11 @@ profile = "django"
 indent = 2
 blank_line_after_tag = "load,extends"
 ignore = "H030,H031"
+
+[tool.coverage.run]
+source = ["src/taxtracker"]
+omit = ["*/migrations/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
