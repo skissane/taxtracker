@@ -42,10 +42,11 @@ fmt-templates:
 test:
     uv run python manage.py test taxtracker.tracker --verbosity=2
 
-# Run the test suite under coverage and print a report
+# Run the test suite under coverage, print a report, and write coverage.xml
 coverage:
     uv run --group dev coverage run manage.py test taxtracker.tracker --verbosity=2
     uv run --group dev coverage report
+    uv run --group dev coverage xml
 
 # Run every ruff/djlint lint and format-check step (no fixes, no tests)
 check: lint fmt-check lint-templates fmt-check-templates
