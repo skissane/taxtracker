@@ -1,9 +1,20 @@
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+import coverage
+from django.contrib import admin
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
+from django.forms import inlineformset_factory
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from .models import DBStoredFile, FileExtension, FileType, MimeType
+from .admin import DBStoredFileAdmin, _AtLeastOnePrimaryFormSet
+from .models import DatabaseStorage, DBStoredFile, FileExtension, FileType, MimeType
 
 
 class FileTypeModelTests(TestCase):
@@ -354,3 +365,353 @@ class ServeFileViewTests(TestCase):
         # Django admin redirects unauthenticated users to the login page
         self.assertEqual(response.status_code, 302)
         self.assertIn("/login/", response["Location"])
+
+
+class DatabaseStorageTests(TestCase):
+    """Tests for the DatabaseStorage custom storage backend."""
+
+    def setUp(self):
+        self.storage = DatabaseStorage()
+
+    def test_dbstoredfile_str(self):
+        obj = DBStoredFile.objects.create(filename="report.pdf", content=b"data")
+        self.assertEqual(str(obj), "report.pdf")
+
+    def test_save_and_open_round_trip(self):
+        name = self.storage.save("report.pdf", ContentFile(b"hello world"))
+        self.assertTrue(name.startswith("db/"))
+        self.assertTrue(name.endswith("/report.pdf"))
+        with self.storage.open(name) as f:
+            self.assertEqual(f.read(), b"hello world")
+
+    def test_exists_true_for_saved_file(self):
+        name = self.storage.save("a.txt", ContentFile(b"x"))
+        self.assertTrue(self.storage.exists(name))
+
+    def test_exists_false_for_missing_pk(self):
+        self.assertFalse(self.storage.exists("db/999999/missing.txt"))
+
+    def test_exists_false_for_malformed_name(self):
+        self.assertFalse(self.storage.exists("not-a-db-path"))
+
+    def test_size(self):
+        name = self.storage.save("sized.txt", ContentFile(b"0123456789"))
+        self.assertEqual(self.storage.size(name), 10)
+
+    def test_delete_removes_stored_file(self):
+        name = self.storage.save("deleteme.txt", ContentFile(b"bye"))
+        self.storage.delete(name)
+        self.assertFalse(self.storage.exists(name))
+
+    def test_delete_malformed_name_is_a_no_op(self):
+        # Should not raise even though the name can't be parsed into a pk.
+        self.storage.delete("not-a-db-path")
+
+    def test_delete_missing_pk_is_a_no_op(self):
+        # Valid path shape but no matching row — filter().delete() is a no-op.
+        self.storage.delete("db/999999/missing.txt")
+
+    def test_url(self):
+        name = self.storage.save("linked.txt", ContentFile(b"y"))
+        pk = DBStoredFile.objects.get().pk
+        self.assertEqual(
+            self.storage.url(name),
+            reverse("admin:core_dbstoredfile_serve_file", args=[pk]),
+        )
+
+    def test_get_available_name_short_name_unchanged(self):
+        self.assertEqual(
+            self.storage.get_available_name("short.txt", max_length=100), "short.txt"
+        )
+
+    def test_get_available_name_truncates_long_stem(self):
+        name = "a" * 50 + ".txt"
+        result = self.storage.get_available_name(name, max_length=20)
+        self.assertTrue(result.endswith(".txt"))
+        self.assertLessEqual(len(result), 20)
+
+    def test_get_available_name_truncates_hard_when_suffix_too_long(self):
+        # allowed <= 0: suffix alone exceeds max_length, so we hard-truncate.
+        name = "a." + "b" * 30
+        result = self.storage.get_available_name(name, max_length=10)
+        self.assertEqual(result, name[:10])
+
+    def test_name_to_pk_rejects_non_str(self):
+        with self.assertRaises(ValueError):
+            self.storage._name_to_pk(123)
+
+    def test_name_to_pk_rejects_missing_prefix(self):
+        with self.assertRaises(ValueError):
+            self.storage._name_to_pk("other/1/file.txt")
+
+    def test_name_to_pk_rejects_non_integer_pk(self):
+        with self.assertRaises(ValueError):
+            self.storage._name_to_pk("db/notanumber/file.txt")
+
+
+class AtLeastOnePrimaryFormSetTests(TestCase):
+    """Direct unit tests for base-class branches not reachable through the
+    concrete MimeTypeFormSet/FileExtensionFormSet subclasses used in the admin."""
+
+    def setUp(self):
+        self.ft = FileType.objects.create(short_name="TST", full_name="Test Type")
+
+    def test_field_errors_short_circuit_formset_clean(self):
+        """An invalid mime_type value should short-circuit clean() via
+        any(self.errors)."""
+        from .admin import MimeTypeFormSet
+
+        FormSet = inlineformset_factory(
+            FileType,
+            MimeType,
+            formset=MimeTypeFormSet,
+            fields=["mime_type", "is_primary"],
+            extra=0,
+        )
+        data = {
+            "mime_types-TOTAL_FORMS": "1",
+            "mime_types-INITIAL_FORMS": "0",
+            "mime_types-MIN_NUM_FORMS": "0",
+            "mime_types-MAX_NUM_FORMS": "1000",
+            "mime_types-0-mime_type": "not-a-valid-mime-type",
+            "mime_types-0-is_primary": "on",
+            "mime_types-0-id": "",
+            "mime_types-0-file_type": "",
+        }
+        fs = FormSet(data, instance=self.ft, prefix="mime_types")
+        self.assertFalse(fs.is_valid())
+        self.assertTrue(any(fs.errors))
+
+    def test_no_nonempty_error_returns_when_no_rows(self):
+        """When a subclass leaves _nonempty_error unset, clean() is a no-op for
+        an empty formset instead of raising."""
+
+        class _NoNonemptyErrorFormSet(_AtLeastOnePrimaryFormSet):
+            pass
+
+        FormSet = inlineformset_factory(
+            FileType,
+            MimeType,
+            formset=_NoNonemptyErrorFormSet,
+            fields=["mime_type", "is_primary"],
+            extra=0,
+        )
+        data = {
+            "mime_types-TOTAL_FORMS": "0",
+            "mime_types-INITIAL_FORMS": "0",
+            "mime_types-MIN_NUM_FORMS": "0",
+            "mime_types-MAX_NUM_FORMS": "1000",
+        }
+        fs = FormSet(data, instance=self.ft, prefix="mime_types")
+        self.assertTrue(fs.is_valid())
+
+
+class FileTypeAdminDisplayTests(TestCase):
+    """Tests for FileTypeAdmin's primary_mime_type/primary_extension columns."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin", "a@b.com", "pass")
+        self.client = Client()
+        self.client.login(username="admin", password="pass")
+
+    def test_changelist_shows_primary_mime_type_and_extension(self):
+        ft = FileType.objects.create(short_name="PDF", full_name="PDF Document")
+        MimeType.objects.create(
+            file_type=ft, mime_type="application/pdf", is_primary=True
+        )
+        FileExtension.objects.create(file_type=ft, extension="pdf", is_primary=True)
+
+        response = self.client.get(reverse("admin:core_filetype_changelist"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "application/pdf")
+        self.assertContains(response, "pdf")
+
+    def test_changelist_shows_placeholder_when_no_primary(self):
+        FileType.objects.create(short_name="NOP", full_name="No Primary")
+
+        response = self.client.get(reverse("admin:core_filetype_changelist"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "—")  # em dash placeholder
+
+
+class DBStoredFileAdminPermissionTests(TestCase):
+    """DBStoredFileAdmin exists only to host the serve-file view; every
+    permission check should always deny."""
+
+    def setUp(self):
+        self.admin = DBStoredFileAdmin(DBStoredFile, admin.site)
+
+    def test_permissions_all_denied(self):
+        self.assertFalse(self.admin.has_add_permission(None))
+        self.assertFalse(self.admin.has_change_permission(None))
+        self.assertFalse(self.admin.has_delete_permission(None))
+
+
+class ServeFileViewMimeTypeFallbackTests(TestCase):
+    """serve_file_view should fall back to application/octet-stream for
+    filenames with no guessable MIME type."""
+
+    def test_unknown_extension_falls_back_to_octet_stream(self):
+        User.objects.create_superuser("admin", "a@b.com", "pass")
+        client = Client()
+        client.login(username="admin", password="pass")
+
+        obj = DBStoredFile.objects.create(
+            filename="mystery.notarealext", content=b"binary data"
+        )
+        url = reverse("admin:core_dbstoredfile_serve_file", args=[obj.pk])
+        response = client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/octet-stream")
+
+
+class ProjectEntryPointTests(TestCase):
+    """The asgi/wsgi entry-point modules are never imported by the app code
+    itself (a real deployment imports them from outside the project), so
+    nothing else exercises them."""
+
+    def test_wsgi_application_is_importable(self):
+        from lifetracker.wsgi import application
+
+        self.assertTrue(callable(application))
+
+    def test_asgi_application_is_importable(self):
+        from lifetracker.asgi import application
+
+        self.assertTrue(callable(application))
+
+
+class SettingsSecretKeyTests(TestCase):
+    """settings.py computes SECRET_KEY at import time, from a file under
+    $HOME, before Django is even configured. It can only be exercised by
+    importing it fresh in a subprocess with a controlled $HOME — the version
+    already imported for this test run reflects whatever the real ~/.config
+    looked like when the suite started."""
+
+    SRC_DIR = Path(__file__).resolve().parent.parent.parent
+    REPO_ROOT = SRC_DIR.parent
+
+    def _run(self, home, extra_env=None):
+        env = {
+            "HOME": str(home),
+            "PATH": os.environ.get("PATH", ""),
+            "PYTHONPATH": str(self.SRC_DIR),
+        }
+        if extra_env:
+            env.update(extra_env)
+
+        code = "import lifetracker.settings as s; print(s.SECRET_KEY)"
+        # When this test run itself is under `coverage run`, also measure the
+        # child interpreter, so the many settings.py branches only reachable
+        # via subprocess (see class docstring) count towards the total.
+        if coverage.Coverage.current() is not None:
+            env["COVERAGE_PROCESS_START"] = str(self.REPO_ROOT / "pyproject.toml")
+            code = "import coverage; coverage.process_startup(); " + code
+
+        return subprocess.run(
+            [sys.executable, "-c", code],
+            env=env,
+            cwd=str(self.REPO_ROOT),
+            capture_output=True,
+            text=True,
+        )
+
+    def test_fresh_install_generates_and_persists_a_key(self):
+        with tempfile.TemporaryDirectory() as home:
+            proc = self._run(home)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            printed_key = proc.stdout.strip()
+            self.assertTrue(printed_key)
+
+            key_file = Path(home) / ".config" / "lifetracker" / "secret_key"
+            self.assertEqual(key_file.read_text().strip(), printed_key)
+            self.assertEqual(key_file.stat().st_mode & 0o777, 0o600)
+
+    def test_old_taxtracker_key_is_copied_forward(self):
+        with tempfile.TemporaryDirectory() as home:
+            old_dir = Path(home) / ".config" / "taxtracker"
+            old_dir.mkdir(parents=True)
+            (old_dir / "secret_key").write_text("legacy-secret-key-content\n")
+
+            proc = self._run(home)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip(), "legacy-secret-key-content")
+
+            new_key_file = Path(home) / ".config" / "lifetracker" / "secret_key"
+            self.assertEqual(
+                new_key_file.read_text().strip(), "legacy-secret-key-content"
+            )
+
+    def test_unreadable_old_key_falls_back_to_fresh_key(self):
+        """An OSError while reading the legacy key must not be fatal — it
+        should just skip the migration and generate a fresh key instead."""
+        with tempfile.TemporaryDirectory() as home:
+            old_dir = Path(home) / ".config" / "taxtracker"
+            old_dir.mkdir(parents=True)
+            old_file = old_dir / "secret_key"
+            old_file.write_text("legacy-secret-key-content\n")
+            old_file.chmod(0o000)
+            try:
+                proc = self._run(home)
+            finally:
+                old_file.chmod(0o600)  # so TemporaryDirectory cleanup can remove it
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertNotEqual(proc.stdout.strip(), "legacy-secret-key-content")
+
+    def test_migration_write_failure_is_swallowed_and_falls_through(self):
+        """If the new key's directory can't be created during migration, that
+        failure is swallowed — but the identical failure then hits again
+        during fresh-key generation, which is fatal."""
+        with tempfile.TemporaryDirectory() as home:
+            old_dir = Path(home) / ".config" / "taxtracker"
+            old_dir.mkdir(parents=True)
+            (old_dir / "secret_key").write_text("legacy-secret-key-content\n")
+            # A file where the new key's parent directory should be.
+            (Path(home) / ".config" / "lifetracker").write_text("not a directory")
+
+            proc = self._run(home)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("Could not write secret key file", proc.stderr)
+
+    def test_unreadable_existing_key_file_raises(self):
+        with tempfile.TemporaryDirectory() as home:
+            new_dir = Path(home) / ".config" / "lifetracker"
+            new_dir.mkdir(parents=True)
+            new_file = new_dir / "secret_key"
+            new_file.write_text("blocked\n")
+            new_file.chmod(0o000)
+            try:
+                proc = self._run(home)
+            finally:
+                new_file.chmod(0o600)
+
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("Could not read secret key file", proc.stderr)
+
+    def test_unwritable_key_directory_raises(self):
+        with tempfile.TemporaryDirectory() as home:
+            config_dir = Path(home) / ".config"
+            config_dir.mkdir(parents=True)
+            # A file where the new key's parent directory should be, and no
+            # legacy key present — so migration is skipped entirely and the
+            # fresh-key write is the first (and only) thing that fails.
+            (config_dir / "lifetracker").write_text("not a directory")
+
+            proc = self._run(home)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("Could not write secret key file", proc.stderr)
+
+    def test_override_env_var_skips_migration(self):
+        with tempfile.TemporaryDirectory() as home:
+            old_dir = Path(home) / ".config" / "taxtracker"
+            old_dir.mkdir(parents=True)
+            (old_dir / "secret_key").write_text("legacy-secret-key-content\n")
+            override_path = Path(home) / "custom" / "secret_key"
+
+            proc = self._run(
+                home, extra_env={"LIFETRACKER_SECRET_KEY_FILE": str(override_path)}
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertNotEqual(proc.stdout.strip(), "legacy-secret-key-content")
+            self.assertTrue(override_path.exists())

@@ -45,6 +45,7 @@ test:
 # Run the test suite under coverage, print a report, and write coverage.xml
 coverage:
     uv run --group dev coverage run manage.py test lifetracker.core lifetracker.taxtracker --verbosity=2
+    uv run --group dev coverage combine
     uv run --group dev coverage report
     uv run --group dev coverage xml
 

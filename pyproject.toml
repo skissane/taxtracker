@@ -38,6 +38,7 @@ ignore = "H030,H031"
 [tool.coverage.run]
 source = ["src/lifetracker"]
 omit = ["*/migrations/*"]
+parallel = true
 
 [tool.coverage.report]
 show_missing = true
