@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
 """Filter a ZIP file by skipping members whose names contain a specific substring."""
 
-import argparse
 import sys
 import zipfile
+
+import click
 
 
 def filter_zip(input_path, output_path, reject_substring):
@@ -40,28 +40,10 @@ def filter_zip(input_path, output_path, reject_substring):
         sys.exit(1)
 
 
-def main():
-    # Set up the argument parser
-    parser = argparse.ArgumentParser(
-        description="Filter ZIP file, skipping members whose names contain substring."
-    )
-
-    # Define the three required positional arguments
-    parser.add_argument("input_zip", help="Path to the source ZIP file.")
-    parser.add_argument(
-        "output_zip", help="Path where the filtered ZIP file will be saved."
-    )
-    parser.add_argument(
-        "reject_substring",
-        help="Substring to check against file names. Matches will be skipped.",
-    )
-
-    # Parse arguments from the command line
-    args = parser.parse_args()
-
-    # Execute the filtering function
-    filter_zip(args.input_zip, args.output_zip, args.reject_substring)
-
-
-if __name__ == "__main__":
-    main()
+@click.command("filter-zip")
+@click.argument("input_zip")
+@click.argument("output_zip")
+@click.argument("reject_substring")
+def filter_zip_command(input_zip: str, output_zip: str, reject_substring: str) -> None:
+    """Filter ZIP file, skipping members whose names contain substring."""
+    filter_zip(input_zip, output_zip, reject_substring)

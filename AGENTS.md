@@ -19,7 +19,7 @@ secret from codecov.io and is skipped by `run_workflow_local.py` since it's a `u
 ./run.sh
 
 # Run all tests
-uv run python manage.py test lifetracker.core lifetracker.taxtracker
+uv run python manage.py test lifetracker.core lifetracker.taxtracker lifetracker.cli
 
 # Run a single test class or method
 uv run python manage.py test lifetracker.taxtracker.tests.ItemModelTests
@@ -34,6 +34,9 @@ uv run ruff format .
 
 # Template lint
 uv run djlint --check src/lifetracker/taxtracker/templates/
+
+# CLI utility scripts (email/PDF/zip helpers, unrelated to the Django app)
+uv run python cli.py --help
 ```
 
 ## Architecture
@@ -43,6 +46,7 @@ uv run djlint --check src/lifetracker/taxtracker/templates/
 **Package layout:** `src/lifetracker/` is the Django project (settings, urls). It contains two apps:
 - `src/lifetracker/core/` (label `core`) — generic infrastructure any future module can reuse: the file-type registry (`FileType`/`MimeType`/`FileExtension`) and DB-backed file storage (`DBStoredFile`/`DatabaseStorage`), plus the file-serving admin view.
 - `src/lifetracker/taxtracker/` (label `taxtracker`) — the tax-tracking module: `FinancialYear`/`Item`/`Attachment`, archive import, and their admin views/templates. This was the original (and currently only) module; more modules (banking, portfolio, insurance, etc.) may be added as siblings of `taxtracker` under `lifetracker` in future.
+- `src/lifetracker/cli/` — standalone `click`-based command-line utilities (`.eml`/HAR/ZIP extraction and conversion helpers) unrelated to the Django app; not a Django app, not in `INSTALLED_APPS`. Invoked via the root launcher `cli.py` (e.g. `uv run python cli.py extract-eml <file> <out.zip>`), which inserts `src/` onto `sys.path` the same way `manage.py` does.
 
 `taxtracker` depends on `core` (via the `Attachment.file_type` FK and `DatabaseStorage`); `core` has no dependency on `taxtracker`.
 

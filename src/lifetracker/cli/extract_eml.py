@@ -1,16 +1,16 @@
-#!/usr/bin/env python3
 """Extract attachments from a .eml file and write them into a .zip file."""
 
 import email
 import re
 import zipfile
-from argparse import ArgumentParser
 from contextlib import suppress
 from email import policy
 from email.generator import BytesGenerator
 from email.message import EmailMessage, Message
 from email.utils import parsedate_to_datetime
 from io import BytesIO
+
+import click
 
 
 def get_attachment_payload(part: EmailMessage) -> bytes | None:
@@ -130,27 +130,22 @@ def eml_to_zip(eml_file_path: str, output_zip_path: str, prefix: str = "") -> No
                 if isinstance(part_payload, list) and len(part_payload) == 1:
                     message_body: Message = part_payload[0]
                     content_type = message_body.get_content_type()
-            print(f"Added to ZIP: {zip_filename} ({content_type})")
+            click.echo(f"Added to ZIP: {zip_filename} ({content_type})")
 
-    print(f"\nSUCCESS: Extracted {attachment_count} attachments to {output_zip_path!r}")
-
-
-def main() -> None:
-    parser = ArgumentParser(
-        description="Extract attachments from a .eml file "
-        "and write them into a .zip file."
+    click.echo(
+        f"\nSUCCESS: Extracted {attachment_count} attachments to {output_zip_path!r}"
     )
-    parser.add_argument("eml_file", help="Path to the .eml file to process")
-    parser.add_argument("output_zip", help="Path to the output .zip file")
-    parser.add_argument(
-        "--prefix",
-        type=str,
-        default="",
-        help="Optional prefix for all extracted filenames",
-    )
-    args = parser.parse_args()
-    eml_to_zip(args.eml_file, args.output_zip, args.prefix)
 
 
-if __name__ == "__main__":
-    main()
+@click.command("extract-eml")
+@click.argument("eml_file")
+@click.argument("output_zip")
+@click.option(
+    "--prefix",
+    type=str,
+    default="",
+    help="Optional prefix for all extracted filenames",
+)
+def extract_eml_command(eml_file: str, output_zip: str, prefix: str) -> None:
+    """Extract attachments from a .eml file and write them into a .zip file."""
+    eml_to_zip(eml_file, output_zip, prefix)

@@ -1,21 +1,17 @@
-#!/usr/bin/env python3
 """Extract Fidelity PDF attachments from a HAR file.
 
-Usage:
-    python extract_fidelity_pdfs.py <har_file> <output_dir>
-
-The script scans the HAR file for GET requests to the Fidelity
-spshistoryservices endpoint, decodes the Base64-encoded PDF from
-each JSON response body, and writes the resulting PDF files to the
-given output directory.
+Scans the HAR file for GET requests to the Fidelity spshistoryservices
+endpoint, decodes the Base64-encoded PDF from each JSON response body, and
+writes the resulting PDF files to the given output directory.
 """
 
-import argparse
 import base64
 import binascii
 import json
 import sys
 from pathlib import Path
+
+import click
 
 FIDELITY_URL_PREFIX = (
     "https://netbenefitsww.fidelity.com"
@@ -142,22 +138,17 @@ def extract_pdfs(har_path: Path, output_dir: Path) -> int:
     return written
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Extract Fidelity PDF attachments from a HAR file."
-    )
-    parser.add_argument("har_file", help="Path to the HAR file")
-    parser.add_argument("output_dir", help="Directory to write extracted PDF files")
-    args = parser.parse_args()
-
-    har_path = Path(args.har_file)
+@click.command("extract-fidelity-pdfs")
+@click.argument("har_file")
+@click.argument("output_dir")
+def extract_fidelity_pdfs_command(har_file: str, output_dir: str) -> None:
+    """Extract Fidelity PDF attachments from a HAR file."""
+    har_path = Path(har_file)
     if not har_path.is_file():
         print(f"ERROR: HAR file not found: {har_path}", file=sys.stderr)
         sys.exit(1)
 
-    output_dir = Path(args.output_dir)
-
-    count = extract_pdfs(har_path, output_dir)
+    count = extract_pdfs(har_path, Path(output_dir))
     if count == 0:
         print(
             "No matching Fidelity PDF entries found in the HAR file.",
@@ -165,7 +156,3 @@ def main() -> None:
         )
     else:
         print(f"Done. {count} PDF file(s) extracted to {output_dir}.")
-
-
-if __name__ == "__main__":
-    main()
