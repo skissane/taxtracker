@@ -12,6 +12,8 @@ from django.test import TestCase
 from .extract_eml import (
     eml_to_zip,
     extract_eml_command,
+    get_attachment_payload,
+    get_email_date_prefix,
     get_unique_filename,
 )
 from .extract_fidelity_pdfs import (
@@ -92,6 +94,84 @@ class ExtractEmlTests(TestCase):
         self.assertEqual(get_unique_filename("a.pdf", used), "a.pdf")
         self.assertEqual(get_unique_filename("a.pdf", used), "a_1.pdf")
         self.assertEqual(get_unique_filename("a.pdf", used), "a_2.pdf")
+
+    def test_get_unique_filename_deduplicates_without_extension(self):
+        used: dict[str, int] = {}
+        self.assertEqual(get_unique_filename("noext", used), "noext")
+        self.assertEqual(get_unique_filename("noext", used), "noext_1")
+
+    def test_get_attachment_payload_message_payload_not_wrapped_in_list(self):
+        nested = EmailMessage()
+        nested.set_content("body")
+        part = EmailMessage()
+        part["Content-Type"] = "message/rfc822"
+        # set_payload (unlike set_content) assigns the Message directly,
+        # rather than wrapping it in a single-element list.
+        part.set_payload(nested)
+        self.assertIsNotNone(get_attachment_payload(part))
+
+    def test_get_attachment_payload_message_unrecognised_payload(self):
+        class FakePart:
+            def get_content_type(self):
+                return "message/rfc822"
+
+            def get_payload(self):
+                return "not a message object"
+
+        self.assertIsNone(get_attachment_payload(FakePart()))
+
+    def test_get_email_date_prefix_payload_not_wrapped_in_list(self):
+        nested = EmailMessage()
+        nested["Date"] = "Tue, 02 Jul 2024 08:30:00 +0000"
+        nested.set_content("body")
+        part = EmailMessage()
+        part["Content-Type"] = "message/rfc822"
+        part.set_payload(nested)
+        self.assertEqual(get_email_date_prefix(part), "2024-07-02-")
+
+    def test_get_email_date_prefix_no_date_header(self):
+        nested = EmailMessage()
+        nested.set_content("body")
+        part = EmailMessage()
+        part["Content-Type"] = "message/rfc822"
+        part.set_payload(nested)
+        self.assertEqual(get_email_date_prefix(part), "")
+
+    def test_get_email_date_prefix_unparseable_date(self):
+        nested = EmailMessage()
+        nested["Date"] = "not a real date"
+        nested.set_content("body")
+        part = EmailMessage()
+        part["Content-Type"] = "message/rfc822"
+        part.set_payload(nested)
+        self.assertEqual(get_email_date_prefix(part), "")
+
+    def test_get_email_date_prefix_unrecognised_payload(self):
+        class FakePart:
+            def get_content_type(self):
+                return "message/rfc822"
+
+            def get_payload(self):
+                return object()
+
+        self.assertEqual(get_email_date_prefix(FakePart()), "")
+
+    def test_skips_attachment_with_no_extractable_payload(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch(
+                "lifetracker.cli.extract_eml.get_attachment_payload",
+                return_value=None,
+            ),
+        ):
+            eml_path = Path(tmp) / "message.eml"
+            eml_path.write_bytes(_build_eml_with_nested())
+            zip_path = Path(tmp) / "out.zip"
+
+            eml_to_zip(str(eml_path), str(zip_path))
+
+            with zipfile.ZipFile(zip_path) as zf:
+                self.assertEqual(zf.namelist(), [])
 
     def test_cli_command_end_to_end(self):
         runner = CliRunner()
@@ -227,6 +307,43 @@ class ExtractFidelityPdfsTests(TestCase):
             self.assertEqual(extract_pdfs(har_path, out_dir), 1)
             self.assertTrue((out_dir / "evil.pdf").exists())
 
+    def test_skips_empty_filename(self):
+        """A URL with nothing after the 'c:' prefix yields an empty basename."""
+        with tempfile.TemporaryDirectory() as tmp:
+            har_path = Path(tmp) / "export.har"
+            har_path.write_bytes(self._make_har(filename=""))
+            out_dir = Path(tmp) / "out"
+
+            self.assertEqual(extract_pdfs(har_path, out_dir), 0)
+
+    def test_skips_undecodable_base64_body(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            har_path = Path(tmp) / "export.har"
+            har_path.write_bytes(
+                self._make_har(body_encoding="base64", body_text="not-base64!!")
+            )
+            out_dir = Path(tmp) / "out"
+
+            self.assertEqual(extract_pdfs(har_path, out_dir), 0)
+
+    def test_skips_empty_response_body(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            har_path = Path(tmp) / "export.har"
+            har_path.write_bytes(self._make_har(body_text=""))
+            out_dir = Path(tmp) / "out"
+
+            self.assertEqual(extract_pdfs(har_path, out_dir), 0)
+
+    def test_skips_undecodable_base64_file_content(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            har_path = Path(tmp) / "export.har"
+            har_path.write_bytes(
+                self._make_har(body_text=json.dumps({"fileContent": "abc"}))
+            )
+            out_dir = Path(tmp) / "out"
+
+            self.assertEqual(extract_pdfs(har_path, out_dir), 0)
+
     def test_cli_missing_har_file_exits_with_error(self):
         runner = CliRunner()
         with tempfile.TemporaryDirectory() as tmp:
@@ -249,6 +366,21 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertEqual(result.exit_code, 0, result.output)
             self.assertTrue((out_dir / "statement-2023-07-20.pdf").exists())
+
+    def test_cli_reports_when_no_entries_match(self):
+        runner = CliRunner()
+        with tempfile.TemporaryDirectory() as tmp:
+            har_path = Path(tmp) / "export.har"
+            har_path.write_bytes(json.dumps({"log": {"entries": []}}).encode())
+            out_dir = Path(tmp) / "out"
+
+            result = runner.invoke(
+                extract_fidelity_pdfs_command,
+                [str(har_path), str(out_dir)],
+            )
+
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertIn("No matching Fidelity PDF entries", result.output)
 
 
 class FilterZipTests(TestCase):
