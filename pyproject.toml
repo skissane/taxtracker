@@ -1,7 +1,7 @@
 [project]
-name = "taxtracker"
+name = "lifetracker"
 version = "0.1.0"
-description = "Tax Return tracker app"
+description = "Personal life admin tracker app (tax tracking is its first module)"
 readme = "README.md"
 requires-python = "~=3.14.0"
 dependencies = [
@@ -36,8 +36,9 @@ blank_line_after_tag = "load,extends"
 ignore = "H030,H031"
 
 [tool.coverage.run]
-source = ["src/taxtracker"]
+source = ["src/lifetracker"]
 omit = ["*/migrations/*"]
+parallel = true
 
 [tool.coverage.report]
 show_missing = true

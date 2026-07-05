@@ -1,0 +1,41 @@
+{% extends "admin/change_form.html" %}
+
+{% load i18n %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <style>
+  .tt-item-nav {
+    margin: 0 0 1em;
+  }
+
+  #id_notes {
+    font-family: monospace;
+  }
+  </style>
+{% endblock extrastyle %}
+{% block content %}
+  {% if prev_item or next_item %}
+    <p class="tt-item-nav">
+      {% if prev_item %}
+        <a href="{% url 'admin:taxtracker_item_change' prev_item.pk %}">← Previous Year ({{ prev_item.year }})</a>
+      {% endif %}
+      {% if next_item %}
+        {% if prev_item %}&nbsp;|&nbsp;{% endif %}
+        <a href="{% url 'admin:taxtracker_item_change' next_item.pk %}">Next Year ({{ next_item.year }}) →</a>
+      {% endif %}
+    </p>
+  {% endif %}
+  {{ block.super }}
+{% endblock content %}
+{% block object-tools-items %}
+  {% if original %}
+    <li>
+      <a href="{{ reassign_attachments_url }}" class="historylink">🗂️ Reassign Attachments</a>
+    </li>
+    <li>
+      <a href="{{ import_archive_url }}" class="historylink">📥 Import Archive</a>
+    </li>
+  {% endif %}
+  {{ block.super }}
+{% endblock object-tools-items %}
