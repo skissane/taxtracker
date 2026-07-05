@@ -1,7 +1,5 @@
-#!/usr/bin/env python3
 """Convert .eml files inside a ZIP archive into PDFs within a new ZIP archive."""
 
-import argparse
 import email
 import zipfile
 from email import policy
@@ -9,51 +7,46 @@ from html import escape
 from pathlib import Path
 from string import Template
 
+import click
 import pdfkit
 
+TEMPLATE_PATH = Path(__file__).parent / "zip_eml_to_pdf.template.html"
 
-def main():
-    # 1. Set up argparse for command-line inputs
-    parser = argparse.ArgumentParser(
-        description="Convert EML files in a ZIP to PDFs in a new ZIP."
-    )
-    parser.add_argument("input_zip", help="Path to the input ZIP containing .eml files")
-    parser.add_argument(
-        "output_zip", help="Path to the output ZIP where PDFs will be saved"
-    )
-    args = parser.parse_args()
 
-    print(f"Reading from: {args.input_zip}")
-    print(f"Writing to: {args.output_zip}")
+def convert_eml_zip_to_pdf(input_zip_path: str, output_zip_path: str) -> int:
+    """Convert every .eml member of *input_zip_path* into a PDF in *output_zip_path*.
 
+    Returns the number of PDFs written.
+    """
     # Options to suppress command line output from wkhtmltopdf
     options = {"quiet": ""}
+    html_template = TEMPLATE_PATH.read_text()
 
-    # 2. Open both ZIP files simultaneously (read one, write to the other)
+    converted = 0
     with (
-        zipfile.ZipFile(args.input_zip, "r") as in_zip,
-        zipfile.ZipFile(args.output_zip, "w", zipfile.ZIP_DEFLATED) as out_zip,
+        zipfile.ZipFile(input_zip_path, "r") as in_zip,
+        zipfile.ZipFile(output_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zip,
     ):
         # Filter for .eml files in the archive
         eml_files = [f for f in in_zip.namelist() if f.lower().endswith(".eml")]
 
         if not eml_files:
-            print("No .eml files found in the input ZIP.")
-            return
+            click.echo("No .eml files found in the input ZIP.")
+            return converted
 
-        print("Starting conversion...")
+        click.echo("Starting conversion...")
         for filename in eml_files:
             # Read the .eml file directly from the ZIP into memory
             with in_zip.open(filename, "r") as f:
                 msg = email.message_from_binary_file(f, policy=policy.default)
 
-            # 3. Extract the clean, high-level headers
+            # Extract the clean, high-level headers
             subject = msg.get("Subject", "No Subject")
             sender = msg.get("From", "Unknown Sender")
             recipient = msg.get("To", "Unknown Recipient")
             date = msg.get("Date", "Unknown Date")
 
-            # 4. Extract the email body (Targeting HTML)
+            # Extract the email body (Targeting HTML)
             body = ""
             body_is_html = False
             if msg.is_multipart():
@@ -71,10 +64,7 @@ def main():
                 body = msg.get_content()
                 body_is_html = msg.get_content_type() == "text/html"
 
-            # 5. Build a clean HTML structure combining headers and body
-            html_template = (
-                Path(__file__).parent / "zip_eml_to_pdf.template.html"
-            ).read_text()
+            # Build a clean HTML structure combining headers and body
             html_content = Template(html_template).substitute(
                 subject=escape(subject),
                 sender=escape(sender),
@@ -83,19 +73,31 @@ def main():
                 body=body if body_is_html else f"<pre>{escape(body)}</pre>",
             )
 
-            # 6. Convert the combined HTML into PDF bytes
+            # Convert the combined HTML into PDF bytes.
             # Passing 'False' instead of a file path forces pdfkit to return bytes
             pdf_bytes = pdfkit.from_string(html_content, False, options=options)
 
-            # 7. Write the generated PDF bytes directly into the output ZIP
+            # Write the generated PDF bytes directly into the output ZIP.
             # Strip the .eml extension and add .pdf
             pdf_filename = filename[:-4] + ".pdf"
             out_zip.writestr(pdf_filename, pdf_bytes)
+            converted += 1
 
-            print(f"Success: {pdf_filename}")
+            click.echo(f"Success: {pdf_filename}")
 
-    print(f"\nBatch complete! Your converted files are saved in {args.output_zip!r}.")
+    return converted
 
 
-if __name__ == "__main__":
-    main()
+@click.command("zip-eml-to-pdf")
+@click.argument("input_zip")
+@click.argument("output_zip")
+def zip_eml_to_pdf_command(input_zip: str, output_zip: str) -> None:
+    """Convert EML files in a ZIP to PDFs in a new ZIP."""
+    click.echo(f"Reading from: {input_zip}")
+    click.echo(f"Writing to: {output_zip}")
+
+    converted = convert_eml_zip_to_pdf(input_zip, output_zip)
+    if converted:
+        click.echo(
+            f"\nBatch complete! Your converted files are saved in {output_zip!r}."
+        )
