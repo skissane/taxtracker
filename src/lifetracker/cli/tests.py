@@ -59,7 +59,45 @@ def _build_eml_with_nested() -> bytes:
     return bytes(outer)
 
 
+def _build_eml_with_nested_pdf_attachment() -> bytes:
+    """A nested message/rfc822 attachment that itself has a PDF attachment,
+    exercising date-prefix inheritance for attachments nested inside a
+    forwarded email."""
+    nested = EmailMessage()
+    nested["From"] = "Payroll <payroll@example.com>"
+    nested["To"] = "Recipient <recipient@example.com>"
+    nested["Subject"] = "Payslip"
+    nested["Date"] = "Tue, 02 Jul 2024 08:30:00 +0000"
+    nested.set_content("Payslip body")
+    nested.add_attachment(
+        PDF_MAGIC, maintype="application", subtype="pdf", filename="payslip.pdf"
+    )
+
+    outer = EmailMessage()
+    outer["From"] = "Sender <sender@example.com>"
+    outer["To"] = "Recipient <recipient@example.com>"
+    outer["Subject"] = "Test Email"
+    outer["Date"] = "Mon, 01 Jul 2024 10:00:00 +0000"
+    outer.set_content("Hello body")
+    outer.add_attachment(nested, subtype="rfc822", filename="payslip.eml")
+    return bytes(outer)
+
+
 class ExtractEmlTests(TestCase):
+    def test_nested_pdf_attachment_inherits_containing_email_date(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            eml_path = Path(tmp) / "message.eml"
+            eml_path.write_bytes(_build_eml_with_nested_pdf_attachment())
+            zip_path = Path(tmp) / "out.zip"
+
+            eml_to_zip(str(eml_path), str(zip_path))
+
+            with zipfile.ZipFile(zip_path) as zf:
+                names = zf.namelist()
+                self.assertIn("2024-07-02-payslip.eml", names)
+                self.assertIn("2024-07-02-payslip.pdf", names)
+                self.assertEqual(zf.read("2024-07-02-payslip.pdf"), PDF_MAGIC)
+
     def test_extracts_attachments_and_nested_email(self):
         with tempfile.TemporaryDirectory() as tmp:
             eml_path = Path(tmp) / "message.eml"
