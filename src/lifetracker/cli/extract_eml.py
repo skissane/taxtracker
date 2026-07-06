@@ -55,6 +55,37 @@ def get_email_date_prefix(part: EmailMessage) -> str:
     return ""
 
 
+def iter_parts_with_date_prefix(part: EmailMessage, inherited_prefix: str = ""):
+    """Depth-first walk yielding (part, date_prefix) pairs.
+
+    Visits parts in the same depth-first order as ``Message.walk()``, but
+    unlike ``walk()`` does not yield plain multipart container parts
+    (``multipart/mixed``, ``multipart/alternative``, etc.) themselves - only
+    leaf parts and ``message/rfc822`` wrappers are yielded. An attached
+    email's date prefix is threaded down to the parts nested inside it (e.g.
+    a PDF attached to a forwarded payslip email), so nested attachments
+    inherit their containing email's date rather than only the ``.eml`` part
+    itself.
+    """
+    if part.get_content_type() == "message/rfc822":
+        prefix = get_email_date_prefix(part) or inherited_prefix
+        yield part, prefix
+
+        payload = part.get_payload()
+        if isinstance(payload, list) and payload:
+            yield from iter_parts_with_date_prefix(payload[0], prefix)
+        elif hasattr(payload, "get"):
+            yield from iter_parts_with_date_prefix(payload, prefix)
+        return
+
+    if part.is_multipart():
+        for subpart in part.iter_parts():
+            yield from iter_parts_with_date_prefix(subpart, inherited_prefix)
+        return
+
+    yield part, inherited_prefix
+
+
 def get_unique_filename(filename: str, used_filenames: dict[str, int]) -> str:
     """Make duplicate attachment names distinct inside the ZIP."""
     if filename not in used_filenames:
@@ -90,11 +121,7 @@ def eml_to_zip(eml_file_path: str, output_zip_path: str, prefix: str = "") -> No
         used_filenames: dict[str, int] = {}
 
         # 3. Walk through all parts of the email
-        for part in msg.walk():
-            # Skip multipart containers, but keep attached emails.
-            if part.is_multipart() and part.get_content_type() != "message/rfc822":
-                continue
-
+        for part, date_prefix in iter_parts_with_date_prefix(msg):
             # Get the filename of the attachment
             filename: str = part.get_filename() or ""
 
@@ -109,7 +136,7 @@ def eml_to_zip(eml_file_path: str, output_zip_path: str, prefix: str = "") -> No
             if prefix:
                 filename = f"{prefix}-{filename}"
 
-            filename = f"{get_email_date_prefix(part)}{filename}"
+            filename = f"{date_prefix}{filename}"
             file_ext = filename.rsplit(".")[-1] if "." in filename else ""
             filename = filename.removesuffix(f".{file_ext}") if file_ext else filename
             filename = "-".join(re.sub(r"[^A-Za-z0-9]", " ", filename).lower().split())
