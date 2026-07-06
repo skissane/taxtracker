@@ -118,10 +118,6 @@ def eml_to_zip(eml_file_path: str, output_zip_path: str, prefix: str = "") -> No
 
         # 3. Walk through all parts of the email
         for part, date_prefix in iter_parts_with_date_prefix(msg):
-            # Skip multipart containers, but keep attached emails.
-            if part.is_multipart() and part.get_content_type() != "message/rfc822":
-                continue
-
             # Get the filename of the attachment
             filename: str = part.get_filename() or ""
 

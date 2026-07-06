@@ -15,6 +15,7 @@ from .extract_eml import (
     get_attachment_payload,
     get_email_date_prefix,
     get_unique_filename,
+    iter_parts_with_date_prefix,
 )
 from .extract_fidelity_pdfs import (
     FIDELITY_URL_PREFIX,
@@ -84,6 +85,19 @@ def _build_eml_with_nested_pdf_attachment() -> bytes:
 
 
 class ExtractEmlTests(TestCase):
+    def test_iter_parts_with_date_prefix_payload_not_wrapped_in_list(self):
+        nested = EmailMessage()
+        nested["Date"] = "Tue, 02 Jul 2024 08:30:00 +0000"
+        nested.set_content("body")
+        part = EmailMessage()
+        part["Content-Type"] = "message/rfc822"
+        part.set_payload(nested)
+
+        results = list(iter_parts_with_date_prefix(part))
+
+        self.assertEqual([p for p, _ in results], [part, nested])
+        self.assertEqual([prefix for _, prefix in results], ["2024-07-02-"] * 2)
+
     def test_nested_pdf_attachment_inherits_containing_email_date(self):
         with tempfile.TemporaryDirectory() as tmp:
             eml_path = Path(tmp) / "message.eml"
@@ -157,6 +171,11 @@ class ExtractEmlTests(TestCase):
                 return "not a message object"
 
         self.assertIsNone(get_attachment_payload(FakePart()))
+
+    def test_get_email_date_prefix_non_rfc822_part(self):
+        part = EmailMessage()
+        part.set_content("body")
+        self.assertEqual(get_email_date_prefix(part), "")
 
     def test_get_email_date_prefix_payload_not_wrapped_in_list(self):
         nested = EmailMessage()
