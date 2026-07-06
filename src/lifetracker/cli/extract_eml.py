@@ -58,10 +58,14 @@ def get_email_date_prefix(part: EmailMessage) -> str:
 def iter_parts_with_date_prefix(part: EmailMessage, inherited_prefix: str = ""):
     """Depth-first walk yielding (part, date_prefix) pairs.
 
-    Mirrors the traversal order of ``Message.walk()``, but threads an attached
-    email's date prefix down to the parts nested inside it (e.g. a PDF
-    attached to a forwarded payslip email), so nested attachments inherit
-    their containing email's date rather than only the ``.eml`` part itself.
+    Visits parts in the same depth-first order as ``Message.walk()``, but
+    unlike ``walk()`` does not yield plain multipart container parts
+    (``multipart/mixed``, ``multipart/alternative``, etc.) themselves - only
+    leaf parts and ``message/rfc822`` wrappers are yielded. An attached
+    email's date prefix is threaded down to the parts nested inside it (e.g.
+    a PDF attached to a forwarded payslip email), so nested attachments
+    inherit their containing email's date rather than only the ``.eml`` part
+    itself.
     """
     if part.get_content_type() == "message/rfc822":
         prefix = get_email_date_prefix(part) or inherited_prefix
