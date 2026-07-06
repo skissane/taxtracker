@@ -13,7 +13,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "coverage>=7.6",
-    "djlint>=1.40.1",
+    "djlint>=1.40.3",
     "pyyaml>=6.0",
     "ruff>=0.15.20",
 ]
