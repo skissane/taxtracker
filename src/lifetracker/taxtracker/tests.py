@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import connection
+from django.db import IntegrityError, connection, transaction
 from django.db.migrations.recorder import MigrationRecorder
 from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
@@ -29,6 +29,7 @@ from .models import (
     FinancialYear,
     FinancialYearStatusHistory,
     Item,
+    ReceivedDocument,
     _extract_date_from_filename,
 )
 
@@ -191,6 +192,33 @@ class ItemYearInheritanceTests(TestCase):
         self.assertEqual(child.year_id, self.fy2024.pk)
 
 
+class ReceivedDocumentModelTests(TestCase):
+    def setUp(self):
+        self.fy = FinancialYear.objects.create(year=2024)
+
+    def test_str(self):
+        doc = ReceivedDocument.objects.create(
+            year=self.fy, title="Notice of Assessment"
+        )
+        self.assertEqual(str(doc), "FY2024: Notice of Assessment")
+
+    def test_date_nullable(self):
+        doc = ReceivedDocument.objects.create(year=self.fy, title="NOA")
+        doc.refresh_from_db()
+        self.assertIsNone(doc.date)
+
+    def test_ordering(self):
+        earlier = ReceivedDocument.objects.create(
+            year=self.fy, title="Earlier", date=datetime.date(2024, 1, 1)
+        )
+        later = ReceivedDocument.objects.create(
+            year=self.fy, title="Later", date=datetime.date(2024, 6, 1)
+        )
+        docs = list(ReceivedDocument.objects.all())
+        # Default ordering is descending by date.
+        self.assertEqual(docs, [later, earlier])
+
+
 class CopyItemsTests(TestCase):
     def setUp(self):
         self.fy = FinancialYear.objects.create(year=2024)
@@ -241,6 +269,80 @@ class CopyItemsTests(TestCase):
         # Should redirect back with error message
         self.assertEqual(response.status_code, 302)
         self.assertFalse(FinancialYear.objects.filter(year=2026).exists())
+
+
+class ReceivedDocumentAdminViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            "admin", "admin@example.com", "password"
+        )
+        self.client = Client()
+        self.client.login(username="admin", password="password")
+        self.fy = FinancialYear.objects.create(year=2024)
+        self.doc = ReceivedDocument.objects.create(year=self.fy, title="NOA")
+
+    def _add_url(self):
+        return reverse("admin:taxtracker_receiveddocument_add")
+
+    def _change_url(self, doc):
+        return reverse("admin:taxtracker_receiveddocument_change", args=[doc.pk])
+
+    def _base_post_data(self, **overrides):
+        data = {
+            "year": self.fy.pk,
+            "title": "NOA",
+            "date": "",
+            "notes": "",
+            "attachments-TOTAL_FORMS": "0",
+            "attachments-INITIAL_FORMS": "0",
+            "attachments-MIN_NUM_FORMS": "0",
+            "attachments-MAX_NUM_FORMS": "1000",
+        }
+        data.update(overrides)
+        return data
+
+    def test_changelist(self):
+        url = reverse("admin:taxtracker_receiveddocument_changelist")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "NOA")
+
+    def test_add_view_get(self):
+        response = self.client.get(self._add_url())
+        self.assertEqual(response.status_code, 200)
+
+    def test_add_creates_received_document(self):
+        response = self.client.post(
+            self._add_url(), self._base_post_data(title="New Doc")
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(ReceivedDocument.objects.filter(title="New Doc").exists())
+
+    def test_changelist_shows_year_link(self):
+        url = reverse("admin:taxtracker_receiveddocument_changelist")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        year_url = reverse("admin:taxtracker_financialyear_change", args=[self.fy.pk])
+        self.assertContains(response, year_url)
+
+    def test_inline_attachment_upload_sets_received_document(self):
+        upload = io.BytesIO(b"%PDF-1.4 test")
+        upload.name = "noa.pdf"
+        data = self._base_post_data(
+            **{
+                "attachments-TOTAL_FORMS": "1",
+                "attachments-0-id": "",
+                "attachments-0-title": "",
+                "attachments-0-date": "",
+                "attachments-0-notes": "",
+                "attachments-0-file": upload,
+            }
+        )
+        response = self.client.post(self._change_url(self.doc), data)
+        self.assertEqual(response.status_code, 302)
+        att = Attachment.objects.get(received_document=self.doc)
+        self.assertIsNone(att.item_id)
+        self.assertEqual(att.received_document_id, self.doc.pk)
 
 
 class AdminViewTests(TestCase):
@@ -1144,6 +1246,86 @@ class AttachmentDateTests(TestCase):
         self.assertIsNone(att.date)
 
 
+class AttachmentParentValidationTests(TestCase):
+    """Tests for Attachment's exactly-one-of item/received_document invariant."""
+
+    def setUp(self):
+        self.fy = FinancialYear.objects.create(year=2024)
+        self.item = Item.objects.create(year=self.fy, title="Income", order=1)
+        self.doc = ReceivedDocument.objects.create(year=self.fy, title="NOA")
+
+    def _make_file(self, name="report.pdf"):
+        return ContentFile(b"data", name=name)
+
+    def test_item_only_is_valid(self):
+        att = Attachment(item=self.item, file=self._make_file())
+        att.full_clean()
+
+    def test_received_document_only_is_valid(self):
+        att = Attachment(received_document=self.doc, file=self._make_file())
+        att.full_clean()
+
+    def test_neither_parent_raises_validation_error(self):
+        att = Attachment(file=self._make_file())
+        with self.assertRaises(ValidationError):
+            att.full_clean()
+
+    def test_both_parents_raises_validation_error(self):
+        att = Attachment(
+            item=self.item, received_document=self.doc, file=self._make_file()
+        )
+        with self.assertRaises(ValidationError):
+            att.full_clean()
+
+    def test_str_uses_item_when_item_is_parent(self):
+        att = Attachment(item=self.item, title="Report", file=self._make_file())
+        self.assertIn(str(self.item), str(att))
+
+    def test_str_uses_received_document_when_received_document_is_parent(self):
+        att = Attachment(
+            received_document=self.doc, title="Report", file=self._make_file()
+        )
+        self.assertIn(str(self.doc), str(att))
+
+    def test_unsaved_parent_with_no_id_yet_is_valid(self):
+        """clean() must not reject a child of a brand-new, not-yet-saved
+        parent -- the FK id is only populated once the parent is actually
+        saved (e.g. admin "add" view with an inline attachment). Calling
+        clean() directly here (not full_clean()) isolates this from the
+        separate, unrelated CheckConstraint pre-validation that Django's
+        full_clean() also runs -- that check legitimately can't pass for
+        an unsaved parent, but the real admin inline-formset flow never
+        exercises it (the sibling parent field is absent from the child
+        form there, so Django excludes it from validation)."""
+        new_doc = ReceivedDocument(year=self.fy, title="Unsaved NOA")
+        att = Attachment(received_document=new_doc, file=self._make_file())
+        att.clean()
+
+
+class AttachmentParentConstraintTests(TestCase):
+    """The DB CheckConstraint fires even when clean()/full_clean() is bypassed."""
+
+    def setUp(self):
+        self.fy = FinancialYear.objects.create(year=2024)
+
+    def test_neither_parent_raises_integrity_error(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Attachment.objects.create(
+                title="Orphan", file=ContentFile(b"data", name="orphan.pdf")
+            )
+
+    def test_both_parents_raises_integrity_error(self):
+        item = Item.objects.create(year=self.fy, title="Income", order=1)
+        doc = ReceivedDocument.objects.create(year=self.fy, title="NOA")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Attachment.objects.create(
+                item=item,
+                received_document=doc,
+                title="Both",
+                file=ContentFile(b"data", name="both.pdf"),
+            )
+
+
 class AttachmentDateInputFormatTests(TestCase):
     """Tests for FlexibleDateField and the extra English date-input formats."""
 
@@ -1797,6 +1979,19 @@ class _LegacyUpgradeSchemaMixin:
                 f"({taxtracker_placeholders})",
                 self.TAXTRACKER_MODELS,
             )
+            # Models added after the legacy schema (e.g. ReceivedDocument) never
+            # existed under the 'tracker' label -- delete their content types
+            # (and the auto-created permissions referencing them) rather than
+            # relabeling. The legacy TAXTRACKER_MODELS rows were already moved
+            # to 'tracker' above, so anything still labeled 'taxtracker' here
+            # postdates the legacy schema.
+            cursor.execute(
+                "DELETE FROM auth_permission WHERE content_type_id IN "
+                "(SELECT id FROM django_content_type WHERE app_label = 'taxtracker')"
+            )
+            cursor.execute(
+                "DELETE FROM django_content_type WHERE app_label = 'taxtracker'"
+            )
             cursor.execute(
                 "DELETE FROM django_migrations WHERE app IN ('core', 'taxtracker')"
             )
@@ -1848,10 +2043,18 @@ class LegacyUpgradeCommandTests(_LegacyUpgradeSchemaMixin, TestCase):
         )
 
     def test_upgrade_preserves_content_type_primary_keys(self):
+        # Restrict to the models that actually existed under the legacy
+        # 'tracker' label -- models added later (e.g. ReceivedDocument) are
+        # dropped by _revert_to_legacy_schema() and are irrelevant here.
+        legacy_models = self.CORE_MODELS + self.TAXTRACKER_MODELS
+        placeholders = ", ".join(["%s"] * len(legacy_models))
+
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT id, app_label, model FROM django_content_type "
-                "WHERE app_label IN ('core', 'taxtracker')"
+                "WHERE app_label IN ('core', 'taxtracker') AND model IN "
+                f"({placeholders})",
+                legacy_models,
             )
             before = {(row[1], row[2]): row[0] for row in cursor.fetchall()}
 
@@ -1861,7 +2064,9 @@ class LegacyUpgradeCommandTests(_LegacyUpgradeSchemaMixin, TestCase):
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT id, app_label, model FROM django_content_type "
-                "WHERE app_label IN ('core', 'taxtracker')"
+                "WHERE app_label IN ('core', 'taxtracker') AND model IN "
+                f"({placeholders})",
+                legacy_models,
             )
             after = {(row[1], row[2]): row[0] for row in cursor.fetchall()}
         self.assertEqual(before, after)

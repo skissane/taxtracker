@@ -23,6 +23,7 @@ from .models import (
     FinancialYear,
     FinancialYearStatusHistory,
     Item,
+    ReceivedDocument,
 )
 
 # ---------------------------------------------------------------------------
@@ -32,9 +33,14 @@ from .models import (
 
 def _attachment_date_warning(obj):
     """Return an HTML warning span if *obj*'s date falls outside its financial year."""
-    if not obj.pk or not obj.date or not obj.item_id:
+    if not obj.pk or not obj.date:
         return ""
-    fy = obj.item.year
+    if obj.item_id:
+        fy = obj.item.year
+    elif obj.received_document_id:
+        fy = obj.received_document.year
+    else:
+        return ""
     if obj.date < fy.start_date or obj.date > fy.end_date:
         return format_html(
             '<span title="Date is outside the financial year ({} – {})"'
@@ -98,6 +104,30 @@ class AttachmentInline(admin.TabularInline):
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related("item__year")
+
+    @admin.display(description="")
+    def date_warning(self, obj):
+        return _attachment_date_warning(obj)
+
+    @admin.display(description="Edit")
+    def change_link(self, obj):
+        if not obj.pk:
+            return "—"
+        url = reverse("admin:taxtracker_attachment_change", args=[obj.pk])
+        return format_html('<a href="{}">Edit</a>', url)
+
+
+class ReceivedAttachmentInline(admin.TabularInline):
+    model = Attachment
+    fk_name = "received_document"
+    form = AttachmentForm
+    extra = 1
+    fields = ("title", "date", "date_warning", "file_type", "file", "change_link")
+    readonly_fields = ("date_warning", "change_link")
+    autocomplete_fields = ("file_type",)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("received_document__year")
 
     @admin.display(description="")
     def date_warning(self, obj):
@@ -455,10 +485,30 @@ class ItemAdmin(admin.ModelAdmin):
 @admin.register(Attachment)
 class AttachmentAdmin(admin.ModelAdmin):
     form = AttachmentForm
-    list_display = ("title", "date", "date_warning", "item", "file_type", "file")
-    list_filter = ("item__year", "file_type")
-    search_fields = ("title", "notes", "item__title", "file_type__short_name")
-    list_select_related = ("item", "item__year", "file_type")
+    list_display = (
+        "title",
+        "date",
+        "date_warning",
+        "item",
+        "received_document",
+        "file_type",
+        "file",
+    )
+    list_filter = ("item__year", "received_document__year", "file_type")
+    search_fields = (
+        "title",
+        "notes",
+        "item__title",
+        "received_document__title",
+        "file_type__short_name",
+    )
+    list_select_related = (
+        "item",
+        "item__year",
+        "received_document",
+        "received_document__year",
+        "file_type",
+    )
     autocomplete_fields = ("file_type",)
     readonly_fields = ("date_warning",)
     fieldsets = (
@@ -467,6 +517,7 @@ class AttachmentAdmin(admin.ModelAdmin):
             {
                 "fields": (
                     "item",
+                    "received_document",
                     "title",
                     ("date", "date_warning"),
                     "notes",
@@ -480,6 +531,29 @@ class AttachmentAdmin(admin.ModelAdmin):
     @admin.display(description="")
     def date_warning(self, obj):
         return _attachment_date_warning(obj)
+
+
+# ---------------------------------------------------------------------------
+# ReceivedDocument Admin
+# ---------------------------------------------------------------------------
+
+
+@admin.register(ReceivedDocument)
+class ReceivedDocumentAdmin(admin.ModelAdmin):
+    list_display = ("title", "year_link", "date")
+    list_filter = ("year",)
+    search_fields = ("title", "notes")
+    list_select_related = ("year",)
+    inlines = [ReceivedAttachmentInline]
+    fields = ("year", "title", "date", "notes")
+
+    @admin.display(description="Year")
+    def year_link(self, obj):
+        url = reverse("admin:taxtracker_financialyear_change", args=[obj.year_id])
+        return format_html('<a href="{}">{}</a>', url, obj.year)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("year")
 
 
 # ---------------------------------------------------------------------------

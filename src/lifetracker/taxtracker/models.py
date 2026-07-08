@@ -290,6 +290,27 @@ class Item(models.Model):
         return path
 
 
+class ReceivedDocument(models.Model):
+    """A document received back from the tax agent/tax office for a financial year."""
+
+    year = models.ForeignKey(
+        FinancialYear,
+        on_delete=models.CASCADE,
+        related_name="received_documents",
+    )
+    title = models.CharField(max_length=255)
+    date = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-date", "title"]
+        verbose_name = "Received Document"
+        verbose_name_plural = "Received Documents"
+
+    def __str__(self):
+        return f"{self.year}: {self.title}"
+
+
 # Matches YYYY[-]MM[-]DD where YYYY is not preceded by a digit.
 # The separator between year/month and month/day is independently optional.
 _DATE_IN_FILENAME_RE = re.compile(r"(?<!\d)(\d{4})-?(\d{2})-?(\d{2})")
@@ -306,10 +327,19 @@ def _extract_date_from_filename(name: str) -> datetime.date | None:
 
 
 class Attachment(models.Model):
-    """A file attachment associated with an Item."""
+    """A file attachment associated with an Item or a ReceivedDocument."""
 
     item = models.ForeignKey(
         Item,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    received_document = models.ForeignKey(
+        ReceivedDocument,
+        null=True,
+        blank=True,
         on_delete=models.CASCADE,
         related_name="attachments",
     )
@@ -342,6 +372,15 @@ class Attachment(models.Model):
         ordering = ["title"]
         verbose_name = "Attachment"
         verbose_name_plural = "Attachments"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(item__isnull=False, received_document__isnull=True)
+                    | models.Q(item__isnull=True, received_document__isnull=False)
+                ),
+                name="attachment_exactly_one_parent",
+            ),
+        ]
 
     def __str__(self):
         if self.title:
@@ -350,7 +389,24 @@ class Attachment(models.Model):
             label = Path(self.file.name).name
         else:
             label = "(no file)"
-        return f"{label} ({self.item})"
+        parent = self.item or self.received_document
+        return f"{label} ({parent})"
+
+    def clean(self):
+        # Check the cached related object too, not just the _id attname: when
+        # an Attachment is added inline alongside a brand-new (unsaved) parent,
+        # the parent's pk (and hence the child's _id) is still None at
+        # validation time even though the in-memory relation is set — the FK
+        # id is only populated once the parent is actually saved.
+        has_item = self.item_id is not None or self.item is not None
+        has_received_document = (
+            self.received_document_id is not None or self.received_document is not None
+        )
+        if has_item == has_received_document:
+            raise ValidationError(
+                "Attachment must belong to exactly one of Item or Received "
+                "Document, not both or neither."
+            )
 
     def save(self, *args, **kwargs):
         if not self.title and self.file:
