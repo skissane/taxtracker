@@ -17,7 +17,7 @@ from django.utils import timezone
 
 from lifetracker.core.models import DBStoredFile, FileExtension, FileType
 
-from .admin import _adjust_notes_headings
+from .admin import _adjust_notes_headings, _attachment_date_warning
 from .archives import (
     UnsupportedArchiveError,
     extract_from_archive,
@@ -343,6 +343,16 @@ class ReceivedDocumentAdminViewTests(TestCase):
         att = Attachment.objects.get(received_document=self.doc)
         self.assertIsNone(att.item_id)
         self.assertEqual(att.received_document_id, self.doc.pk)
+
+    def test_change_view_shows_edit_link_for_existing_attachment(self):
+        att = Attachment.objects.create(
+            received_document=self.doc,
+            file=ContentFile(b"data", name="noa.pdf"),
+        )
+        response = self.client.get(self._change_url(self.doc))
+        self.assertEqual(response.status_code, 200)
+        attachment_url = reverse("admin:taxtracker_attachment_change", args=[att.pk])
+        self.assertContains(response, attachment_url)
 
 
 class AdminViewTests(TestCase):
@@ -1244,6 +1254,55 @@ class AttachmentDateTests(TestCase):
         att.save()
         att.refresh_from_db()
         self.assertIsNone(att.date)
+
+
+class AttachmentDateWarningHelperTests(TestCase):
+    """Tests for _attachment_date_warning covering both Item and
+    ReceivedDocument parents."""
+
+    def setUp(self):
+        self.fy = FinancialYear.objects.create(year=2024)
+        self.item = Item.objects.create(year=self.fy, title="Income", order=1)
+        self.doc = ReceivedDocument.objects.create(year=self.fy, title="NOA")
+
+    def test_item_date_in_range_no_warning(self):
+        att = Attachment.objects.create(
+            item=self.item,
+            date=datetime.date(2024, 1, 1),
+            file=ContentFile(b"data", name="in_range.pdf"),
+        )
+        self.assertEqual(_attachment_date_warning(att), "")
+
+    def test_item_date_out_of_range_warns(self):
+        att = Attachment.objects.create(
+            item=self.item,
+            date=datetime.date(2020, 1, 1),
+            file=ContentFile(b"data", name="out_of_range.pdf"),
+        )
+        self.assertIn("outside the financial year", _attachment_date_warning(att))
+
+    def test_received_document_date_in_range_no_warning(self):
+        att = Attachment.objects.create(
+            received_document=self.doc,
+            date=datetime.date(2024, 1, 1),
+            file=ContentFile(b"data", name="in_range.pdf"),
+        )
+        self.assertEqual(_attachment_date_warning(att), "")
+
+    def test_received_document_date_out_of_range_warns(self):
+        att = Attachment.objects.create(
+            received_document=self.doc,
+            date=datetime.date(2020, 1, 1),
+            file=ContentFile(b"data", name="out_of_range.pdf"),
+        )
+        self.assertIn("outside the financial year", _attachment_date_warning(att))
+
+    def test_neither_parent_returns_empty(self):
+        """Not reachable for a saved row (the CheckConstraint forbids it),
+        but the helper is written defensively -- exercise it directly."""
+        att = Attachment(date=datetime.date(2024, 1, 1))
+        att.pk = 12345
+        self.assertEqual(_attachment_date_warning(att), "")
 
 
 class AttachmentParentValidationTests(TestCase):
