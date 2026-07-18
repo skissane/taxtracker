@@ -1,0 +1,40 @@
+{% extends "admin/base_site.html" %}
+
+{% load i18n %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> ›
+    <a href="{% url 'admin:taxtracker_receiveddocument_changelist' %}">Received Documents</a> ›
+    Import Archive
+  </div>
+{% endblock breadcrumbs %}
+{% block content %}
+  <p>
+    Upload a ZIP file containing PDF documents received back from the tax
+    agent/ATO. Each PDF's filename must start with the 4-digit financial year
+    it belongs to (e.g. <code>2024-notice-of-assessment.pdf</code>) — a new
+    Received Document is created for each matching PDF, assigned to that
+    financial year. Dates will be auto-extracted from filenames where
+    possible. PDFs without a 4-digit year prefix, or whose year has no
+    matching Financial Year record, are skipped.
+  </p>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <fieldset class="module aligned">
+      {% for field in form %}
+        <div class="form-row">
+          {{ field.errors }}
+          {{ field.label_tag }}
+          {{ field }}
+          {% if field.help_text %}<p class="help">{{ field.help_text }}</p>{% endif %}
+        </div>
+      {% endfor %}
+    </fieldset>
+    <div class="submit-row">
+      <input type="submit" value="Import" class="default">
+      <a class="button cancel"
+         href="{% url 'admin:taxtracker_receiveddocument_changelist' %}">Cancel</a>
+    </div>
+  </form>
+{% endblock content %}

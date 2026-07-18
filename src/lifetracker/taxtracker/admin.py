@@ -17,13 +17,14 @@ from django.utils.html import format_html
 from lifetracker.core.models import DBStoredFile
 
 from .archives import UnsupportedArchiveError, extract_from_archive_with_skips
-from .forms import AttachmentForm, ImportArchiveForm
+from .forms import AttachmentForm, ImportArchiveForm, ReceivedDocumentImportArchiveForm
 from .models import (
     Attachment,
     FinancialYear,
     FinancialYearStatusHistory,
     Item,
     ReceivedDocument,
+    _extract_date_from_filename,
 )
 
 # ---------------------------------------------------------------------------
@@ -55,6 +56,11 @@ def _attachment_date_warning(obj):
 def _financial_year_number_for_date(date):
     """Return FY end-year number for a date (e.g. Aug-2023 -> FY2024)."""
     return date.year if date.month <= 6 else date.year + 1
+
+
+# Matches a leading 4-digit financial year in a filename, e.g. "2024-notice.pdf".
+# The negative lookahead excludes longer digit runs like "20245-notice.pdf".
+_RECEIVED_DOC_YEAR_RE = re.compile(r"^(\d{4})(?!\d)")
 
 
 def _item_path_signature(item):
@@ -554,6 +560,148 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related("year")
+
+    # ------------------------------------------------------------------
+    # Custom URLs
+    # ------------------------------------------------------------------
+
+    def get_urls(self):
+        custom = [
+            path(
+                "import-archive/",
+                self.admin_site.admin_view(self.import_archive_view),
+                name="taxtracker_receiveddocument_import_archive",
+            ),
+        ]
+        return custom + super().get_urls()
+
+    # ------------------------------------------------------------------
+    # Import archive view
+    # ------------------------------------------------------------------
+
+    def import_archive_view(self, request):
+        if not self.has_add_permission(request):
+            raise PermissionDenied
+        attachment_admin = self.admin_site._registry.get(Attachment)
+        if attachment_admin is None or not attachment_admin.has_add_permission(request):
+            raise PermissionDenied
+
+        if request.method == "POST":
+            form = ReceivedDocumentImportArchiveForm(request.POST, request.FILES)
+        else:
+            form = ReceivedDocumentImportArchiveForm()
+
+        if request.method == "POST" and form.is_valid():
+            uploaded = form.cleaned_data["archive"]
+            file_bytes = uploaded.read()
+            filename = uploaded.name
+
+            had_error = False
+            no_year_names: list[str] = []
+            missing_fy_names: list[str] = []
+            created_count = 0
+            try:
+                extracted, skipped_names = extract_from_archive_with_skips(
+                    file_bytes, filename
+                )
+            except UnsupportedArchiveError as exc:
+                messages.error(request, str(exc))
+                extracted = []
+                skipped_names = []
+                had_error = True
+
+            if extracted:
+                existing_names = {
+                    Path(file_name).name
+                    for file_name in Attachment.objects.values_list("file", flat=True)
+                    if file_name
+                }
+                fy_cache: dict[int, FinancialYear | None] = {}
+
+                with transaction.atomic():
+                    for pdf_filename, pdf_bytes in extracted:
+                        base_name = Path(pdf_filename).name
+                        if base_name in existing_names:
+                            skipped_names.append(base_name)
+                            continue
+
+                        match = _RECEIVED_DOC_YEAR_RE.match(base_name)
+                        if not match:
+                            no_year_names.append(base_name)
+                            continue
+
+                        year_num = int(match.group(1))
+                        if year_num not in fy_cache:
+                            fy_cache[year_num] = FinancialYear.objects.filter(
+                                year=year_num
+                            ).first()
+                        fy = fy_cache[year_num]
+                        if fy is None:
+                            missing_fy_names.append(f"{base_name} (FY{year_num})")
+                            continue
+
+                        doc = ReceivedDocument.objects.create(
+                            year=fy,
+                            title=base_name,
+                            date=_extract_date_from_filename(base_name),
+                        )
+                        att = Attachment(received_document=doc)
+                        # save=False: store the file in the storage backend now
+                        # but don't yet write the Attachment row; att.save()
+                        # below will auto-extract the title and file_type from
+                        # the filename before persisting to the DB.
+                        att.file.save(base_name, io.BytesIO(pdf_bytes), save=False)
+                        att.save()
+                        existing_names.add(base_name)
+                        created_count += 1
+
+                if created_count:
+                    messages.success(
+                        request,
+                        f"Imported {created_count} received document(s) "
+                        f"from '{filename}'.",
+                    )
+
+            if skipped_names:
+                unique_skipped = list(dict.fromkeys(skipped_names))
+                messages.warning(
+                    request,
+                    f"Skipped {len(unique_skipped)} file(s): "
+                    f"{', '.join(unique_skipped)}.",
+                )
+            if no_year_names:
+                unique_no_year = list(dict.fromkeys(no_year_names))
+                messages.warning(
+                    request,
+                    f"Skipped {len(unique_no_year)} file(s) without a leading "
+                    f"4-digit year: {', '.join(unique_no_year)}.",
+                )
+            if missing_fy_names:
+                unique_missing_fy = list(dict.fromkeys(missing_fy_names))
+                messages.warning(
+                    request,
+                    f"Skipped {len(unique_missing_fy)} file(s) with no matching "
+                    f"Financial Year record: {', '.join(unique_missing_fy)}.",
+                )
+            if not had_error and not extracted and not skipped_names:
+                messages.warning(
+                    request,
+                    f"No attachments could be extracted from '{filename}'.",
+                )
+
+            return redirect(reverse("admin:taxtracker_receiveddocument_changelist"))
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Import Archive — Received Documents",
+            "form": form,
+            "opts": self.model._meta,
+        }
+        return render(
+            request,
+            "admin/taxtracker/receiveddocument/import_archive.html",
+            context,
+        )
 
 
 # ---------------------------------------------------------------------------

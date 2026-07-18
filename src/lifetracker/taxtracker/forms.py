@@ -44,3 +44,17 @@ class ImportArchiveForm(forms.Form):
             "Supported formats: .har, .zip"
         ),
     )
+
+
+class ReceivedDocumentImportArchiveForm(forms.Form):
+    """Upload form for the ReceivedDocument "Import Archive" admin view."""
+
+    archive = forms.FileField(
+        label="Archive file",
+        help_text=(
+            "Upload a ZIP file containing PDF documents. Each PDF's filename must "
+            "start with the 4-digit financial year it belongs to (e.g. "
+            "'2024-notice-of-assessment.pdf'). PDFs without a 4-digit year prefix, "
+            "or whose year has no matching Financial Year record, are skipped."
+        ),
+    )

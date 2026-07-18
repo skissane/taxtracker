@@ -1983,6 +1983,184 @@ class ImportArchiveViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
 
+class ReceivedDocumentImportArchiveViewTests(TestCase):
+    """Tests for the ReceivedDocument admin 'Import Archive' view."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin", "a@b.com", "pass")
+        self.client = Client()
+        self.client.login(username="admin", password="pass")
+        self.fy2024 = FinancialYear.objects.create(year=2024)
+
+    def _import_url(self):
+        return reverse("admin:taxtracker_receiveddocument_import_archive")
+
+    def _changelist_url(self):
+        return reverse("admin:taxtracker_receiveddocument_changelist")
+
+    # ------------------------------------------------------------------
+    # GET — show upload form
+    # ------------------------------------------------------------------
+
+    def test_get_shows_form(self):
+        response = self.client.get(self._import_url())
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Import Archive")
+
+    def test_changelist_has_import_archive_link(self):
+        response = self.client.get(self._changelist_url())
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Import Archive")
+        self.assertContains(response, self._import_url())
+
+    # ------------------------------------------------------------------
+    # POST — valid ZIP → received documents created
+    # ------------------------------------------------------------------
+
+    def test_post_zip_creates_received_documents_per_year(self):
+        fy2025 = FinancialYear.objects.create(year=2025)
+        zip_bytes = _make_zip_archive(
+            [
+                ("2024-07-20-notice.pdf", PDF_MAGIC),
+                ("2025_assessment.PDF", PDF_MAGIC),
+            ]
+        )
+        upload = io.BytesIO(zip_bytes)
+        upload.name = "archive.zip"
+        response = self.client.post(
+            self._import_url(), {"archive": upload}, follow=True
+        )
+        self.assertContains(response, "Imported 2 received document(s)")
+
+        doc_2024 = ReceivedDocument.objects.get(title="2024-07-20-notice.pdf")
+        self.assertEqual(doc_2024.year, self.fy2024)
+        self.assertEqual(doc_2024.date, datetime.date(2024, 7, 20))
+        self.assertTrue(
+            Attachment.objects.filter(
+                received_document=doc_2024, file__endswith="/2024-07-20-notice.pdf"
+            ).exists()
+        )
+
+        doc_2025 = ReceivedDocument.objects.get(title="2025_assessment.pdf")
+        self.assertEqual(doc_2025.year, fy2025)
+
+    def test_post_zip_skips_non_pdf_files(self):
+        zip_bytes = _make_zip_archive(
+            [
+                ("2024-notice.pdf", PDF_MAGIC),
+                ("ignored.txt", b"text"),
+            ]
+        )
+        upload = io.BytesIO(zip_bytes)
+        upload.name = "archive.zip"
+        response = self.client.post(
+            self._import_url(), {"archive": upload}, follow=True
+        )
+        self.assertContains(response, "Imported 1 received document(s)")
+        self.assertContains(response, "Skipped 1 file(s): ignored.txt")
+
+    def test_post_zip_skips_pdf_without_year_prefix(self):
+        zip_bytes = _make_zip_archive(
+            [
+                ("2024-notice.pdf", PDF_MAGIC),
+                ("notes.pdf", PDF_MAGIC),
+                ("12345.pdf", PDF_MAGIC),
+            ]
+        )
+        upload = io.BytesIO(zip_bytes)
+        upload.name = "archive.zip"
+        response = self.client.post(
+            self._import_url(), {"archive": upload}, follow=True
+        )
+        self.assertContains(response, "Imported 1 received document(s)")
+        self.assertContains(
+            response,
+            "Skipped 2 file(s) without a leading 4-digit year: notes.pdf, 12345.pdf",
+        )
+
+    def test_post_zip_skips_pdf_with_missing_financial_year(self):
+        zip_bytes = _make_zip_archive([("2019-letter.pdf", PDF_MAGIC)])
+        upload = io.BytesIO(zip_bytes)
+        upload.name = "archive.zip"
+        response = self.client.post(
+            self._import_url(), {"archive": upload}, follow=True
+        )
+        self.assertContains(
+            response,
+            "Skipped 1 file(s) with no matching Financial Year record: "
+            "2019-letter.pdf (FY2019)",
+        )
+        self.assertFalse(FinancialYear.objects.filter(year=2019).exists())
+        self.assertFalse(
+            ReceivedDocument.objects.filter(title="2019-letter.pdf").exists()
+        )
+
+    def test_post_zip_skips_existing_filename_and_warns(self):
+        other_doc = ReceivedDocument.objects.create(year=self.fy2024, title="Existing")
+        existing = Attachment(received_document=other_doc)
+        existing.file.save("2024-existing.pdf", ContentFile(PDF_MAGIC), save=False)
+        existing.save()
+
+        zip_bytes = _make_zip_archive(
+            [
+                ("2024-existing.pdf", PDF_MAGIC),
+                ("2024-new.pdf", PDF_MAGIC),
+            ]
+        )
+        upload = io.BytesIO(zip_bytes)
+        upload.name = "archive.zip"
+        response = self.client.post(
+            self._import_url(), {"archive": upload}, follow=True
+        )
+        self.assertContains(response, "Imported 1 received document(s)")
+        self.assertContains(response, "Skipped 1 file(s): 2024-existing.pdf")
+        self.assertTrue(ReceivedDocument.objects.filter(title="2024-new.pdf").exists())
+
+    def test_post_missing_file_shows_form_error(self):
+        """Posting without a file should re-render the form with an error."""
+        response = self.client.post(self._import_url(), {})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This field is required")
+
+    # ------------------------------------------------------------------
+    # Permission checks
+    # ------------------------------------------------------------------
+
+    def _limited_client(self, username, *permission_codenames):
+        """Return a Client logged in as a staff user with only the given permissions."""
+        from django.contrib.auth.models import Permission
+
+        user = User.objects.create_user(username, f"{username}@b.com", "pass")
+        user.is_staff = True
+        user.save()
+        for codename in permission_codenames:
+            perm = Permission.objects.get(codename=codename)
+            user.user_permissions.add(perm)
+        client = Client()
+        client.login(username=username, password="pass")
+        return client
+
+    def test_get_requires_receiveddocument_add_permission(self):
+        """Staff user without add_receiveddocument permission should get 403."""
+        client = self._limited_client("limited1", "add_attachment")
+        response = client.get(self._import_url())
+        self.assertEqual(response.status_code, 403)
+
+    def test_get_requires_attachment_add_permission(self):
+        """Staff user without add_attachment permission should get 403."""
+        client = self._limited_client("limited2", "add_receiveddocument")
+        response = client.get(self._import_url())
+        self.assertEqual(response.status_code, 403)
+
+    def test_get_allowed_with_both_permissions(self):
+        """Staff with both add_receiveddocument and add_attachment can access."""
+        client = self._limited_client(
+            "limited3", "add_receiveddocument", "add_attachment"
+        )
+        response = client.get(self._import_url())
+        self.assertEqual(response.status_code, 200)
+
+
 # ---------------------------------------------------------------------------
 # upgrade_legacy_db management command tests
 # ---------------------------------------------------------------------------
