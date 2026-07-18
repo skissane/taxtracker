@@ -18,12 +18,12 @@ secret from codecov.io and is skipped by `run_workflow_local.py` since it's a `u
 # create superuser, runserver)
 ./run.sh
 
-# Run all tests
-uv run python manage.py test tests.core tests.taxtracker tests.cli
+# Run all tests (pytest-django + pytest-xdist, parallelised across CPU cores)
+uv run pytest
 
 # Run a single test class or method
-uv run python manage.py test tests.taxtracker.tests.ItemModelTests
-uv run python manage.py test tests.taxtracker.tests.ItemModelTests.test_str_root
+uv run pytest tests/taxtracker/tests.py::ItemModelTests
+uv run pytest tests/taxtracker/tests.py::ItemModelTests::test_str_root
 
 # Run tests under coverage, print a report, and write coverage.xml (no minimum enforced)
 just coverage
@@ -52,8 +52,11 @@ uv run python cli.py --help
 
 Tests live outside `src/`, in a top-level `tests/` tree mirroring the package layout (`tests/core/tests.py`,
 `tests/taxtracker/tests.py`, `tests/cli/tests.py`), each importing the code under test via absolute
-`lifetracker.*` imports. `manage.py test` labels reference these as `tests.core`, `tests.taxtracker`,
-`tests.cli` rather than the `lifetracker.*` app labels.
+`lifetracker.*` imports. Run via `pytest` (using `pytest-django`, configured in `pyproject.toml`'s
+`[tool.pytest.ini_options]` with `testpaths = ["tests"]`), parallelised across CPU cores by
+`pytest-xdist` (`-n auto`, set as a default in `addopts`). `manage.py test tests.core tests.taxtracker
+tests.cli` still works as an unparallelised fallback, referencing these as `tests.core`,
+`tests.taxtracker`, `tests.cli` labels rather than the `lifetracker.*` app labels.
 
 **File storage:** All uploaded attachments are stored in the SQLite database, not on disk. `DatabaseStorage` (in `core/models.py`) is a custom Django storage backend that writes file content to `DBStoredFile` rows. Storage paths have the form `db/<pk>/<filename>`. Files are served through `DBStoredFileAdmin.serve_file_view` at `/admin/core/dbstoredfile/file/<pk>/`.
 
