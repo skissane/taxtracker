@@ -1,4 +1,5 @@
 import base64
+import datetime
 import json
 import tempfile
 import zipfile
@@ -9,7 +10,7 @@ from unittest.mock import patch
 from click.testing import CliRunner
 from django.test import TestCase
 
-from .extract_eml import (
+from lifetracker.cli.extract_eml import (
     eml_to_zip,
     extract_eml_command,
     get_attachment_payload,
@@ -17,21 +18,27 @@ from .extract_eml import (
     get_unique_filename,
     iter_parts_with_date_prefix,
 )
-from .extract_fidelity_pdfs import (
+from lifetracker.cli.extract_fidelity_pdfs import (
     FIDELITY_URL_PREFIX,
     extract_fidelity_pdfs_command,
     extract_pdfs,
 )
-from .filter_zip import filter_zip, filter_zip_command
-from .process_dates import (
+from lifetracker.cli.filter_zip import filter_zip, filter_zip_command
+from lifetracker.cli.process_dates import (
     get_financial_year,
     group_by_financial_year,
     process_dates_command,
     read_dates,
     render_markdown,
 )
-from .zip_eml_to_pdf import convert_eml_zip_to_pdf, zip_eml_to_pdf_command
-from .zip_eml_to_txt import convert_eml_zip_to_txt, zip_eml_to_txt_command
+from lifetracker.cli.zip_eml_to_pdf import (
+    convert_eml_zip_to_pdf,
+    zip_eml_to_pdf_command,
+)
+from lifetracker.cli.zip_eml_to_txt import (
+    convert_eml_zip_to_txt,
+    zip_eml_to_txt_command,
+)
 
 PDF_MAGIC = b"%PDF-1.4 fake"
 
@@ -491,8 +498,6 @@ class FilterZipTests(TestCase):
 
 class ProcessDatesTests(TestCase):
     def test_get_financial_year_boundary(self):
-        import datetime
-
         self.assertEqual(get_financial_year(datetime.date(2024, 6, 30)), 2024)
         self.assertEqual(get_financial_year(datetime.date(2024, 7, 1)), 2025)
 
@@ -500,15 +505,11 @@ class ProcessDatesTests(TestCase):
         dates = read_dates(
             ["2024-01-15\n", "November 20th 2024\n", "\n", "2024-01-15\n"], 0
         )
-        import datetime
-
         self.assertEqual(
             dates, {datetime.date(2024, 1, 15), datetime.date(2024, 11, 20)}
         )
 
     def test_read_dates_applies_add_days(self):
-        import datetime
-
         dates = read_dates(["2024-01-15\n"], 5)
         self.assertEqual(dates, {datetime.date(2024, 1, 20)})
 
@@ -518,8 +519,6 @@ class ProcessDatesTests(TestCase):
         self.assertIn("line 1", str(ctx.exception))
 
     def test_group_and_render_markdown(self):
-        import datetime
-
         dates = {datetime.date(2024, 6, 30), datetime.date(2024, 7, 1)}
         groups = group_by_financial_year(dates)
         self.assertEqual(set(groups.keys()), {2024, 2025})
@@ -530,15 +529,11 @@ class ProcessDatesTests(TestCase):
         self.assertIn("| 2024-06-30 | Sun |", rendered)
 
     def test_render_markdown_summary_only(self):
-        import datetime
-
         groups = group_by_financial_year({datetime.date(2024, 1, 1)})
         rendered = render_markdown(groups, summary=True, year=None)
         self.assertEqual(rendered, "# FY2024 (1 date)")
 
     def test_render_markdown_year_filter(self):
-        import datetime
-
         groups = group_by_financial_year(
             {datetime.date(2023, 1, 1), datetime.date(2024, 1, 1)}
         )

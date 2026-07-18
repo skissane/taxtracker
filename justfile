@@ -38,16 +38,13 @@ fmt-check-templates:
 fmt-templates:
     uv run --group dev djlint --reformat .
 
-# Run the Django test suite
+# Run the test suite in parallel with pytest-xdist
 test:
-    uv run python manage.py test lifetracker.core lifetracker.taxtracker lifetracker.cli --verbosity=2
+    uv run --group dev pytest
 
-# Run the test suite under coverage, print a report, and write coverage.xml
+# Run the test suite in parallel, print a coverage report, and write coverage.xml
 coverage:
-    uv run --group dev coverage run manage.py test lifetracker.core lifetracker.taxtracker lifetracker.cli --verbosity=2
-    uv run --group dev coverage combine
-    uv run --group dev coverage report
-    uv run --group dev coverage xml
+    uv run --group dev pytest --cov=src/lifetracker --cov-report=term --cov-report=xml
 
 # Run every ruff/djlint lint and format-check step (no fixes, no tests)
 check: lint fmt-check lint-templates fmt-check-templates

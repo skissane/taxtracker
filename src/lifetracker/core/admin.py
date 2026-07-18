@@ -8,7 +8,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.urls import path
 
-from .models import DBStoredFile, FileExtension, FileType, MimeType
+from lifetracker.core.models import DBStoredFile, FileExtension, FileType, MimeType
 
 # ---------------------------------------------------------------------------
 # Formsets — "at least one primary" validation

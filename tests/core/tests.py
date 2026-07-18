@@ -9,12 +9,25 @@ from django.contrib import admin
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
+from django.db import IntegrityError
 from django.forms import inlineformset_factory
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from .admin import DBStoredFileAdmin, _AtLeastOnePrimaryFormSet
-from .models import DatabaseStorage, DBStoredFile, FileExtension, FileType, MimeType
+from lifetracker.asgi import application as asgi_application
+from lifetracker.core.admin import (
+    DBStoredFileAdmin,
+    MimeTypeFormSet,
+    _AtLeastOnePrimaryFormSet,
+)
+from lifetracker.core.models import (
+    DatabaseStorage,
+    DBStoredFile,
+    FileExtension,
+    FileType,
+    MimeType,
+)
+from lifetracker.wsgi import application as wsgi_application
 
 
 class FileTypeModelTests(TestCase):
@@ -27,14 +40,10 @@ class FileTypeModelTests(TestCase):
         self.assertEqual(str(self.ft), "PDF")
 
     def test_filetype_short_name_unique(self):
-        from django.db import IntegrityError
-
         with self.assertRaises(IntegrityError):
             FileType.objects.create(short_name="PDF", full_name="Other PDF")
 
     def test_filetype_full_name_unique(self):
-        from django.db import IntegrityError
-
         with self.assertRaises(IntegrityError):
             FileType.objects.create(short_name="PDF2", full_name="PDF Document")
 
@@ -76,8 +85,6 @@ class FileTypeModelTests(TestCase):
             mt.clean()
 
     def test_mimetype_globally_unique(self):
-        from django.db import IntegrityError
-
         ft2 = FileType.objects.create(short_name="PDF2", full_name="PDF 2")
         MimeType.objects.create(
             file_type=self.ft, mime_type="application/pdf", is_primary=True
@@ -88,8 +95,6 @@ class FileTypeModelTests(TestCase):
             )
 
     def test_at_most_one_primary_mime_type_per_file_type(self):
-        from django.db import IntegrityError
-
         MimeType.objects.create(
             file_type=self.ft, mime_type="application/pdf", is_primary=True
         )
@@ -135,8 +140,6 @@ class FileTypeModelTests(TestCase):
             ext.clean()
 
     def test_extension_globally_unique(self):
-        from django.db import IntegrityError
-
         ft2 = FileType.objects.create(short_name="PDF2", full_name="PDF 2")
         FileExtension.objects.create(
             file_type=self.ft, extension="pdf", is_primary=True
@@ -147,8 +150,6 @@ class FileTypeModelTests(TestCase):
             )
 
     def test_at_most_one_primary_extension_per_file_type(self):
-        from django.db import IntegrityError
-
         FileExtension.objects.create(
             file_type=self.ft, extension="pdf", is_primary=True
         )
@@ -459,8 +460,6 @@ class AtLeastOnePrimaryFormSetTests(TestCase):
     def test_field_errors_short_circuit_formset_clean(self):
         """An invalid mime_type value should short-circuit clean() via
         any(self.errors)."""
-        from .admin import MimeTypeFormSet
-
         FormSet = inlineformset_factory(
             FileType,
             MimeType,
@@ -571,14 +570,10 @@ class ProjectEntryPointTests(TestCase):
     nothing else exercises them."""
 
     def test_wsgi_application_is_importable(self):
-        from lifetracker.wsgi import application
-
-        self.assertTrue(callable(application))
+        self.assertTrue(callable(wsgi_application))
 
     def test_asgi_application_is_importable(self):
-        from lifetracker.asgi import application
-
-        self.assertTrue(callable(application))
+        self.assertTrue(callable(asgi_application))
 
 
 class SettingsSecretKeyTests(TestCase):
@@ -588,8 +583,8 @@ class SettingsSecretKeyTests(TestCase):
     already imported for this test run reflects whatever the real ~/.config
     looked like when the suite started."""
 
-    SRC_DIR = Path(__file__).resolve().parent.parent.parent
-    REPO_ROOT = SRC_DIR.parent
+    REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+    SRC_DIR = REPO_ROOT / "src"
 
     def _run(self, home, extra_env=None):
         env = {

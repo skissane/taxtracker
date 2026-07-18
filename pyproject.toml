@@ -10,10 +10,24 @@ dependencies = [
     "pdfkit>=1.0.0",
 ]
 
+[project.scripts]
+lifetracker-cli = "lifetracker.cli:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lifetracker"]
+
 [dependency-groups]
 dev = [
     "coverage>=7.6",
     "djlint>=1.40.3",
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "pytest-django>=4.9",
+    "pytest-xdist>=3.6",
     "pyyaml>=6.0",
     "ruff>=0.15.20",
 ]
@@ -24,8 +38,11 @@ target-version = "py314"
 exclude = ["*/migrations/*.py"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP"]
+select = ["E", "F", "W", "I", "UP", "TID252", "PLC0415"]
 ignore = []
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
 
 [tool.ruff.lint.per-file-ignores]
 "*/migrations/*.py" = ["E501"]
@@ -35,6 +52,13 @@ profile = "django"
 indent = 2
 blank_line_after_tag = "load,extends"
 ignore = "H030,H031"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "lifetracker.settings"
+pythonpath = ["src"]
+testpaths = ["tests"]
+python_files = ["tests.py", "test_*.py", "*_tests.py"]
+addopts = "-n auto"
 
 [tool.coverage.run]
 source = ["src/lifetracker"]

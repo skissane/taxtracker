@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.storage import Storage
 from django.db import models
+from django.urls import reverse
 from django.utils.deconstruct import deconstructible
 
 
@@ -183,8 +184,6 @@ class DatabaseStorage(Storage):
             return False
 
     def url(self, name):
-        from django.urls import reverse
-
         pk = self._name_to_pk(name)
         return reverse("admin:core_dbstoredfile_serve_file", args=[pk])
 

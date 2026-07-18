@@ -1,7 +1,7 @@
 from django import forms
 from django.utils import formats
 
-from .models import Attachment
+from lifetracker.taxtracker.models import Attachment
 
 # These English month-name formats are not in the en-AU locale defaults but are
 # natural ways to type a date in English (e.g. in a PDF statement heading).
@@ -42,5 +42,19 @@ class ImportArchiveForm(forms.Form):
         help_text=(
             "Upload an archive file to extract attachments from. "
             "Supported formats: .har, .zip"
+        ),
+    )
+
+
+class ReceivedDocumentImportArchiveForm(forms.Form):
+    """Upload form for the ReceivedDocument "Import Archive" admin view."""
+
+    archive = forms.FileField(
+        label="Archive file",
+        help_text=(
+            "Upload a ZIP file containing PDF documents. Each PDF's filename must "
+            "start with the 4-digit financial year it belongs to (e.g. "
+            "'2024-notice-of-assessment.pdf'). PDFs without a 4-digit year prefix, "
+            "or whose year has no matching Financial Year record, are skipped."
         ),
     )
