@@ -4,7 +4,7 @@ import io
 import json
 import zipfile
 
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Permission, User
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.management import call_command
@@ -1055,9 +1055,7 @@ class EnsureSuperuserCommandTests(TestCase):
 
     def _call(self, **kwargs):
         """Call ensure_superuser and return captured stdout."""
-        from io import StringIO
-
-        out = StringIO()
+        out = io.StringIO()
         call_command("ensure_superuser", stdout=out, **kwargs)
         return out.getvalue()
 
@@ -1124,8 +1122,6 @@ class AttachmentTitleTests(TestCase):
         self.ft = FileType.objects.create(short_name="PDF", full_name="PDF Document")
 
     def _make_simple_file(self, name="document.pdf"):
-        from django.core.files.base import ContentFile
-
         return ContentFile(b"%PDF-1.4 test", name=name)
 
     def test_title_auto_populated_from_filename(self):
@@ -1419,8 +1415,6 @@ class AttachmentDateInputFormatTests(TestCase):
         self.assertEqual(self.field.clean("Jun 30, 2023"), datetime.date(2023, 6, 30))
 
     def test_invalid_date_string_raises(self):
-        from django.core.exceptions import ValidationError
-
         with self.assertRaises(ValidationError):
             self.field.clean("not a date")
 
@@ -1954,8 +1948,6 @@ class ImportArchiveViewTests(TestCase):
 
     def _limited_client(self, username, *permission_codenames):
         """Return a Client logged in as a staff user with only the given permissions."""
-        from django.contrib.auth.models import Permission
-
         user = User.objects.create_user(username, f"{username}@b.com", "pass")
         user.is_staff = True
         user.save()
@@ -2147,8 +2139,6 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
 
     def _limited_client(self, username, *permission_codenames):
         """Return a Client logged in as a staff user with only the given permissions."""
-        from django.contrib.auth.models import Permission
-
         user = User.objects.create_user(username, f"{username}@b.com", "pass")
         user.is_staff = True
         user.save()
@@ -2256,9 +2246,7 @@ class _LegacyUpgradeSchemaMixin:
             recorder.record_applied("tracker", name)
 
     def _call(self):
-        from io import StringIO
-
-        out = StringIO()
+        out = io.StringIO()
         call_command("upgrade_legacy_db", stdout=out)
         return out.getvalue()
 

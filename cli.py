@@ -7,7 +7,7 @@ from pathlib import Path
 
 def main():
     sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-    from lifetracker.cli import cli
+    from lifetracker.cli import cli  # noqa: PLC0415
 
     cli()
 

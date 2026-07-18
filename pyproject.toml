@@ -28,7 +28,7 @@ target-version = "py314"
 exclude = ["*/migrations/*.py"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "TID252"]
+select = ["E", "F", "W", "I", "UP", "TID252", "PLC0415"]
 ignore = []
 
 [tool.ruff.lint.flake8-tidy-imports]
