@@ -19,11 +19,11 @@ secret from codecov.io and is skipped by `run_workflow_local.py` since it's a `u
 ./run.sh
 
 # Run all tests
-uv run python manage.py test lifetracker.core lifetracker.taxtracker lifetracker.cli
+uv run python manage.py test tests.core tests.taxtracker tests.cli
 
 # Run a single test class or method
-uv run python manage.py test lifetracker.taxtracker.tests.ItemModelTests
-uv run python manage.py test lifetracker.taxtracker.tests.ItemModelTests.test_str_root
+uv run python manage.py test tests.taxtracker.tests.ItemModelTests
+uv run python manage.py test tests.taxtracker.tests.ItemModelTests.test_str_root
 
 # Run tests under coverage, print a report, and write coverage.xml (no minimum enforced)
 just coverage
@@ -49,6 +49,11 @@ uv run python cli.py --help
 - `src/lifetracker/cli/` — standalone `click`-based command-line utilities (`.eml`/HAR/ZIP extraction and conversion helpers) unrelated to the Django app; not a Django app, not in `INSTALLED_APPS`. Invoked via the root launcher `cli.py` (e.g. `uv run python cli.py extract-eml <file> <out.zip>`), which inserts `src/` onto `sys.path` the same way `manage.py` does.
 
 `taxtracker` depends on `core` (via the `Attachment.file_type` FK and `DatabaseStorage`); `core` has no dependency on `taxtracker`.
+
+Tests live outside `src/`, in a top-level `tests/` tree mirroring the package layout (`tests/core/tests.py`,
+`tests/taxtracker/tests.py`, `tests/cli/tests.py`), each importing the code under test via absolute
+`lifetracker.*` imports. `manage.py test` labels reference these as `tests.core`, `tests.taxtracker`,
+`tests.cli` rather than the `lifetracker.*` app labels.
 
 **File storage:** All uploaded attachments are stored in the SQLite database, not on disk. `DatabaseStorage` (in `core/models.py`) is a custom Django storage backend that writes file content to `DBStoredFile` rows. Storage paths have the form `db/<pk>/<filename>`. Files are served through `DBStoredFileAdmin.serve_file_view` at `/admin/core/dbstoredfile/file/<pk>/`.
 

@@ -594,8 +594,8 @@ class SettingsSecretKeyTests(TestCase):
     already imported for this test run reflects whatever the real ~/.config
     looked like when the suite started."""
 
-    SRC_DIR = Path(__file__).resolve().parent.parent.parent
-    REPO_ROOT = SRC_DIR.parent
+    REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+    SRC_DIR = REPO_ROOT / "src"
 
     def _run(self, home, extra_env=None):
         env = {
