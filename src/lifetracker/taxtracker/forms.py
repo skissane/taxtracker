@@ -1,7 +1,7 @@
 from django import forms
 from django.utils import formats
 
-from .models import Attachment
+from lifetracker.taxtracker.models import Attachment
 
 # These English month-name formats are not in the en-AU locale defaults but are
 # natural ways to type a date in English (e.g. in a PDF statement heading).

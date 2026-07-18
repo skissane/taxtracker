@@ -9,7 +9,7 @@ from unittest.mock import patch
 from click.testing import CliRunner
 from django.test import TestCase
 
-from .extract_eml import (
+from lifetracker.cli.extract_eml import (
     eml_to_zip,
     extract_eml_command,
     get_attachment_payload,
@@ -17,21 +17,27 @@ from .extract_eml import (
     get_unique_filename,
     iter_parts_with_date_prefix,
 )
-from .extract_fidelity_pdfs import (
+from lifetracker.cli.extract_fidelity_pdfs import (
     FIDELITY_URL_PREFIX,
     extract_fidelity_pdfs_command,
     extract_pdfs,
 )
-from .filter_zip import filter_zip, filter_zip_command
-from .process_dates import (
+from lifetracker.cli.filter_zip import filter_zip, filter_zip_command
+from lifetracker.cli.process_dates import (
     get_financial_year,
     group_by_financial_year,
     process_dates_command,
     read_dates,
     render_markdown,
 )
-from .zip_eml_to_pdf import convert_eml_zip_to_pdf, zip_eml_to_pdf_command
-from .zip_eml_to_txt import convert_eml_zip_to_txt, zip_eml_to_txt_command
+from lifetracker.cli.zip_eml_to_pdf import (
+    convert_eml_zip_to_pdf,
+    zip_eml_to_pdf_command,
+)
+from lifetracker.cli.zip_eml_to_txt import (
+    convert_eml_zip_to_txt,
+    zip_eml_to_txt_command,
+)
 
 PDF_MAGIC = b"%PDF-1.4 fake"
 

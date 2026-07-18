@@ -13,8 +13,14 @@ from django.forms import inlineformset_factory
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from .admin import DBStoredFileAdmin, _AtLeastOnePrimaryFormSet
-from .models import DatabaseStorage, DBStoredFile, FileExtension, FileType, MimeType
+from lifetracker.core.admin import DBStoredFileAdmin, _AtLeastOnePrimaryFormSet
+from lifetracker.core.models import (
+    DatabaseStorage,
+    DBStoredFile,
+    FileExtension,
+    FileType,
+    MimeType,
+)
 
 
 class FileTypeModelTests(TestCase):
@@ -459,7 +465,7 @@ class AtLeastOnePrimaryFormSetTests(TestCase):
     def test_field_errors_short_circuit_formset_clean(self):
         """An invalid mime_type value should short-circuit clean() via
         any(self.errors)."""
-        from .admin import MimeTypeFormSet
+        from lifetracker.core.admin import MimeTypeFormSet
 
         FormSet = inlineformset_factory(
             FileType,

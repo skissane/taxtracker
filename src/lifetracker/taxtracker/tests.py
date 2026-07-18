@@ -16,15 +16,17 @@ from django.urls import reverse
 from django.utils import timezone
 
 from lifetracker.core.models import DBStoredFile, FileExtension, FileType
-
-from .admin import _adjust_notes_headings, _attachment_date_warning
-from .archives import (
+from lifetracker.taxtracker.admin import (
+    _adjust_notes_headings,
+    _attachment_date_warning,
+)
+from lifetracker.taxtracker.archives import (
     UnsupportedArchiveError,
     extract_from_archive,
     extract_from_archive_with_skips,
 )
-from .forms import AttachmentForm, FlexibleDateField
-from .models import (
+from lifetracker.taxtracker.forms import AttachmentForm, FlexibleDateField
+from lifetracker.taxtracker.models import (
     Attachment,
     FinancialYear,
     FinancialYearStatusHistory,

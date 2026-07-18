@@ -15,10 +15,16 @@ from django.utils import timezone
 from django.utils.html import format_html
 
 from lifetracker.core.models import DBStoredFile
-
-from .archives import UnsupportedArchiveError, extract_from_archive_with_skips
-from .forms import AttachmentForm, ImportArchiveForm, ReceivedDocumentImportArchiveForm
-from .models import (
+from lifetracker.taxtracker.archives import (
+    UnsupportedArchiveError,
+    extract_from_archive_with_skips,
+)
+from lifetracker.taxtracker.forms import (
+    AttachmentForm,
+    ImportArchiveForm,
+    ReceivedDocumentImportArchiveForm,
+)
+from lifetracker.taxtracker.models import (
     Attachment,
     FinancialYear,
     FinancialYearStatusHistory,
