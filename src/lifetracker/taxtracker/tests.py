@@ -2122,6 +2122,23 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "This field is required")
 
+    def test_post_unsupported_format_shows_error(self):
+        upload = io.BytesIO(b"anything")
+        upload.name = "archive.7z"
+        response = self.client.post(
+            self._import_url(), {"archive": upload}, follow=True
+        )
+        self.assertContains(response, "Unrecognised archive format")
+
+    def test_post_zip_with_no_entries_shows_warning(self):
+        zip_bytes = _make_zip_archive([])
+        upload = io.BytesIO(zip_bytes)
+        upload.name = "empty.zip"
+        response = self.client.post(
+            self._import_url(), {"archive": upload}, follow=True
+        )
+        self.assertContains(response, "No attachments could be extracted")
+
     # ------------------------------------------------------------------
     # Permission checks
     # ------------------------------------------------------------------
