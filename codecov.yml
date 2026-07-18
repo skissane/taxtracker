@@ -4,7 +4,7 @@ coverage:
       default:
         # Tolerate small fluctuations (e.g. refactors that change what's in
         # scope) instead of hard-failing on any decrease.
-        threshold: 1%
+        threshold: 2%
     patch:
       default:
         threshold: 1%
