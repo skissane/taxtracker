@@ -156,6 +156,22 @@ class TaskModelTests(TestCase):
         )
         self.assertEqual(task.linked_object, self.file_type)
 
+    def test_clean_handles_missing_self_row(self):
+        task = Task(pk=99999, title="Ghost", parent=self.root)
+        task.clean()
+
+    def test_clean_handles_dangling_parent(self):
+        self.root.parent_id = 99999
+        self.root.clean()
+
+    def test_get_folder_path_is_cycle_safe(self):
+        a = Task.objects.create(title="A", order=2)
+        b = Task.objects.create(title="B", order=3)
+        Task.objects.filter(pk=a.pk).update(parent_id=b.pk)
+        Task.objects.filter(pk=b.pk).update(parent_id=a.pk)
+        a.refresh_from_db()
+        self.assertEqual(a.get_folder_path(), ["B", "A"])
+
 
 class TaskAttachmentDateTests(TestCase):
     def test_extract_iso_date(self):
@@ -247,3 +263,17 @@ class TaskAttachmentModelTests(TestCase):
     def test_task_fk_required(self):
         with self.assertRaises(IntegrityError), transaction.atomic():
             TaskAttachment.objects.create(file=self._make_file("orphan.pdf"))
+
+    def test_str_falls_back_to_file_name(self):
+        attachment = TaskAttachment(task=self.task, file=self._make_file("photo.jpg"))
+        self.assertEqual(str(attachment), "photo.jpg (Inbox)")
+
+    def test_str_falls_back_to_no_file(self):
+        attachment = TaskAttachment(task=self.task)
+        self.assertEqual(str(attachment), "(no file) (Inbox)")
+
+    def test_unknown_extension_leaves_file_type_unset(self):
+        attachment = TaskAttachment(task=self.task, file=self._make_file("mystery.xyz"))
+        attachment.save()
+        attachment.refresh_from_db()
+        self.assertIsNone(attachment.file_type)
