@@ -10,5 +10,9 @@ if [ "$#" -gt 0 ]; then
   exec "$@"
 fi
 
-exec python manage.py runserver \
-  "${LIFETRACKER_HOST:-0.0.0.0}:${PORT:-8000}"
+exec gunicorn \
+  --access-logfile - \
+  --error-logfile - \
+  --bind \
+  "${LIFETRACKER_HOST:-0.0.0.0}:${PORT:-8000}" \
+  lifetracker.wsgi

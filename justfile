@@ -48,7 +48,7 @@ coverage:
 
 # Build the container image
 docker-build:
-    docker build -t taxtracker .
+    docker build -t lifetracker .
 
 # Run every ruff/djlint lint and format-check step (no fixes, no tests)
 check: lint fmt-check lint-templates fmt-check-templates

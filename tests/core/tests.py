@@ -814,7 +814,11 @@ class DockerEntrypointTests(TestCase):
     """Tests for the Docker entrypoint startup sequence."""
 
     def test_entrypoint_runs_startup_commands_before_execing_arguments(self):
-        repo_root = Path(__file__).resolve().parents[2]
+        repo_root = next(
+            parent
+            for parent in Path(__file__).resolve().parents
+            if (parent / "manage.py").exists()
+        )
         script = repo_root / "docker-entrypoint.sh"
 
         with tempfile.TemporaryDirectory() as tempdir:
@@ -822,7 +826,16 @@ class DockerEntrypointTests(TestCase):
             log_path = temp_path / "python.log"
             python_path = temp_path / "python"
             python_path.write_text(
-                '#!/usr/bin/env sh\nprintf \'%s\\n\' "$*" >> "$UV_LOG_PATH"\nexit 0\n'
+                "#!/usr/bin/env sh\n"
+                "{\n"
+                "  sep=''\n"
+                '  for arg in "$@"; do\n'
+                '    printf \'%s%s\' "$sep" "$arg"\n'
+                "    sep=' '\n"
+                "  done\n"
+                "  printf '\\n'\n"
+                '} >> "$PYTHON_LOG_PATH"\n'
+                "exit 0\n"
             )
             python_path.chmod(0o755)
 
@@ -832,7 +845,7 @@ class DockerEntrypointTests(TestCase):
                 env={
                     **os.environ,
                     "PATH": f"{tempdir}:{os.environ['PATH']}",
-                    "UV_LOG_PATH": str(log_path),
+                    "PYTHON_LOG_PATH": str(log_path),
                     "LIFETRACKER_APP_DIR": str(repo_root),
                 },
                 check=False,
