@@ -9,8 +9,18 @@ from django.db import models
 
 from lifetracker.core.models import FileExtension, FileType, database_storage
 
+# The pk of the built-in "Generic" task type, created by a data migration.
+# Its name and (lack of) content_type are pinned by both a DB-level check
+# constraint and TaskType.clean() below, and it can never be deleted (see
+# TaskType.delete()) — it exists as the default task_type for new tasks.
+# Also exposed as TaskType.GENERIC_PK; defined at module level because a
+# Meta class body can't see its enclosing class's namespace.
+_GENERIC_TASK_TYPE_PK = 1
+
 
 class TaskType(models.Model):
+    GENERIC_PK = _GENERIC_TASK_TYPE_PK
+
     name = models.CharField(max_length=100, unique=True)
     content_type = models.ForeignKey(
         ContentType,
@@ -28,9 +38,56 @@ class TaskType(models.Model):
         ordering = ["name"]
         verbose_name = "Task Type"
         verbose_name_plural = "Task Types"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(pk=_GENERIC_TASK_TYPE_PK, name="Generic")
+                    | (~models.Q(pk=_GENERIC_TASK_TYPE_PK) & ~models.Q(name="Generic"))
+                ),
+                name="tasktype_pk1_iff_name_generic",
+                violation_error_message=(
+                    "Task type id=1 must be named 'Generic', and no other "
+                    "task type may be named 'Generic'."
+                ),
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(pk=_GENERIC_TASK_TYPE_PK)
+                | models.Q(content_type__isnull=True),
+                name="tasktype_pk1_has_no_content_type",
+                violation_error_message=(
+                    "The built-in 'Generic' task type cannot be linked to a model."
+                ),
+            ),
+        ]
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        is_generic_pk = self.pk == self.GENERIC_PK
+        is_generic_name = self.name == "Generic"
+        if is_generic_pk != is_generic_name:
+            raise ValidationError(
+                {
+                    "name": (
+                        "Task type id=1 must be named 'Generic', and no other "
+                        "task type may be named 'Generic'."
+                    )
+                }
+            )
+        if is_generic_pk and self.content_type_id is not None:
+            raise ValidationError(
+                {
+                    "content_type": (
+                        "The built-in 'Generic' task type cannot be linked to a model."
+                    )
+                }
+            )
+
+    def delete(self, *args, **kwargs):
+        if self.pk == self.GENERIC_PK:
+            raise ValidationError("The built-in 'Generic' task type cannot be deleted.")
+        super().delete(*args, **kwargs)
 
 
 class Task(models.Model):
@@ -61,6 +118,7 @@ class Task(models.Model):
     )
     task_type = models.ForeignKey(
         TaskType,
+        default=TaskType.GENERIC_PK,
         on_delete=models.PROTECT,
         related_name="tasks",
     )

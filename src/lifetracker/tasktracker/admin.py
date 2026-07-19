@@ -43,6 +43,17 @@ class TaskTypeAdmin(admin.ModelAdmin):
     list_filter = ("content_type",)
     search_fields = ("name",)
 
+    def get_readonly_fields(self, request, obj=None):
+        readonly_fields = super().get_readonly_fields(request, obj)
+        if obj is not None and obj.pk == TaskType.GENERIC_PK:
+            readonly_fields = tuple(readonly_fields) + ("name", "content_type")
+        return readonly_fields
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and obj.pk == TaskType.GENERIC_PK:
+            return False
+        return super().has_delete_permission(request, obj)
+
 
 @admin.register(TaskAttachment)
 class TaskAttachmentAdmin(admin.ModelAdmin):

@@ -1,10 +1,12 @@
 import datetime
 
+from django.contrib import admin
+from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 
 from lifetracker.core.models import (
     DBStoredFile,
@@ -12,6 +14,7 @@ from lifetracker.core.models import (
     FileType,
     database_storage,
 )
+from lifetracker.tasktracker.admin import TaskTypeAdmin
 from lifetracker.tasktracker.models import (
     Task,
     TaskAttachment,
@@ -35,6 +38,53 @@ class TaskTypeModelTests(TestCase):
         task_type = TaskType.objects.create(name="Standalone")
         self.assertIsNone(task_type.content_type)
 
+    def test_generic_row_created_by_migration(self):
+        generic = TaskType.objects.get(pk=TaskType.GENERIC_PK)
+        self.assertEqual(generic.name, "Generic")
+        self.assertIsNone(generic.content_type_id)
+
+    def test_clean_rejects_renaming_pk1(self):
+        generic = TaskType.objects.get(pk=TaskType.GENERIC_PK)
+        generic.name = "Not Generic"
+        with self.assertRaises(ValidationError):
+            generic.full_clean()
+
+    def test_clean_rejects_other_row_named_generic(self):
+        other = TaskType(name="Generic")
+        with self.assertRaises(ValidationError):
+            other.full_clean()
+
+    def test_clean_rejects_content_type_on_pk1(self):
+        generic = TaskType.objects.get(pk=TaskType.GENERIC_PK)
+        generic.content_type = ContentType.objects.get_for_model(TaskType)
+        with self.assertRaises(ValidationError):
+            generic.full_clean()
+
+    def test_db_check_constraint_rejects_renaming_pk1(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            TaskType.objects.filter(pk=TaskType.GENERIC_PK).update(name="Not Generic")
+
+    def test_db_check_constraint_rejects_content_type_on_pk1(self):
+        ct = ContentType.objects.get_for_model(TaskType)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            TaskType.objects.filter(pk=TaskType.GENERIC_PK).update(content_type=ct)
+
+    def test_db_check_constraint_rejects_other_row_named_generic(self):
+        other = TaskType.objects.create(name="Placeholder")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            TaskType.objects.filter(pk=other.pk).update(name="Generic")
+
+    def test_delete_rejected_for_generic(self):
+        generic = TaskType.objects.get(pk=TaskType.GENERIC_PK)
+        with self.assertRaises(ValidationError):
+            generic.delete()
+        self.assertTrue(TaskType.objects.filter(pk=TaskType.GENERIC_PK).exists())
+
+    def test_delete_allowed_for_other_task_type(self):
+        other = TaskType.objects.create(name="Disposable")
+        other.delete()
+        self.assertFalse(TaskType.objects.filter(pk=other.pk).exists())
+
 
 class TaskModelTests(TestCase):
     def setUp(self):
@@ -47,7 +97,7 @@ class TaskModelTests(TestCase):
             name="File-related",
             content_type=self.file_type_content_type,
         )
-        self.untyped_task_type = TaskType.objects.create(name="Generic")
+        self.untyped_task_type = TaskType.objects.create(name="Untyped")
         self.root = Task.objects.create(
             title="Home", order=1, task_type=self.untyped_task_type
         )
@@ -161,14 +211,18 @@ class TaskModelTests(TestCase):
         task = Task(title="No link", task_type=self.untyped_task_type)
         task.full_clean()
 
-    def test_task_type_is_required(self):
-        task = Task(title="No type")
+    def test_task_type_defaults_to_generic_when_omitted(self):
+        task = Task.objects.create(title="No type given")
+        self.assertEqual(task.task_type_id, TaskType.GENERIC_PK)
+
+    def test_task_type_explicit_none_rejected_by_clean(self):
+        task = Task(title="No type", task_type=None)
         with self.assertRaises(ValidationError):
             task.full_clean()
 
-    def test_task_type_fk_required_at_db_level(self):
+    def test_task_type_explicit_none_rejected_at_db_level(self):
         with self.assertRaises(IntegrityError), transaction.atomic():
-            Task.objects.create(title="No type")
+            Task.objects.create(title="No type", task_type=None)
 
     def test_linked_object_resolves(self):
         task = Task.objects.create(
@@ -224,10 +278,7 @@ class TaskAttachmentDateTests(TestCase):
 
 class TaskAttachmentModelTests(TestCase):
     def setUp(self):
-        self.task_type = TaskType.objects.create(name="Generic")
-        self.task = Task.objects.create(
-            title="Inbox", order=1, task_type=self.task_type
-        )
+        self.task = Task.objects.create(title="Inbox", order=1)
         self.pdf_type = FileType.objects.create(
             short_name="PDF",
             full_name="PDF Document",
@@ -303,3 +354,39 @@ class TaskAttachmentModelTests(TestCase):
         attachment.save()
         attachment.refresh_from_db()
         self.assertIsNone(attachment.file_type)
+
+
+class TaskTypeAdminGenericProtectionTests(TestCase):
+    """The built-in 'Generic' TaskType (pk=1) should be uneditable and
+    undeletable through the admin."""
+
+    def setUp(self):
+        self.admin = TaskTypeAdmin(TaskType, admin.site)
+        self.generic = TaskType.objects.get(pk=TaskType.GENERIC_PK)
+        self.other = TaskType.objects.create(name="Household")
+        superuser = User.objects.create_superuser("root", "", "password")
+        self.request = RequestFactory().get("/")
+        self.request.user = superuser
+
+    def test_delete_permission_denied_for_generic(self):
+        self.assertFalse(self.admin.has_delete_permission(self.request, self.generic))
+
+    def test_delete_permission_allowed_for_other(self):
+        self.assertTrue(self.admin.has_delete_permission(self.request, self.other))
+
+    def test_delete_permission_allowed_with_no_object(self):
+        self.assertTrue(self.admin.has_delete_permission(self.request, None))
+
+    def test_readonly_fields_locked_for_generic(self):
+        readonly_fields = self.admin.get_readonly_fields(None, self.generic)
+        self.assertIn("name", readonly_fields)
+        self.assertIn("content_type", readonly_fields)
+
+    def test_readonly_fields_unlocked_for_other(self):
+        readonly_fields = self.admin.get_readonly_fields(None, self.other)
+        self.assertNotIn("name", readonly_fields)
+        self.assertNotIn("content_type", readonly_fields)
+
+    def test_readonly_fields_unlocked_for_new_object(self):
+        readonly_fields = self.admin.get_readonly_fields(None, None)
+        self.assertNotIn("name", readonly_fields)
