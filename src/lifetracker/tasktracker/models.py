@@ -61,9 +61,7 @@ class Task(models.Model):
     )
     task_type = models.ForeignKey(
         TaskType,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         related_name="tasks",
     )
     content_type = models.ForeignKey(
@@ -140,7 +138,7 @@ class Task(models.Model):
             )
 
         allowed_content_type_id = None
-        if self.task_type_id is not None or self.task_type is not None:
+        if self.task_type_id is not None:
             allowed_content_type_id = self.task_type.content_type_id
 
         if allowed_content_type_id is None:

@@ -7,7 +7,7 @@ class ChildTaskInline(admin.TabularInline):
     model = Task
     fk_name = "parent"
     extra = 1
-    fields = ("order", "title", "status", "notes")
+    fields = ("order", "title", "status", "task_type", "notes")
     show_change_link = True
 
 

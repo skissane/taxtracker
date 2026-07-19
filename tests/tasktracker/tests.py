@@ -38,8 +38,6 @@ class TaskTypeModelTests(TestCase):
 
 class TaskModelTests(TestCase):
     def setUp(self):
-        self.root = Task.objects.create(title="Home", order=1)
-        self.child = Task.objects.create(parent=self.root, title="Laundry", order=1)
         self.file_type = FileType.objects.create(
             short_name="PDF",
             full_name="PDF Document",
@@ -50,6 +48,15 @@ class TaskModelTests(TestCase):
             content_type=self.file_type_content_type,
         )
         self.untyped_task_type = TaskType.objects.create(name="Generic")
+        self.root = Task.objects.create(
+            title="Home", order=1, task_type=self.untyped_task_type
+        )
+        self.child = Task.objects.create(
+            parent=self.root,
+            title="Laundry",
+            order=1,
+            task_type=self.untyped_task_type,
+        )
 
     def test_str_root(self):
         self.assertEqual(str(self.root), "Home")
@@ -58,8 +65,8 @@ class TaskModelTests(TestCase):
         self.assertEqual(str(self.child), "Home > Laundry")
 
     def test_str_is_cycle_safe(self):
-        a = Task.objects.create(title="A", order=2)
-        b = Task.objects.create(title="B", order=3)
+        a = Task.objects.create(title="A", order=2, task_type=self.untyped_task_type)
+        b = Task.objects.create(title="B", order=3, task_type=self.untyped_task_type)
         Task.objects.filter(pk=a.pk).update(parent_id=b.pk)
         Task.objects.filter(pk=b.pk).update(parent_id=a.pk)
         a.refresh_from_db()
@@ -81,7 +88,12 @@ class TaskModelTests(TestCase):
             self.root.clean()
 
     def test_clean_rejects_multi_level_cycle(self):
-        third = Task.objects.create(parent=self.child, title="Fold", order=1)
+        third = Task.objects.create(
+            parent=self.child,
+            title="Fold",
+            order=1,
+            task_type=self.untyped_task_type,
+        )
         self.root.parent_id = third.pk
         with self.assertRaises(ValidationError):
             self.root.clean()
@@ -126,13 +138,15 @@ class TaskModelTests(TestCase):
             task.full_clean()
 
     def test_content_type_forbidden_when_task_type_is_none(self):
+        # task_type is a required field, but clean() is defensive against
+        # being called before clean_fields() has enforced that.
         task = Task(
             title="Forbidden link",
             content_type=self.file_type_content_type,
             object_id=self.file_type.pk,
         )
         with self.assertRaises(ValidationError):
-            task.full_clean()
+            task.clean()
 
     def test_content_type_and_object_id_must_be_set_together(self):
         task = Task(
@@ -144,8 +158,17 @@ class TaskModelTests(TestCase):
             task.full_clean()
 
     def test_baseline_all_none_case_is_valid(self):
-        task = Task(title="No link")
+        task = Task(title="No link", task_type=self.untyped_task_type)
         task.full_clean()
+
+    def test_task_type_is_required(self):
+        task = Task(title="No type")
+        with self.assertRaises(ValidationError):
+            task.full_clean()
+
+    def test_task_type_fk_required_at_db_level(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Task.objects.create(title="No type")
 
     def test_linked_object_resolves(self):
         task = Task.objects.create(
@@ -165,8 +188,8 @@ class TaskModelTests(TestCase):
         self.root.clean()
 
     def test_get_folder_path_is_cycle_safe(self):
-        a = Task.objects.create(title="A", order=2)
-        b = Task.objects.create(title="B", order=3)
+        a = Task.objects.create(title="A", order=2, task_type=self.untyped_task_type)
+        b = Task.objects.create(title="B", order=3, task_type=self.untyped_task_type)
         Task.objects.filter(pk=a.pk).update(parent_id=b.pk)
         Task.objects.filter(pk=b.pk).update(parent_id=a.pk)
         a.refresh_from_db()
@@ -201,7 +224,10 @@ class TaskAttachmentDateTests(TestCase):
 
 class TaskAttachmentModelTests(TestCase):
     def setUp(self):
-        self.task = Task.objects.create(title="Inbox", order=1)
+        self.task_type = TaskType.objects.create(name="Generic")
+        self.task = Task.objects.create(
+            title="Inbox", order=1, task_type=self.task_type
+        )
         self.pdf_type = FileType.objects.create(
             short_name="PDF",
             full_name="PDF Document",
