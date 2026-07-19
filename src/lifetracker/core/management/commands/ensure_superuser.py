@@ -7,21 +7,27 @@ Behaviour
 * ``--username``  (default: ``admin``) — the username to create/repair.
 * ``--email``     (default: ``""``)   — email address (only used on creation).
 
-If the user **does not exist**, a new superuser is created with a randomly
-generated password (``secrets.token_hex(16)``) and the password is printed.
+If the user **does not exist**, a new superuser is created. Its initial
+password is read from ``~/.config/lifetracker/initial_admin_password``
+(stripped) if that file exists and is non-empty; in that case the password
+is not printed, since it's assumed the operator already knows it. Otherwise
+a random password (``secrets.token_hex(16)``) is generated and printed.
 
 If the user **exists**:
   * ``is_active``, ``is_staff``, and ``is_superuser`` are all set to ``True``
     (and saved) if any of them are ``False``.
-  * If the user has **no usable password** (``has_usable_password()`` returns
-    ``False``), a new random password is generated, set, and printed.
-  * Otherwise nothing is changed and nothing is printed.
+  * Its password is left untouched either way.
 """
 
 import secrets
+from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
+
+INITIAL_ADMIN_PASSWORD_FILE = (
+    Path.home() / ".config" / "lifetracker" / "initial_admin_password"
+)
 
 
 class Command(BaseCommand):
@@ -50,33 +56,35 @@ class Command(BaseCommand):
         try:
             user = User.objects.get(**{User.USERNAME_FIELD: username})
         except User.DoesNotExist:
-            # Create brand-new superuser with a random password.
-            password = secrets.token_hex(16)
-            User.objects.create_superuser(
-                username=username, email=email, password=password
-            )
-            self.stdout.write(
-                f"Created superuser '{username}' with password: {password}"
-            )
-            self.stdout.write("Change this password after first login.")
+            initial_password = self._read_initial_password()
+            if initial_password is not None:
+                User.objects.create_superuser(
+                    username=username, email=email, password=initial_password
+                )
+                self.stdout.write(
+                    f"Created superuser '{username}' using password from "
+                    f"{INITIAL_ADMIN_PASSWORD_FILE}."
+                )
+            else:
+                password = secrets.token_hex(16)
+                User.objects.create_superuser(
+                    username=username, email=email, password=password
+                )
+                self.stdout.write(
+                    f"Created superuser '{username}' with password: {password}"
+                )
+                self.stdout.write("Change this password after first login.")
             return
 
-        # User exists – repair flags if needed.
-        needs_save = False
+        # User exists – repair flags if needed. Password is left alone.
         if not user.is_active or not user.is_staff or not user.is_superuser:
             user.is_active = True
             user.is_staff = True
             user.is_superuser = True
-            needs_save = True
-
-        # Set a password if the account has no usable password.
-        if not user.has_usable_password():
-            password = secrets.token_hex(16)
-            user.set_password(password)
-            needs_save = True
-            self.stdout.write(
-                f"Set password for existing user '{username}': {password}"
-            )
-
-        if needs_save:
             user.save()
+
+    def _read_initial_password(self):
+        if not INITIAL_ADMIN_PASSWORD_FILE.exists():
+            return None
+        password = INITIAL_ADMIN_PASSWORD_FILE.read_text().strip()
+        return password or None
