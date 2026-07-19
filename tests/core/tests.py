@@ -808,3 +808,58 @@ class EnsureSuperuserCommandTests(TestCase):
         self.assertEqual(output.strip(), "")
         user.refresh_from_db()
         self.assertFalse(user.has_usable_password())
+
+
+class DockerEntrypointTests(TestCase):
+    """Tests for the Docker entrypoint startup sequence."""
+
+    def test_entrypoint_runs_startup_commands_before_execing_arguments(self):
+        repo_root = next(
+            parent
+            for parent in Path(__file__).resolve().parents
+            if (parent / "manage.py").exists()
+        )
+        script = repo_root / "docker-entrypoint.sh"
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            temp_path = Path(tempdir)
+            log_path = temp_path / "python.log"
+            python_path = temp_path / "python"
+            python_path.write_text(
+                "#!/usr/bin/env sh\n"
+                "{\n"
+                "  sep=''\n"
+                '  for arg in "$@"; do\n'
+                '    printf \'%s%s\' "$sep" "$arg"\n'
+                "    sep=' '\n"
+                "  done\n"
+                "  printf '\\n'\n"
+                '} >> "$PYTHON_LOG_PATH"\n'
+                "exit 0\n"
+            )
+            python_path.chmod(0o755)
+
+            result = subprocess.run(
+                ["sh", str(script), "sh", "-c", "printf ready"],
+                cwd=repo_root,
+                env={
+                    **os.environ,
+                    "PATH": f"{tempdir}:{os.environ['PATH']}",
+                    "PYTHON_LOG_PATH": str(log_path),
+                    "LIFETRACKER_APP_DIR": str(repo_root),
+                },
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            log_lines = log_path.read_text().splitlines()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "ready")
+        self.assertEqual(
+            log_lines,
+            [
+                "manage.py upgrade_legacy_db",
+                "manage.py migrate",
+            ],
+        )
