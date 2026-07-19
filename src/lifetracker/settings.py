@@ -90,6 +90,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "lifetracker.core",
     "lifetracker.taxtracker",
+    "lifetracker.tasktracker",
 ]
 
 MIDDLEWARE = [

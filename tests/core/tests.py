@@ -1,14 +1,17 @@
+import io
 import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 import coverage
 from django.contrib import admin
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
+from django.core.management import call_command
 from django.db import IntegrityError
 from django.forms import inlineformset_factory
 from django.test import Client, TestCase
@@ -710,3 +713,98 @@ class SettingsSecretKeyTests(TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertNotEqual(proc.stdout.strip(), "legacy-secret-key-content")
             self.assertTrue(override_path.exists())
+
+
+class EnsureSuperuserCommandTests(TestCase):
+    """Tests for the ensure_superuser management command."""
+
+    def setUp(self):
+        # Point the initial-admin-password lookup at a file inside a fresh
+        # temp dir that doesn't exist unless a test writes to it, so this
+        # never picks up a real ~/.config/lifetracker/initial_admin_password.
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.password_file = Path(tmpdir.name) / "initial_admin_password"
+        patcher = mock.patch(
+            "lifetracker.core.management.commands.ensure_superuser."
+            "INITIAL_ADMIN_PASSWORD_FILE",
+            self.password_file,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _call(self, **kwargs):
+        """Call ensure_superuser and return captured stdout."""
+        out = io.StringIO()
+        call_command("ensure_superuser", stdout=out, **kwargs)
+        return out.getvalue()
+
+    def test_creates_new_user_with_random_password(self):
+        output = self._call(username="testadmin", email="a@example.com")
+        self.assertTrue(User.objects.filter(username="testadmin").exists())
+        user = User.objects.get(username="testadmin")
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.is_staff)
+        self.assertTrue(user.is_active)
+        self.assertIn("testadmin", output)
+        # Password is the last word on the first output line, 32 hex chars.
+        first_line = output.splitlines()[0]
+        printed_password = first_line.split()[-1]
+        self.assertEqual(len(printed_password), 32)
+        self.assertTrue(user.check_password(printed_password))
+
+    def test_default_username_is_admin(self):
+        output = self._call()
+        self.assertTrue(User.objects.filter(username="admin").exists())
+        self.assertIn("admin", output)
+
+    def test_creates_new_user_with_password_from_file(self):
+        self.password_file.parent.mkdir(parents=True, exist_ok=True)
+        self.password_file.write_text("from-the-file\n")
+        output = self._call(username="admin")
+        user = User.objects.get(username="admin")
+        self.assertTrue(user.check_password("from-the-file"))
+        # The password itself must never be printed.
+        self.assertNotIn("from-the-file", output)
+        self.assertIn(str(self.password_file), output)
+
+    def test_empty_password_file_falls_back_to_random_password(self):
+        self.password_file.parent.mkdir(parents=True, exist_ok=True)
+        self.password_file.write_text("   \n")
+        output = self._call(username="admin")
+        user = User.objects.get(username="admin")
+        first_line = output.splitlines()[0]
+        printed_password = first_line.split()[-1]
+        self.assertEqual(len(printed_password), 32)
+        self.assertTrue(user.check_password(printed_password))
+
+    def test_existing_user_no_change_when_already_superuser_with_password(self):
+        User.objects.create_superuser("admin", "", "existingpassword")
+        output = self._call(username="admin")
+        # No password should be printed when user already has one
+        self.assertEqual(output.strip(), "")
+        user = User.objects.get(username="admin")
+        self.assertTrue(user.check_password("existingpassword"))
+
+    def test_existing_user_flags_repaired(self):
+        user = User.objects.create_user("admin", "", "existingpassword")
+        user.is_active = False
+        user.is_staff = False
+        user.is_superuser = False
+        user.save()
+        self._call(username="admin")
+        user.refresh_from_db()
+        self.assertTrue(user.is_active)
+        self.assertTrue(user.is_staff)
+        self.assertTrue(user.is_superuser)
+        # Password unchanged — existing password should still work
+        self.assertTrue(user.check_password("existingpassword"))
+
+    def test_existing_user_password_left_alone_when_unusable(self):
+        user = User.objects.create_superuser("admin", "", "tmp")
+        user.set_unusable_password()
+        user.save()
+        output = self._call(username="admin")
+        self.assertEqual(output.strip(), "")
+        user.refresh_from_db()
+        self.assertFalse(user.has_usable_password())
