@@ -49,6 +49,9 @@ jobs:
       - name: Run tests with coverage
         run: just coverage
 
+      - name: Build Docker image
+        run: just docker-build
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:

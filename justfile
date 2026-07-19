@@ -46,6 +46,10 @@ test:
 coverage:
     uv run --group dev pytest --cov=src/lifetracker --cov-report=term --cov-report=xml
 
+# Build the container image
+docker-build:
+    docker build -t taxtracker .
+
 # Run every ruff/djlint lint and format-check step (no fixes, no tests)
 check: lint fmt-check lint-templates fmt-check-templates
 
@@ -53,4 +57,4 @@ check: lint fmt-check lint-templates fmt-check-templates
 fix: lint-fix fmt fmt-templates
 
 # Run everything the CI workflow runs
-ci: lock-check sync check coverage
+ci: lock-check sync check coverage docker-build
