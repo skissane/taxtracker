@@ -6,6 +6,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
+from django.db.models import ProtectedError
 from django.test import RequestFactory, TestCase
 
 from lifetracker.core.models import (
@@ -232,6 +233,16 @@ class TaskModelTests(TestCase):
             object_id=self.file_type.pk,
         )
         self.assertEqual(task.linked_object, self.file_type)
+
+    def test_content_type_deletion_protected_while_referenced(self):
+        Task.objects.create(
+            title="Has link",
+            task_type=self.typed_task_type,
+            content_type=self.file_type_content_type,
+            object_id=self.file_type.pk,
+        )
+        with self.assertRaises(ProtectedError):
+            self.file_type_content_type.delete()
 
     def test_clean_handles_missing_self_row(self):
         task = Task(pk=99999, title="Ghost", parent=self.root)

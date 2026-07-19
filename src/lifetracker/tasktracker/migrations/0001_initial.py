@@ -34,7 +34,7 @@ class Migration(migrations.Migration):
                 ('notes', models.TextField(blank=True)),
                 ('order', models.PositiveIntegerField(default=0, help_text='Order among siblings (lower numbers appear first).')),
                 ('object_id', models.PositiveIntegerField(blank=True, null=True)),
-                ('content_type', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='+', to='contenttypes.contenttype')),
+                ('content_type', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='+', to='contenttypes.contenttype')),
                 ('parent', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='children', to='tasktracker.task')),
             ],
             options={

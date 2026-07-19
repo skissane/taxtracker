@@ -126,7 +126,7 @@ class Task(models.Model):
         ContentType,
         null=True,
         blank=True,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         related_name="+",
     )
     object_id = models.PositiveIntegerField(null=True, blank=True)
