@@ -23,7 +23,7 @@ packages = ["src/lifetracker"]
 [dependency-groups]
 dev = [
     "coverage>=7.6",
-    "djlint>=1.40.3",
+    "djlint>=1.43.2",
     "pytest>=8.3",
     "pytest-cov>=6.0",
     "pytest-django>=4.9",
