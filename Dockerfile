@@ -34,11 +34,27 @@ ENV LIFETRACKER_DATA_DIR=/data
 # LIFETRACKER_DEBUG=1 for local use instead.
 ENV LIFETRACKER_DEBUG=0
 
+# The lifetracker user/group the app runs as. Created with these IDs at build
+# time; set LIFETRACKER_UID/LIFETRACKER_GID at runtime (e.g. to match the owner
+# of a bind-mounted directory) and docker-entrypoint.sh changes them to match
+# before dropping root. The defaults are above 10000 to stay clear of typical
+# host user/group IDs. dialout is deleted because its GID, 20, is macOS's
+# staff group: nothing in the image uses it, and with it gone a lifetracker
+# group renumbered to 20 shows by name instead of as dialout.
+ENV LIFETRACKER_UID=10001
+ENV LIFETRACKER_GID=10001
+RUN groupdel dialout \
+    && groupadd --system --gid "${LIFETRACKER_GID}" lifetracker \
+    && useradd --system --uid "${LIFETRACKER_UID}" --gid lifetracker \
+       --create-home --home-dir /home/lifetracker --shell /usr/sbin/nologin \
+       lifetracker
+
 COPY --from=builder /app /app
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+RUN mkdir /data && chown lifetracker:lifetracker /data
 VOLUME /data
 
 EXPOSE 8000
