@@ -14,6 +14,8 @@ import os
 import secrets
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -21,16 +23,41 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
+
+def _env_path(name):
+    value = os.environ.get(name)
+    return Path(value) if value else None
+
+
+# LIFETRACKER_DATA_DIR (the Docker image sets it to /data) is a directory for the
+# database, and also for the config files below unless LIFETRACKER_CONFIG_DIR
+# is set, so everything can live together on one volume.
+_data_dir = _env_path("LIFETRACKER_DATA_DIR")
+
+# Where per-install config files (secret key, initial admin password) live by
+# default: LIFETRACKER_CONFIG_DIR, else LIFETRACKER_DATA_DIR, else
+# ~/.config/lifetracker. LIFETRACKER_SECRET_KEY_FILE and
+# LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE override each file. A setting rather
+# than private, so management commands can use it too.
+_home_config_dir = Path.home() / ".config" / "lifetracker"
+LIFETRACKER_CONFIG_DIR = (
+    _env_path("LIFETRACKER_CONFIG_DIR") or _data_dir or _home_config_dir
+)
+
 # SECRET_KEY is stored in a file to avoid committing it to source control.
 # Set LIFETRACKER_SECRET_KEY_FILE to override the default location.
-_default_key_file = Path.home() / ".config" / "lifetracker" / "secret_key"
+_default_key_file = LIFETRACKER_CONFIG_DIR / "secret_key"
 _key_file = Path(os.environ.get("LIFETRACKER_SECRET_KEY_FILE", _default_key_file))
 
 # One-time migration from the old taxtracker config location: if nothing lives
 # at the new default path yet but a key from the pre-rename app does, copy it
 # forward so existing sessions/logins survive the rename instead of getting a
-# freshly generated key.
-if "LIFETRACKER_SECRET_KEY_FILE" not in os.environ and not _key_file.exists():
+# freshly generated key. Only applies to the ~/.config default.
+if (
+    "LIFETRACKER_SECRET_KEY_FILE" not in os.environ
+    and LIFETRACKER_CONFIG_DIR == _home_config_dir
+    and not _key_file.exists()
+):
     _old_key_file = Path.home() / ".config" / "taxtracker" / "secret_key"
     try:
         _old_stored = (
@@ -73,10 +100,50 @@ if not _stored:
 
 SECRET_KEY = _stored
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
 
-ALLOWED_HOSTS = []
+def _env_bool(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    normalized = value.lower()
+    if normalized in ("1", "true"):
+        return True
+    if normalized in ("0", "false"):
+        return False
+    raise ImproperlyConfigured(f"{name} must be 1/true or 0/false, not {value!r}.")
+
+
+def _env_list(name):
+    items = (item.strip() for item in os.environ.get(name, "").split(","))
+    return [item for item in items if item]
+
+
+# SECURITY WARNING: don't run with debug turned on in production!
+# On by default so ./run.sh works out of the box; the Docker image turns it off
+# (and `just docker-run` turns it back on for local use).
+DEBUG = _env_bool("LIFETRACKER_DEBUG", True)
+
+# Comma-separated, e.g. "tax.example.com". With DEBUG on and this empty, Django
+# allows localhost only. With DEBUG off and this empty, Django would start fine
+# and then reject every request with a 400, so fail at startup instead.
+ALLOWED_HOSTS = _env_list("LIFETRACKER_ALLOWED_HOSTS")
+if not DEBUG and not ALLOWED_HOSTS:
+    raise ImproperlyConfigured(
+        "LIFETRACKER_ALLOWED_HOSTS must be set when LIFETRACKER_DEBUG is off."
+    )
+
+# Behind a TLS-terminating reverse proxy, Django sees plain HTTP, so the admin
+# login's CSRF Origin check fails. Either list the public origins here
+# (comma-separated, e.g. "https://tax.example.com"), or set
+# LIFETRACKER_TRUST_X_FORWARDED_PROTO=1 if the proxy always sets
+# X-Forwarded-Proto and the container is reachable only through it.
+CSRF_TRUSTED_ORIGINS = _env_list("LIFETRACKER_CSRF_TRUSTED_ORIGINS")
+if _env_bool("LIFETRACKER_TRUST_X_FORWARDED_PROTO", False):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Production is assumed to be HTTPS: don't send session/CSRF cookies over HTTP.
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
 
 
 # Application definition
@@ -95,6 +162,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -125,11 +193,15 @@ WSGI_APPLICATION = "lifetracker.wsgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
+# Set LIFETRACKER_DB_PATH (or LIFETRACKER_DATA_DIR, above) to keep the
+# database outside the source tree.
+
+_default_db_path = (_data_dir or BASE_DIR) / "db.sqlite3"
 
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": Path(os.environ.get("LIFETRACKER_DB_PATH", _default_db_path)),
     }
 }
 
@@ -169,6 +241,11 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = "static/"
+# Gunicorn doesn't serve static files the way runserver does, so WhiteNoise does.
+# The Docker image sets LIFETRACKER_STATIC_ROOT and runs `collectstatic` into it at
+# build time; elsewhere it's unset, and WhiteNoise serves straight from the apps'
+# static directories while DEBUG is on.
+STATIC_ROOT = os.environ.get("LIFETRACKER_STATIC_ROOT")
 
 # Media files (uploads)
 # https://docs.djangoproject.com/en/6.0/topics/files/

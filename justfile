@@ -46,6 +46,30 @@ test:
 coverage:
     uv run --group dev pytest --cov=src/lifetracker --cov-report=term --cov-report=xml
 
+# Build the container image
+docker-build:
+    docker build -t lifetracker .
+
+# Host config directory (secret key, initial admin password) that `just
+# docker-run` mounts read-only, the same one ./run.sh uses by default. Made
+# absolute (a relative path is taken from the repo root), since docker treats a
+# relative -v source as a named volume.
+#
+# docker-run first imports settings on the host (`manage.py check`), which
+# creates this directory and the secret key as the current user if missing.
+# Otherwise the Docker daemon would create a missing directory as root on
+# Linux, and the container couldn't generate the key in a read-only mount.
+config_dir := absolute_path(env("LIFETRACKER_CONFIG_DIR", env("HOME") / ".config/lifetracker"))
+
+# Run the app container locally (DEBUG on, loopback only, host config read-only)
+docker-run:
+    LIFETRACKER_CONFIG_DIR="{{ config_dir }}" uv run python manage.py check
+    docker run --rm --name=lifetracker -p 127.0.0.1:8000:8000 -e LIFETRACKER_DEBUG=1 -v lifetracker-data:/data -v "{{ config_dir }}:/config:ro" -e LIFETRACKER_CONFIG_DIR=/config lifetracker
+
+# Open a bash shell in the running container started by docker-run
+docker-shell:
+    docker exec -it lifetracker /bin/bash
+
 # Run every ruff/djlint lint and format-check step (no fixes, no tests)
 check: lint fmt-check lint-templates fmt-check-templates
 
@@ -53,4 +77,4 @@ check: lint fmt-check lint-templates fmt-check-templates
 fix: lint-fix fmt fmt-templates
 
 # Run everything the CI workflow runs
-ci: lock-check sync check coverage
+ci: lock-check sync check coverage docker-build

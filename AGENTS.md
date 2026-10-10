@@ -100,7 +100,7 @@ tests.cli` still works as an unparallelised fallback, referencing these as `test
 
 ## Secret key
 
-The Django `SECRET_KEY` is stored in `~/.config/lifetracker/secret_key` (auto-generated on first run). Override with `LIFETRACKER_SECRET_KEY_FILE`. On first run under the new config location, if a key from the pre-rename `~/.config/taxtracker/secret_key` exists, it's copied forward automatically so existing sessions/logins survive.
+The Django `SECRET_KEY` is stored in `~/.config/lifetracker/secret_key` (auto-generated on first run). Override with `LIFETRACKER_SECRET_KEY_FILE`. On first run under the new config location, if a key from the pre-rename `~/.config/taxtracker/secret_key` exists, it's copied forward automatically so existing sessions/logins survive. The key's directory is `settings.LIFETRACKER_CONFIG_DIR`: `$LIFETRACKER_CONFIG_DIR` if set, else `$LIFETRACKER_DATA_DIR` if set (the Docker image sets it to `/data`), else `~/.config/lifetracker`; the legacy-key copy only happens for the `~/.config` default. `LIFETRACKER_DATA_DIR` also moves the database to `$LIFETRACKER_DATA_DIR/db.sqlite3` (overridable with `LIFETRACKER_DB_PATH`). The `ensure_superuser` command reads an optional initial admin password from `initial_admin_password` in the config directory, overridable with `LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE`.
 
 ## Linting config
 
@@ -114,6 +114,8 @@ Ruff: rules E, F, W, I, UP; line length 88; migrations excluded. djlint: profile
 - If it's expected and benign — e.g. Django's `UserWarning` ("Overriding setting DATABASES...") whenever a test uses `override_settings(DATABASES=...)` — assert it explicitly with `pytest.warns(WarningType, match=...)` around the minimal block that triggers it, rather than adding a `filterwarnings` ignore entry (globally in `pyproject.toml` or via `@pytest.mark.filterwarnings("ignore:...")`). `pytest.warns` is a two-sided check: it also fails if the warning *stops* occurring, so if the underlying code later changes and the warning goes away, the test fails and forces someone to remove the now-stale wrapper. A `filterwarnings` ignore rule has no such mechanism — it just keeps silently suppressing nothing, orphaned, indefinitely. Reserve global ignore entries for warnings that are pervasive and not tied to one specific assertable call site.
 
 ## Pitfalls
+
+**Only Linux and macOS are supported; Windows deliberately isn't.** `pyproject.toml`'s `[tool.uv] environments` restricts resolution to `darwin` and `linux`. Don't flag or "fix" Windows portability issues (e.g. relying on `HOME`, POSIX shell syntax in the `justfile` or scripts, `/` path separators, file permission bits), and don't add Windows-specific workarounds.
 
 **`except A, B, C:` is valid Python 3 syntax.** Do not flag comma-separated exception types (without parentheses) as "Python 2-style syntax" or a SyntaxError. This is valid in Python 3, and ruff format will restore it if you remove it.
 

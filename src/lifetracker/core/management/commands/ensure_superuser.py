@@ -8,10 +8,15 @@ Behaviour
 * ``--email``     (default: ``""``)   — email address (only used on creation).
 
 If the user **does not exist**, a new superuser is created. Its initial
-password is read from ``~/.config/lifetracker/initial_admin_password``
-(stripped) if that file exists and is non-empty; in that case the password
-is not printed, since it's assumed the operator already knows it. Otherwise
-a random password (``secrets.token_hex(16)``) is generated and printed.
+password is read (stripped) from the initial admin password file if that
+file exists and is non-empty; in that case the password is not printed,
+since it's assumed the operator already knows it. Otherwise a random
+password (``secrets.token_hex(16)``) is generated and printed.
+
+The initial admin password file is ``$LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE``
+if set, otherwise ``initial_admin_password`` in ``settings.LIFETRACKER_CONFIG_DIR``
+(``$LIFETRACKER_CONFIG_DIR``, else ``$LIFETRACKER_DATA_DIR``, else
+``~/.config/lifetracker``).
 
 If the user **exists**:
   * ``is_active``, ``is_staff``, and ``is_superuser`` are all set to ``True``
@@ -19,15 +24,23 @@ If the user **exists**:
   * Its password is left untouched either way.
 """
 
+import os
 import secrets
 from pathlib import Path
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
-INITIAL_ADMIN_PASSWORD_FILE = (
-    Path.home() / ".config" / "lifetracker" / "initial_admin_password"
-)
+
+def _initial_admin_password_file():
+    override = os.environ.get("LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE")
+    if override:
+        return Path(override)
+    return settings.LIFETRACKER_CONFIG_DIR / "initial_admin_password"
+
+
+INITIAL_ADMIN_PASSWORD_FILE = _initial_admin_password_file()
 
 
 class Command(BaseCommand):
