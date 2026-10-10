@@ -2,6 +2,8 @@
 
 This file provides guidance to AI coding assistants working with code in this repository.
 
+**`CLAUDE.md` and `.github/copilot-instructions.md` are symlinks to this file**, not separate files. Always edit `AGENTS.md` directly. If you only see one of the symlink paths, resolve it back to `AGENTS.md` first — don't write through the symlink, and don't treat the symlinked path as a distinct file that also needs updating.
+
 ## Commands
 
 CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run
@@ -103,6 +105,13 @@ The Django `SECRET_KEY` is stored in `~/.config/lifetracker/secret_key` (auto-ge
 ## Linting config
 
 Ruff: rules E, F, W, I, UP; line length 88; migrations excluded. djlint: profile=django, indent=2.
+
+## Test warnings policy
+
+`[tool.pytest.ini_options]` sets `filterwarnings = ["error"]`, so any warning raised during the test suite fails that test. This is deliberate: it forces whoever's change introduces a new warning to deal with it immediately, rather than letting it sit as unread noise in pytest's warnings summary. When a test hits a warning:
+
+- If it's a real signal (e.g. a deprecation warning), fix the underlying cause so it stops firing.
+- If it's expected and benign — e.g. Django's `UserWarning` ("Overriding setting DATABASES...") whenever a test uses `override_settings(DATABASES=...)` — assert it explicitly with `pytest.warns(WarningType, match=...)` around the minimal block that triggers it, rather than adding a `filterwarnings` ignore entry (globally in `pyproject.toml` or via `@pytest.mark.filterwarnings("ignore:...")`). `pytest.warns` is a two-sided check: it also fails if the warning *stops* occurring, so if the underlying code later changes and the warning goes away, the test fails and forces someone to remove the now-stale wrapper. A `filterwarnings` ignore rule has no such mechanism — it just keeps silently suppressing nothing, orphaned, indefinitely. Reserve global ignore entries for warnings that are pervasive and not tied to one specific assertable call site.
 
 ## Pitfalls
 

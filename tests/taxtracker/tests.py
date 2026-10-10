@@ -4,6 +4,7 @@ import io
 import json
 import zipfile
 
+import pytest
 from django.contrib.auth.models import Permission, User
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
@@ -596,17 +597,18 @@ class AdminViewTests(TestCase):
         response = client.get(url)
         self.assertEqual(response.status_code, 403)
 
-    @override_settings(
-        DATABASES={
-            "default": {
-                "ENGINE": "django.db.backends.postgresql",
-                "NAME": "irrelevant",
-            }
-        }
-    )
     def test_download_db_backup_rejects_non_sqlite_engine(self):
         url = reverse("admin:taxtracker_financialyear_download_db_backup")
-        response = self.client.get(url, follow=True)
+        with pytest.warns(UserWarning, match="Overriding setting DATABASES"):
+            with override_settings(
+                DATABASES={
+                    "default": {
+                        "ENGINE": "django.db.backends.postgresql",
+                        "NAME": "irrelevant",
+                    }
+                }
+            ):
+                response = self.client.get(url, follow=True)
         self.assertRedirects(
             response, reverse("admin:taxtracker_financialyear_changelist")
         )
