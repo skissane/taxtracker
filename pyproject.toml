@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = "~=3.14.0"
 dependencies = [
     "click>=8.4.2",
-    "django>=6.1",
+    "django>=6.1.1",
     "pdfkit>=1.0.0",
 ]
 
@@ -23,13 +23,13 @@ packages = ["src/lifetracker"]
 [dependency-groups]
 dev = [
     "coverage>=7.15.4",
-    "djlint>=1.40.3",
-    "pytest>=8.3",
-    "pytest-cov>=6.0",
-    "pytest-django>=4.9",
-    "pytest-xdist>=3.6",
-    "pyyaml>=6.0",
-    "ruff>=0.15.20",
+    "djlint>=1.46.3",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "pytest-django>=4.14.0",
+    "pytest-xdist>=3.8.0",
+    "pyyaml>=6.0.3",
+    "ruff>=0.16.9",
 ]
 
 [tool.ruff]
