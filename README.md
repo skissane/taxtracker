@@ -22,6 +22,14 @@ and open <http://localhost:8000/admin/>.
 `just docker-run` is for local use: it sets `LIFETRACKER_DEBUG=1` and publishes the
 port on `127.0.0.1` only. Don't publish a `DEBUG` container on other interfaces.
 
+It also mounts your host config directory (`~/.config/lifetracker`, or
+`$LIFETRACKER_CONFIG_DIR` if set) read-only at `/config`, so the container uses the
+same secret key and `initial_admin_password` as `./run.sh`. Before starting the
+container it runs `manage.py check` on the host, which creates the directory and
+secret key as you if they don't exist yet; that way Docker never creates them as
+root. The database is still separate: the container's lives in the
+`lifetracker-data` volume, not in the repo.
+
 The container startup path runs `upgrade_legacy_db`, then `migrate`, then
 `ensure_superuser`, then starts the Gunicorn WSGI server on `0.0.0.0:${PORT:-8000}`.
 Gunicorn's worker timeout is 120 seconds rather than its default 30, since ZIP
@@ -41,9 +49,13 @@ then uses it and doesn't print it.
 
 The SQLite database and secret key live in `/data` inside the container
 (`/data/db.sqlite3` and `/data/secret_key`, because the image sets
-`LIFETRACKER_DATA_DIR=/data`), which `just docker-run` mounts as the
-`lifetracker-data` named volume, so they survive container restarts and image
-rebuilds. Remove the volume (`docker volume rm lifetracker-data`) to start fresh. To
+`LIFETRACKER_DATA_DIR=/data`), so mount a volume there to keep them across
+container restarts and image rebuilds. `just docker-run` mounts the
+`lifetracker-data` named volume there, and reads the secret key from `/config`
+instead (see above); an older `lifetracker-data` volume's `/data/secret_key` is then
+ignored, which logs out existing sessions once. `initial_admin_password` only takes
+effect when `admin` is first created, so with an existing volume it won't change the
+password. Remove the volume (`docker volume rm lifetracker-data`) to start fresh. To
 put either file somewhere else, set `LIFETRACKER_DB_PATH` or
 `LIFETRACKER_SECRET_KEY_FILE`, which take precedence.
 
