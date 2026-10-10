@@ -115,6 +115,8 @@ Ruff: rules E, F, W, I, UP; line length 88; migrations excluded. djlint: profile
 
 ## Pitfalls
 
+**Only Linux and macOS are supported; Windows deliberately isn't.** `pyproject.toml`'s `[tool.uv] environments` restricts resolution to `darwin` and `linux`. Don't flag or "fix" Windows portability issues (e.g. relying on `HOME`, POSIX shell syntax in the `justfile` or scripts, `/` path separators, file permission bits), and don't add Windows-specific workarounds.
+
 **`except A, B, C:` is valid Python 3 syntax.** Do not flag comma-separated exception types (without parentheses) as "Python 2-style syntax" or a SyntaxError. This is valid in Python 3, and ruff format will restore it if you remove it.
 
 **Legacy-upgraded databases keep old `tracker_`-prefixed index names.** SQLite's `ALTER TABLE ... RENAME TO` (used by `upgrade_legacy_db`) has no equivalent for indexes, so a database that went through the upgrade keeps index names like `tracker_item_parent_id_d6e76dee` on the renamed `taxtracker_item` table, instead of matching what a fresh install would generate. This is cosmetic only — Django never looks up indexes by name at runtime — do not "fix" it.
