@@ -20,7 +20,10 @@ just docker-run
 and open <http://localhost:8000/admin/>.
 
 `just docker-run` is for local use: it sets `LIFETRACKER_DEBUG=1` and publishes the
-port on `127.0.0.1` only. Don't publish a `DEBUG` container on other interfaces.
+port on `127.0.0.1` only. Don't publish a `DEBUG` container on other interfaces. To
+use a host port other than 8000, set `LIFETRACKER_DOCKER_PORT` (e.g.
+`LIFETRACKER_DOCKER_PORT=8080 just docker-run`, then open
+<http://localhost:8080/admin/>).
 
 It also mounts your host config directory (`~/.config/lifetracker`, or
 `$LIFETRACKER_CONFIG_DIR` if set) read-only at `/config`, so the container uses the
@@ -38,8 +41,9 @@ large database. Change it with `LIFETRACKER_GUNICORN_TIMEOUT` (in seconds).
 On first start, `ensure_superuser` creates an `admin` user with a random password and
 prints it to the container log (`docker logs lifetracker`); on later starts it leaves
 the existing user's password alone. If you miss it (the log is gone once the
-container exits), reset it with `docker exec -it lifetracker python manage.py
-changepassword admin`.
+container exits), reset it with `just docker-shell python manage.py changepassword
+admin` (or, without `just`, `docker exec -it -u lifetracker lifetracker python
+manage.py changepassword admin`).
 
 To choose the initial password yourself, and keep it out of the log (worth doing in
 production, where logs are often shipped elsewhere), put it in
@@ -58,6 +62,19 @@ effect when `admin` is first created, so with an existing volume it won't change
 password. Remove the volume (`docker volume rm lifetracker-data`) to start fresh. To
 put either file somewhere else, set `LIFETRACKER_DB_PATH` or
 `LIFETRACKER_SECRET_KEY_FILE`, which take precedence.
+
+The entrypoint starts as root only to set up the `lifetracker` user (UID and GID
+10001 by default), then drops to that user to run migrations and Gunicorn. Set
+`LIFETRACKER_UID` and `LIFETRACKER_GID` to run as different IDs, for example to match
+the owner of a bind-mounted directory; `just docker-run` sets them to your own, so the
+container can read your `secret_key` (mode 0600) from `/config`. On each start the
+entrypoint re-owns anything in `/data` not already owned by that user, which also
+upgrades volumes from older root-run images. Only `/data` is re-owned: if you've
+pointed `LIFETRACKER_DB_PATH` or a writable `LIFETRACKER_CONFIG_DIR` somewhere else,
+`chown` its files to that user yourself, or the app can't write to them. Running with
+`docker run --user` skips all of this and runs as the given user, who then needs write
+access to `/data`. Pass `-u lifetracker` to `docker exec` (as above, and as `just
+docker-shell` does) so commands don't run as root.
 
 To keep config separate from data, for example with the secret key and initial
 admin password coming from a read-only secrets mount, set `LIFETRACKER_CONFIG_DIR`.

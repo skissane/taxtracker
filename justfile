@@ -59,16 +59,32 @@ docker-build:
 # creates this directory and the secret key as the current user if missing.
 # Otherwise the Docker daemon would create a missing directory as root on
 # Linux, and the container couldn't generate the key in a read-only mount.
+#
+# The container runs as your host UID/GID (LIFETRACKER_UID/LIFETRACKER_GID),
+# since the secret key is only readable by its owner (mode 0600).
 config_dir := absolute_path(env("LIFETRACKER_CONFIG_DIR", env("HOME") / ".config/lifetracker"))
 
-# Run the app container locally (DEBUG on, loopback only, host config read-only)
-docker-run:
-    LIFETRACKER_CONFIG_DIR="{{ config_dir }}" uv run python manage.py check
-    docker run --rm --name=lifetracker -p 127.0.0.1:8000:8000 -e LIFETRACKER_DEBUG=1 -v lifetracker-data:/data -v "{{ config_dir }}:/config:ro" -e LIFETRACKER_CONFIG_DIR=/config lifetracker
+# docker-run's arguments replace the Gunicorn server with a command, run after
+# migrations, e.g. `just docker-run python manage.py shell`. -t only with a
+# terminal on stdin, so it still works piped or in CI. The host port is
+# LIFETRACKER_DOCKER_PORT (default 8000). It can't run alongside a running
+# server container (same container name); use docker-shell for that.
 
-# Open a bash shell in the running container started by docker-run
-docker-shell:
-    docker exec -it lifetracker /bin/bash
+# Run the app container locally (DEBUG on, loopback only, host config read-only)
+[positional-arguments]
+docker-run *args:
+    LIFETRACKER_CONFIG_DIR="{{ config_dir }}" uv run python manage.py check
+    docker run -i $([ -t 0 ] && echo -t) --rm --name=lifetracker -p 127.0.0.1:${LIFETRACKER_DOCKER_PORT:-8000}:8000 -e LIFETRACKER_DEBUG=1 -v lifetracker-data:/data -v "{{ config_dir }}:/config:ro" -e LIFETRACKER_CONFIG_DIR=/config -e LIFETRACKER_UID="$(id -u)" -e LIFETRACKER_GID="$(id -g)" lifetracker "$@"
+
+# docker-shell's arguments replace bash with a command run in the running
+# container, e.g. `just docker-shell python manage.py shell`. -t only with a
+# terminal on stdin, as in docker-run. The default and the exec share one line
+# since just runs each recipe line in its own shell.
+
+# Open a bash shell (or run a command) in the running container from docker-run
+[positional-arguments]
+docker-shell *args:
+    [ $# -gt 0 ] || set -- /bin/bash; docker exec -i $([ -t 0 ] && echo -t) -u lifetracker lifetracker "$@"
 
 # Run every ruff/djlint lint and format-check step (no fixes, no tests)
 check: lint fmt-check lint-templates fmt-check-templates
