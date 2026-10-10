@@ -24,6 +24,9 @@ port on `127.0.0.1` only. Don't publish a `DEBUG` container on other interfaces.
 
 The container startup path runs `upgrade_legacy_db`, then `migrate`, then
 `ensure_superuser`, then starts the Gunicorn WSGI server on `0.0.0.0:${PORT:-8000}`.
+Gunicorn's worker timeout is 120 seconds rather than its default 30, since ZIP
+exports, DB backups and archive imports run in the request and can be slow for a
+large database. Change it with `LIFETRACKER_GUNICORN_TIMEOUT` (in seconds).
 On first start, `ensure_superuser` creates an `admin` user with a random password and
 prints it to the container log (`docker logs lifetracker`); on later starts it leaves
 the existing user's password alone. If you miss it (the log is gone once the
@@ -76,3 +79,5 @@ docker run -d --name=lifetracker -p 127.0.0.1:8000:8000 -v lifetracker-data:/dat
 
 With `DEBUG` off, session and CSRF cookies are marked `Secure`, so the app must be
 served over HTTPS (typically via the reverse proxy); over plain HTTP you can't log in.
+The app doesn't redirect HTTP to HTTPS or send an HSTS header itself; configure
+both on the reverse proxy.

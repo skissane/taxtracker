@@ -105,9 +105,10 @@ def _env_bool(name, default):
     value = os.environ.get(name)
     if value is None:
         return default
-    if value in ("1", "true"):
+    normalized = value.lower()
+    if normalized in ("1", "true"):
         return True
-    if value in ("0", "false"):
+    if normalized in ("0", "false"):
         return False
     raise ImproperlyConfigured(f"{name} must be 1/true or 0/false, not {value!r}.")
 

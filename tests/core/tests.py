@@ -863,6 +863,14 @@ class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
         stderr = self._error(LIFETRACKER_DEBUG="yes")
         self.assertIn("LIFETRACKER_DEBUG must be 1/true or 0/false", stderr)
 
+    def test_bool_is_case_insensitive(self):
+        self.assertTrue(self._settings(LIFETRACKER_DEBUG="TRUE")[0])
+        self.assertFalse(
+            self._settings(
+                LIFETRACKER_DEBUG="False", LIFETRACKER_ALLOWED_HOSTS="example.com"
+            )[0]
+        )
+
     def test_proxy_settings(self):
         debug, _, origins, proxy_header, _, _ = self._settings(
             LIFETRACKER_DEBUG="true",
@@ -1002,7 +1010,20 @@ class EnsureSuperuserCommandTests(TestCase):
 class DockerEntrypointTests(TestCase):
     """Tests for the Docker entrypoint startup sequence."""
 
-    def test_entrypoint_runs_startup_commands_before_execing_arguments(self):
+    STARTUP = [
+        "python manage.py upgrade_legacy_db",
+        "python manage.py migrate",
+        "python manage.py ensure_superuser",
+    ]
+
+    ENTRYPOINT_ENV = {"LIFETRACKER_GUNICORN_TIMEOUT", "LIFETRACKER_HOST", "PORT"}
+
+    def _run_entrypoint(self, *args, env=None):
+        """Run the entrypoint with fake `python` and `gunicorn` on PATH.
+
+        Each fake logs its name and arguments, one invocation per line.
+        Returns the completed process and the logged lines.
+        """
         repo_root = next(
             parent
             for parent in Path(__file__).resolve().parents
@@ -1012,30 +1033,37 @@ class DockerEntrypointTests(TestCase):
 
         with tempfile.TemporaryDirectory() as tempdir:
             temp_path = Path(tempdir)
-            log_path = temp_path / "python.log"
-            python_path = temp_path / "python"
-            python_path.write_text(
-                "#!/usr/bin/env sh\n"
-                "{\n"
-                "  sep=''\n"
-                '  for arg in "$@"; do\n'
-                '    printf \'%s%s\' "$sep" "$arg"\n'
-                "    sep=' '\n"
-                "  done\n"
-                "  printf '\\n'\n"
-                '} >> "$PYTHON_LOG_PATH"\n'
-                "exit 0\n"
-            )
-            python_path.chmod(0o755)
+            log_path = temp_path / "commands.log"
+            for name in ("python", "gunicorn"):
+                fake_path = temp_path / name
+                fake_path.write_text(
+                    "#!/usr/bin/env sh\n"
+                    "{\n"
+                    f"  printf '%s' {name}\n"
+                    '  for arg in "$@"; do\n'
+                    "    printf ' %s' \"$arg\"\n"
+                    "  done\n"
+                    "  printf '\\n'\n"
+                    '} >> "$COMMANDS_LOG_PATH"\n'
+                    "exit 0\n"
+                )
+                fake_path.chmod(0o755)
 
             result = subprocess.run(
-                ["sh", str(script), "sh", "-c", "printf ready"],
+                ["sh", str(script), *args],
                 cwd=repo_root,
                 env={
-                    **os.environ,
+                    # Drop the entrypoint's own settings so the caller's shell
+                    # can't change what the defaults look like.
+                    **{
+                        key: value
+                        for key, value in os.environ.items()
+                        if key not in self.ENTRYPOINT_ENV
+                    },
                     "PATH": f"{tempdir}:{os.environ['PATH']}",
-                    "PYTHON_LOG_PATH": str(log_path),
+                    "COMMANDS_LOG_PATH": str(log_path),
                     "LIFETRACKER_APP_DIR": str(repo_root),
+                    **(env or {}),
                 },
                 check=False,
                 capture_output=True,
@@ -1044,12 +1072,37 @@ class DockerEntrypointTests(TestCase):
             log_lines = log_path.read_text().splitlines()
 
         self.assertEqual(result.returncode, 0, result.stderr)
+        return result, log_lines
+
+    def test_entrypoint_runs_startup_commands_before_execing_arguments(self):
+        result, log_lines = self._run_entrypoint("sh", "-c", "printf ready")
+
         self.assertEqual(result.stdout, "ready")
+        self.assertEqual(log_lines, self.STARTUP)
+
+    def test_entrypoint_starts_gunicorn_by_default(self):
+        _, log_lines = self._run_entrypoint()
+
         self.assertEqual(
             log_lines,
             [
-                "manage.py upgrade_legacy_db",
-                "manage.py migrate",
-                "manage.py ensure_superuser",
+                *self.STARTUP,
+                "gunicorn --access-logfile - --error-logfile - --timeout 120"
+                " --bind 0.0.0.0:8000 lifetracker.wsgi",
             ],
+        )
+
+    def test_entrypoint_gunicorn_settings_come_from_env(self):
+        _, log_lines = self._run_entrypoint(
+            env={
+                "LIFETRACKER_GUNICORN_TIMEOUT": "600",
+                "LIFETRACKER_HOST": "127.0.0.1",
+                "PORT": "9000",
+            }
+        )
+
+        self.assertEqual(
+            log_lines[-1],
+            "gunicorn --access-logfile - --error-logfile - --timeout 600"
+            " --bind 127.0.0.1:9000 lifetracker.wsgi",
         )

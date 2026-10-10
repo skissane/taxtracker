@@ -14,6 +14,7 @@ fi
 exec gunicorn \
   --access-logfile - \
   --error-logfile - \
+  --timeout "${LIFETRACKER_GUNICORN_TIMEOUT:-120}" \
   --bind \
   "${LIFETRACKER_HOST:-0.0.0.0}:${PORT:-8000}" \
   lifetracker.wsgi
