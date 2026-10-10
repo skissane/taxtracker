@@ -28,8 +28,7 @@ ENV PYTHONUNBUFFERED=1
 ENV LIFETRACKER_STATIC_ROOT=/app/staticfiles
 # Keep the database and secret key on a volume so they survive container
 # restarts and image rebuilds.
-ENV LIFETRACKER_DB_PATH=/data/db.sqlite3
-ENV LIFETRACKER_SECRET_KEY_FILE=/data/secret_key
+ENV LIFETRACKER_DATA_VOLUME=/data
 # Production-safe by default: deployments must set LIFETRACKER_ALLOWED_HOSTS
 # (settings.py refuses to start without it). `just docker-run` sets
 # LIFETRACKER_DEBUG=1 for local use instead.

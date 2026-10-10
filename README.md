@@ -31,9 +31,12 @@ container exits), reset it with `docker exec -it lifetracker python manage.py
 changepassword admin`.
 
 The SQLite database and secret key live in `/data` inside the container
-(`LIFETRACKER_DB_PATH` and `LIFETRACKER_SECRET_KEY_FILE`), which `just docker-run`
-mounts as the `lifetracker-data` named volume, so they survive container restarts and
-image rebuilds. Remove the volume (`docker volume rm lifetracker-data`) to start fresh.
+(`/data/db.sqlite3` and `/data/secret_key`, because the image sets
+`LIFETRACKER_DATA_VOLUME=/data`), which `just docker-run` mounts as the
+`lifetracker-data` named volume, so they survive container restarts and image
+rebuilds. Remove the volume (`docker volume rm lifetracker-data`) to start fresh. To
+put either file somewhere else, set `LIFETRACKER_DB_PATH` or
+`LIFETRACKER_SECRET_KEY_FILE`, which take precedence.
 
 Static files (the admin's CSS/JS) are collected into the image at build time and
 served by WhiteNoise.

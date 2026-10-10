@@ -721,6 +721,64 @@ class SettingsSecretKeyTests(_SettingsSubprocessMixin, TestCase):
             self.assertTrue(override_path.exists())
 
 
+class SettingsDataVolumeTests(_SettingsSubprocessMixin, TestCase):
+    """LIFETRACKER_DATA_VOLUME supplies default locations for the database and
+    secret key; LIFETRACKER_DB_PATH and LIFETRACKER_SECRET_KEY_FILE override
+    them."""
+
+    EXPR = "(str(s.DATABASES['default']['NAME']), str(s._key_file))"
+
+    def test_paths_default_to_the_data_volume(self):
+        with tempfile.TemporaryDirectory() as home:
+            # A legacy key under $HOME must not be copied into the volume.
+            old_dir = Path(home) / ".config" / "taxtracker"
+            old_dir.mkdir(parents=True)
+            (old_dir / "secret_key").write_text("legacy-secret-key-content\n")
+            volume = Path(home) / "data"
+            volume.mkdir()
+
+            proc = self._run(
+                home,
+                extra_env={"LIFETRACKER_DATA_VOLUME": str(volume)},
+                expr=f"{self.EXPR} + (s.SECRET_KEY,)",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            db_path, key_path, key = ast.literal_eval(proc.stdout.strip())
+            self.assertEqual(db_path, str(volume / "db.sqlite3"))
+            self.assertEqual(key_path, str(volume / "secret_key"))
+            self.assertNotEqual(key, "legacy-secret-key-content")
+            self.assertEqual((volume / "secret_key").read_text().strip(), key)
+            self.assertFalse((Path(home) / ".config" / "lifetracker").exists())
+
+    def test_explicit_paths_take_precedence(self):
+        with tempfile.TemporaryDirectory() as home:
+            volume = Path(home) / "data"
+            db_path = Path(home) / "elsewhere" / "db.sqlite3"
+            key_path = Path(home) / "elsewhere" / "secret_key"
+
+            proc = self._run(
+                home,
+                extra_env={
+                    "LIFETRACKER_DATA_VOLUME": str(volume),
+                    "LIFETRACKER_DB_PATH": str(db_path),
+                    "LIFETRACKER_SECRET_KEY_FILE": str(key_path),
+                },
+                expr=self.EXPR,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(
+                ast.literal_eval(proc.stdout.strip()), (str(db_path), str(key_path))
+            )
+            self.assertFalse(volume.exists())
+
+    def test_without_volume_db_defaults_to_repo_root(self):
+        with tempfile.TemporaryDirectory() as home:
+            proc = self._run(home, expr=self.EXPR)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            db_path, _ = ast.literal_eval(proc.stdout.strip())
+            self.assertEqual(db_path, str(self.REPO_ROOT / "db.sqlite3"))
+
+
 class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
     """DEBUG, ALLOWED_HOSTS and the HTTPS-related settings come from
     LIFETRACKER_* environment variables."""

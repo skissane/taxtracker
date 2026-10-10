@@ -100,7 +100,7 @@ tests.cli` still works as an unparallelised fallback, referencing these as `test
 
 ## Secret key
 
-The Django `SECRET_KEY` is stored in `~/.config/lifetracker/secret_key` (auto-generated on first run). Override with `LIFETRACKER_SECRET_KEY_FILE`. On first run under the new config location, if a key from the pre-rename `~/.config/taxtracker/secret_key` exists, it's copied forward automatically so existing sessions/logins survive.
+The Django `SECRET_KEY` is stored in `~/.config/lifetracker/secret_key` (auto-generated on first run). Override with `LIFETRACKER_SECRET_KEY_FILE`. On first run under the new config location, if a key from the pre-rename `~/.config/taxtracker/secret_key` exists, it's copied forward automatically so existing sessions/logins survive. If `LIFETRACKER_DATA_VOLUME` is set (the Docker image sets it to `/data`), the key defaults to `$LIFETRACKER_DATA_VOLUME/secret_key` and the database to `$LIFETRACKER_DATA_VOLUME/db.sqlite3` instead (with `LIFETRACKER_DB_PATH` overriding the latter), and that legacy-key copy is skipped.
 
 ## Linting config
 

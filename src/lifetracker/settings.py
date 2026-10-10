@@ -23,16 +23,29 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
+# LIFETRACKER_DATA_VOLUME (set by the Docker image) is a directory holding both
+# the database and the secret key, so they can live together on one volume.
+# LIFETRACKER_DB_PATH and LIFETRACKER_SECRET_KEY_FILE override each one.
+_data_volume = os.environ.get("LIFETRACKER_DATA_VOLUME")
+_data_dir = Path(_data_volume) if _data_volume else None
+
 # SECRET_KEY is stored in a file to avoid committing it to source control.
 # Set LIFETRACKER_SECRET_KEY_FILE to override the default location.
-_default_key_file = Path.home() / ".config" / "lifetracker" / "secret_key"
+if _data_dir:
+    _default_key_file = _data_dir / "secret_key"
+else:
+    _default_key_file = Path.home() / ".config" / "lifetracker" / "secret_key"
 _key_file = Path(os.environ.get("LIFETRACKER_SECRET_KEY_FILE", _default_key_file))
 
 # One-time migration from the old taxtracker config location: if nothing lives
 # at the new default path yet but a key from the pre-rename app does, copy it
 # forward so existing sessions/logins survive the rename instead of getting a
-# freshly generated key.
-if "LIFETRACKER_SECRET_KEY_FILE" not in os.environ and not _key_file.exists():
+# freshly generated key. Only applies to the ~/.config default.
+if (
+    "LIFETRACKER_SECRET_KEY_FILE" not in os.environ
+    and not _data_dir
+    and not _key_file.exists()
+):
     _old_key_file = Path.home() / ".config" / "taxtracker" / "secret_key"
     try:
         _old_stored = (
@@ -167,13 +180,15 @@ WSGI_APPLICATION = "lifetracker.wsgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
-# Set LIFETRACKER_DB_PATH to keep the database outside the source tree (e.g. on
-# a Docker volume).
+# Set LIFETRACKER_DB_PATH (or LIFETRACKER_DATA_VOLUME, above) to keep the
+# database outside the source tree.
+
+_default_db_path = (_data_dir or BASE_DIR) / "db.sqlite3"
 
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": Path(os.environ.get("LIFETRACKER_DB_PATH", BASE_DIR / "db.sqlite3")),
+        "NAME": Path(os.environ.get("LIFETRACKER_DB_PATH", _default_db_path)),
     }
 }
 
