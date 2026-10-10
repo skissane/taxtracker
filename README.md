@@ -19,8 +19,8 @@ just docker-run
 
 and open <http://localhost:8000/admin/>.
 
-`just docker-run` publishes the port on `127.0.0.1` only. The app runs with `DEBUG`
-on and isn't hardened for network exposure, so don't publish it on other interfaces.
+`just docker-run` is for local use: it sets `LIFETRACKER_DEBUG=1` and publishes the
+port on `127.0.0.1` only. Don't publish a `DEBUG` container on other interfaces.
 
 The container startup path runs `upgrade_legacy_db`, then `migrate`, then
 `ensure_superuser`, then starts the Gunicorn WSGI server on `0.0.0.0:${PORT:-8000}`.
@@ -37,3 +37,27 @@ image rebuilds. Remove the volume (`docker volume rm lifetracker-data`) to start
 
 Static files (the admin's CSS/JS) are collected into the image at build time and
 served by WhiteNoise.
+
+### Production deployment
+
+The image defaults to `LIFETRACKER_DEBUG=0`, and then refuses to start unless
+`LIFETRACKER_ALLOWED_HOSTS` is set. Configure it with these environment variables
+(lists are comma-separated):
+
+| Variable | Purpose |
+|---|---|
+| `LIFETRACKER_ALLOWED_HOSTS` | Required. Hostnames the app answers to, e.g. `tax.example.com`. |
+| `LIFETRACKER_CSRF_TRUSTED_ORIGINS` | Public origins, e.g. `https://tax.example.com`. Needed behind a TLS-terminating reverse proxy, or the admin login fails its CSRF check. |
+| `LIFETRACKER_TRUST_X_FORWARDED_PROTO` | Set to `1` instead of listing origins, if the proxy always sets `X-Forwarded-Proto` and the container is reachable only through it. |
+
+For example:
+
+```bash
+docker run -d --name=lifetracker -p 127.0.0.1:8000:8000 -v lifetracker-data:/data \
+  -e LIFETRACKER_ALLOWED_HOSTS=tax.example.com \
+  -e LIFETRACKER_CSRF_TRUSTED_ORIGINS=https://tax.example.com \
+  lifetracker
+```
+
+With `DEBUG` off, session and CSRF cookies are marked `Secure`, so the app must be
+served over HTTPS (typically via the reverse proxy); over plain HTTP you can't log in.

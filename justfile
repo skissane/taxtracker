@@ -50,9 +50,10 @@ coverage:
 docker-build:
     docker build -t lifetracker .
 
-# Run the application container (data persists in the lifetracker-data volume)
+# Run the application container locally, with DEBUG on and reachable only from
+# this machine (data persists in the lifetracker-data volume)
 docker-run:
-    docker run --rm --name=lifetracker -p 127.0.0.1:8000:8000 -v lifetracker-data:/data lifetracker
+    docker run --rm --name=lifetracker -p 127.0.0.1:8000:8000 -e LIFETRACKER_DEBUG=1 -v lifetracker-data:/data lifetracker
 
 # Run every ruff/djlint lint and format-check step (no fixes, no tests)
 check: lint fmt-check lint-templates fmt-check-templates

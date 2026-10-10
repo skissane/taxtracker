@@ -14,6 +14,8 @@ import os
 import secrets
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -73,10 +75,49 @@ if not _stored:
 
 SECRET_KEY = _stored
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
 
-ALLOWED_HOSTS = []
+def _env_bool(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    if value in ("1", "true"):
+        return True
+    if value in ("0", "false"):
+        return False
+    raise ImproperlyConfigured(f"{name} must be 1/true or 0/false, not {value!r}.")
+
+
+def _env_list(name):
+    items = (item.strip() for item in os.environ.get(name, "").split(","))
+    return [item for item in items if item]
+
+
+# SECURITY WARNING: don't run with debug turned on in production!
+# On by default so ./run.sh works out of the box; the Docker image turns it off
+# (and `just docker-run` turns it back on for local use).
+DEBUG = _env_bool("LIFETRACKER_DEBUG", True)
+
+# Comma-separated, e.g. "tax.example.com". With DEBUG on and this empty, Django
+# allows localhost only. With DEBUG off and this empty, Django would start fine
+# and then reject every request with a 400, so fail at startup instead.
+ALLOWED_HOSTS = _env_list("LIFETRACKER_ALLOWED_HOSTS")
+if not DEBUG and not ALLOWED_HOSTS:
+    raise ImproperlyConfigured(
+        "LIFETRACKER_ALLOWED_HOSTS must be set when LIFETRACKER_DEBUG is off."
+    )
+
+# Behind a TLS-terminating reverse proxy, Django sees plain HTTP, so the admin
+# login's CSRF Origin check fails. Either list the public origins here
+# (comma-separated, e.g. "https://tax.example.com"), or set
+# LIFETRACKER_TRUST_X_FORWARDED_PROTO=1 if the proxy always sets
+# X-Forwarded-Proto and the container is reachable only through it.
+CSRF_TRUSTED_ORIGINS = _env_list("LIFETRACKER_CSRF_TRUSTED_ORIGINS")
+if _env_bool("LIFETRACKER_TRUST_X_FORWARDED_PROTO", False):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Production is assumed to be HTTPS: don't send session/CSRF cookies over HTTP.
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
 
 
 # Application definition

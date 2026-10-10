@@ -30,6 +30,10 @@ ENV LIFETRACKER_STATIC_ROOT=/app/staticfiles
 # restarts and image rebuilds.
 ENV LIFETRACKER_DB_PATH=/data/db.sqlite3
 ENV LIFETRACKER_SECRET_KEY_FILE=/data/secret_key
+# Production-safe by default: deployments must set LIFETRACKER_ALLOWED_HOSTS
+# (settings.py refuses to start without it). `just docker-run` sets
+# LIFETRACKER_DEBUG=1 for local use instead.
+ENV LIFETRACKER_DEBUG=0
 
 COPY --from=builder /app /app
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh

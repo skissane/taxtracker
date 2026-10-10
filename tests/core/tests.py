@@ -1,3 +1,4 @@
+import ast
 import io
 import os
 import subprocess
@@ -579,17 +580,18 @@ class ProjectEntryPointTests(TestCase):
         self.assertTrue(callable(asgi_application))
 
 
-class SettingsSecretKeyTests(TestCase):
-    """settings.py computes SECRET_KEY at import time, from a file under
-    $HOME, before Django is even configured. It can only be exercised by
-    importing it fresh in a subprocess with a controlled $HOME — the version
-    already imported for this test run reflects whatever the real ~/.config
-    looked like when the suite started."""
+class _SettingsSubprocessMixin:
+    """settings.py computes its values at import time, from files under $HOME
+    and from environment variables, before Django is even configured. They can
+    only be exercised by importing it fresh in a subprocess with a controlled
+    $HOME and environment — the version already imported for this test run
+    reflects whatever the real ~/.config and environment looked like when the
+    suite started."""
 
     REPO_ROOT = Path(__file__).resolve().parent.parent.parent
     SRC_DIR = REPO_ROOT / "src"
 
-    def _run(self, home, extra_env=None):
+    def _run(self, home, extra_env=None, expr="s.SECRET_KEY"):
         env = {
             "HOME": str(home),
             "PATH": os.environ.get("PATH", ""),
@@ -598,7 +600,7 @@ class SettingsSecretKeyTests(TestCase):
         if extra_env:
             env.update(extra_env)
 
-        code = "import lifetracker.settings as s; print(s.SECRET_KEY)"
+        code = f"import lifetracker.settings as s; print({expr})"
         # When this test run itself is under `coverage run`, also measure the
         # child interpreter, so the many settings.py branches only reachable
         # via subprocess (see class docstring) count towards the total.
@@ -613,6 +615,10 @@ class SettingsSecretKeyTests(TestCase):
             capture_output=True,
             text=True,
         )
+
+
+class SettingsSecretKeyTests(_SettingsSubprocessMixin, TestCase):
+    """SECRET_KEY is read from (or generated into) a file under $HOME."""
 
     def test_fresh_install_generates_and_persists_a_key(self):
         with tempfile.TemporaryDirectory() as home:
@@ -713,6 +719,67 @@ class SettingsSecretKeyTests(TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertNotEqual(proc.stdout.strip(), "legacy-secret-key-content")
             self.assertTrue(override_path.exists())
+
+
+class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
+    """DEBUG, ALLOWED_HOSTS and the HTTPS-related settings come from
+    LIFETRACKER_* environment variables."""
+
+    EXPR = (
+        "(s.DEBUG, s.ALLOWED_HOSTS, s.CSRF_TRUSTED_ORIGINS,"
+        " getattr(s, 'SECURE_PROXY_SSL_HEADER', None),"
+        " s.SESSION_COOKIE_SECURE, s.CSRF_COOKIE_SECURE)"
+    )
+
+    def _settings(self, **env):
+        with tempfile.TemporaryDirectory() as home:
+            proc = self._run(home, extra_env=env, expr=self.EXPR)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return ast.literal_eval(proc.stdout.strip())
+
+    def _error(self, **env):
+        with tempfile.TemporaryDirectory() as home:
+            proc = self._run(home, extra_env=env, expr=self.EXPR)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("ImproperlyConfigured", proc.stderr)
+        return proc.stderr
+
+    def test_defaults_are_local_development(self):
+        self.assertEqual(self._settings(), (True, [], [], None, False, False))
+
+    def test_debug_off_with_hosts(self):
+        self.assertEqual(
+            self._settings(
+                LIFETRACKER_DEBUG="0",
+                LIFETRACKER_ALLOWED_HOSTS=" tax.example.com, other.example.com ,",
+            ),
+            (
+                False,
+                ["tax.example.com", "other.example.com"],
+                [],
+                None,
+                True,
+                True,
+            ),
+        )
+
+    def test_debug_off_without_hosts_refuses_to_start(self):
+        stderr = self._error(LIFETRACKER_DEBUG="false")
+        self.assertIn("LIFETRACKER_ALLOWED_HOSTS must be set", stderr)
+
+    def test_invalid_bool_is_rejected(self):
+        stderr = self._error(LIFETRACKER_DEBUG="yes")
+        self.assertIn("LIFETRACKER_DEBUG must be 1/true or 0/false", stderr)
+
+    def test_proxy_settings(self):
+        debug, _, origins, proxy_header, _, _ = self._settings(
+            LIFETRACKER_DEBUG="true",
+            LIFETRACKER_CSRF_TRUSTED_ORIGINS="https://tax.example.com",
+            LIFETRACKER_TRUST_X_FORWARDED_PROTO="1",
+        )
+        self.assertTrue(debug)
+        self.assertEqual(origins, ["https://tax.example.com"])
+        self.assertEqual(proxy_header, ("HTTP_X_FORWARDED_PROTO", "https"))
 
 
 class EnsureSuperuserCommandTests(TestCase):
