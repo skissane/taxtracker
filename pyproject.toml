@@ -69,3 +69,9 @@ parallel = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
+
+[tool.uv]
+environments = [
+    "sys_platform == 'darwin'",
+    "sys_platform == 'linux'",
+]
