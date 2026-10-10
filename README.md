@@ -30,13 +30,25 @@ the existing user's password alone. If you miss it (the log is gone once the
 container exits), reset it with `docker exec -it lifetracker python manage.py
 changepassword admin`.
 
+To choose the initial password yourself, and keep it out of the log (worth doing in
+production, where logs are often shipped elsewhere), put it in
+`/data/initial_admin_password` on the volume before the first start, or point
+`LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE` at a file containing it. `ensure_superuser`
+then uses it and doesn't print it.
+
 The SQLite database and secret key live in `/data` inside the container
 (`/data/db.sqlite3` and `/data/secret_key`, because the image sets
-`LIFETRACKER_DATA_VOLUME=/data`), which `just docker-run` mounts as the
+`LIFETRACKER_DATA_DIR=/data`), which `just docker-run` mounts as the
 `lifetracker-data` named volume, so they survive container restarts and image
 rebuilds. Remove the volume (`docker volume rm lifetracker-data`) to start fresh. To
 put either file somewhere else, set `LIFETRACKER_DB_PATH` or
 `LIFETRACKER_SECRET_KEY_FILE`, which take precedence.
+
+To keep config separate from data, for example with the secret key and initial
+admin password coming from a read-only secrets mount, set `LIFETRACKER_CONFIG_DIR`.
+The secret key and initial password file are then read from there, while the
+database stays in `/data`. A read-only config directory must already contain
+`secret_key`, since it can't be generated there.
 
 Static files (the admin's CSS/JS) are collected into the image at build time and
 served by WhiteNoise.

@@ -24,6 +24,9 @@ from lifetracker.core.admin import (
     MimeTypeFormSet,
     _AtLeastOnePrimaryFormSet,
 )
+from lifetracker.core.management.commands.ensure_superuser import (
+    _initial_admin_password_file,
+)
 from lifetracker.core.models import (
     DatabaseStorage,
     DBStoredFile,
@@ -721,45 +724,46 @@ class SettingsSecretKeyTests(_SettingsSubprocessMixin, TestCase):
             self.assertTrue(override_path.exists())
 
 
-class SettingsDataVolumeTests(_SettingsSubprocessMixin, TestCase):
-    """LIFETRACKER_DATA_VOLUME supplies default locations for the database and
-    secret key; LIFETRACKER_DB_PATH and LIFETRACKER_SECRET_KEY_FILE override
-    them."""
+class SettingsDataDirTests(_SettingsSubprocessMixin, TestCase):
+    """LIFETRACKER_DATA_DIR supplies default locations for the database and
+    config files, LIFETRACKER_CONFIG_DIR moves the config files elsewhere, and
+    LIFETRACKER_DB_PATH and LIFETRACKER_SECRET_KEY_FILE override each file."""
 
     EXPR = "(str(s.DATABASES['default']['NAME']), str(s._key_file))"
 
-    def test_paths_default_to_the_data_volume(self):
+    def test_paths_default_to_the_data_dir(self):
         with tempfile.TemporaryDirectory() as home:
-            # A legacy key under $HOME must not be copied into the volume.
+            # A legacy key under $HOME must not be copied into the data dir.
             old_dir = Path(home) / ".config" / "taxtracker"
             old_dir.mkdir(parents=True)
             (old_dir / "secret_key").write_text("legacy-secret-key-content\n")
-            volume = Path(home) / "data"
-            volume.mkdir()
+            data_dir = Path(home) / "data"
+            data_dir.mkdir()
 
             proc = self._run(
                 home,
-                extra_env={"LIFETRACKER_DATA_VOLUME": str(volume)},
-                expr=f"{self.EXPR} + (s.SECRET_KEY,)",
+                extra_env={"LIFETRACKER_DATA_DIR": str(data_dir)},
+                expr=f"{self.EXPR} + (s.SECRET_KEY, str(s.LIFETRACKER_CONFIG_DIR))",
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            db_path, key_path, key = ast.literal_eval(proc.stdout.strip())
-            self.assertEqual(db_path, str(volume / "db.sqlite3"))
-            self.assertEqual(key_path, str(volume / "secret_key"))
+            db_path, key_path, key, config_dir = ast.literal_eval(proc.stdout.strip())
+            self.assertEqual(config_dir, str(data_dir))
+            self.assertEqual(db_path, str(data_dir / "db.sqlite3"))
+            self.assertEqual(key_path, str(data_dir / "secret_key"))
             self.assertNotEqual(key, "legacy-secret-key-content")
-            self.assertEqual((volume / "secret_key").read_text().strip(), key)
+            self.assertEqual((data_dir / "secret_key").read_text().strip(), key)
             self.assertFalse((Path(home) / ".config" / "lifetracker").exists())
 
     def test_explicit_paths_take_precedence(self):
         with tempfile.TemporaryDirectory() as home:
-            volume = Path(home) / "data"
+            data_dir = Path(home) / "data"
             db_path = Path(home) / "elsewhere" / "db.sqlite3"
             key_path = Path(home) / "elsewhere" / "secret_key"
 
             proc = self._run(
                 home,
                 extra_env={
-                    "LIFETRACKER_DATA_VOLUME": str(volume),
+                    "LIFETRACKER_DATA_DIR": str(data_dir),
                     "LIFETRACKER_DB_PATH": str(db_path),
                     "LIFETRACKER_SECRET_KEY_FILE": str(key_path),
                 },
@@ -769,14 +773,44 @@ class SettingsDataVolumeTests(_SettingsSubprocessMixin, TestCase):
             self.assertEqual(
                 ast.literal_eval(proc.stdout.strip()), (str(db_path), str(key_path))
             )
-            self.assertFalse(volume.exists())
+            self.assertFalse(data_dir.exists())
 
-    def test_without_volume_db_defaults_to_repo_root(self):
+    def test_config_dir_takes_precedence_over_data_dir(self):
         with tempfile.TemporaryDirectory() as home:
-            proc = self._run(home, expr=self.EXPR)
+            # A legacy key under $HOME must not be copied into the config dir.
+            old_dir = Path(home) / ".config" / "taxtracker"
+            old_dir.mkdir(parents=True)
+            (old_dir / "secret_key").write_text("legacy-secret-key-content\n")
+            data_dir = Path(home) / "data"
+            config_dir = Path(home) / "config"
+
+            proc = self._run(
+                home,
+                extra_env={
+                    "LIFETRACKER_DATA_DIR": str(data_dir),
+                    "LIFETRACKER_CONFIG_DIR": str(config_dir),
+                },
+                expr=f"{self.EXPR} + (s.SECRET_KEY, str(s.LIFETRACKER_CONFIG_DIR))",
+            )
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            db_path, _ = ast.literal_eval(proc.stdout.strip())
+            db_path, key_path, key, resolved_config_dir = ast.literal_eval(
+                proc.stdout.strip()
+            )
+            self.assertEqual(resolved_config_dir, str(config_dir))
+            self.assertEqual(key_path, str(config_dir / "secret_key"))
+            self.assertEqual(db_path, str(data_dir / "db.sqlite3"))
+            self.assertNotEqual(key, "legacy-secret-key-content")
+            self.assertFalse(data_dir.exists())
+
+    def test_without_data_dir_db_defaults_to_repo_root(self):
+        with tempfile.TemporaryDirectory() as home:
+            proc = self._run(
+                home, expr=f"{self.EXPR} + (str(s.LIFETRACKER_CONFIG_DIR),)"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            db_path, _, config_dir = ast.literal_eval(proc.stdout.strip())
             self.assertEqual(db_path, str(self.REPO_ROOT / "db.sqlite3"))
+            self.assertEqual(config_dir, str(Path(home) / ".config" / "lifetracker"))
 
 
 class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
@@ -838,6 +872,36 @@ class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
         self.assertTrue(debug)
         self.assertEqual(origins, ["https://tax.example.com"])
         self.assertEqual(proxy_header, ("HTTP_X_FORWARDED_PROTO", "https"))
+
+
+class InitialAdminPasswordFileTests(TestCase):
+    """Where ensure_superuser looks for the initial admin password file."""
+
+    def _resolve(self, env=None):
+        # patch.dict restores the whole environment afterwards, including the
+        # pop, so a real LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE can't leak in.
+        with (
+            mock.patch.dict(os.environ),
+            self.settings(LIFETRACKER_CONFIG_DIR=Path("/config")),
+        ):
+            os.environ.pop("LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE", None)
+            os.environ.update(env or {})
+            return _initial_admin_password_file()
+
+    def test_defaults_to_config_dir(self):
+        self.assertEqual(self._resolve(), Path("/config/initial_admin_password"))
+
+    def test_env_var_overrides(self):
+        self.assertEqual(
+            self._resolve({"LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE": "/elsewhere/pw"}),
+            Path("/elsewhere/pw"),
+        )
+
+    def test_empty_env_var_is_ignored(self):
+        self.assertEqual(
+            self._resolve({"LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE": ""}),
+            Path("/config/initial_admin_password"),
+        )
 
 
 class EnsureSuperuserCommandTests(TestCase):

@@ -23,18 +23,30 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# LIFETRACKER_DATA_VOLUME (set by the Docker image) is a directory holding both
-# the database and the secret key, so they can live together on one volume.
-# LIFETRACKER_DB_PATH and LIFETRACKER_SECRET_KEY_FILE override each one.
-_data_volume = os.environ.get("LIFETRACKER_DATA_VOLUME")
-_data_dir = Path(_data_volume) if _data_volume else None
+
+def _env_path(name):
+    value = os.environ.get(name)
+    return Path(value) if value else None
+
+
+# LIFETRACKER_DATA_DIR (the Docker image sets it to /data) is a directory for the
+# database, and also for the config files below unless LIFETRACKER_CONFIG_DIR
+# is set, so everything can live together on one volume.
+_data_dir = _env_path("LIFETRACKER_DATA_DIR")
+
+# Where per-install config files (secret key, initial admin password) live by
+# default: LIFETRACKER_CONFIG_DIR, else LIFETRACKER_DATA_DIR, else
+# ~/.config/lifetracker. LIFETRACKER_SECRET_KEY_FILE and
+# LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE override each file. A setting rather
+# than private, so management commands can use it too.
+_home_config_dir = Path.home() / ".config" / "lifetracker"
+LIFETRACKER_CONFIG_DIR = (
+    _env_path("LIFETRACKER_CONFIG_DIR") or _data_dir or _home_config_dir
+)
 
 # SECRET_KEY is stored in a file to avoid committing it to source control.
 # Set LIFETRACKER_SECRET_KEY_FILE to override the default location.
-if _data_dir:
-    _default_key_file = _data_dir / "secret_key"
-else:
-    _default_key_file = Path.home() / ".config" / "lifetracker" / "secret_key"
+_default_key_file = LIFETRACKER_CONFIG_DIR / "secret_key"
 _key_file = Path(os.environ.get("LIFETRACKER_SECRET_KEY_FILE", _default_key_file))
 
 # One-time migration from the old taxtracker config location: if nothing lives
@@ -43,7 +55,7 @@ _key_file = Path(os.environ.get("LIFETRACKER_SECRET_KEY_FILE", _default_key_file
 # freshly generated key. Only applies to the ~/.config default.
 if (
     "LIFETRACKER_SECRET_KEY_FILE" not in os.environ
-    and not _data_dir
+    and LIFETRACKER_CONFIG_DIR == _home_config_dir
     and not _key_file.exists()
 ):
     _old_key_file = Path.home() / ".config" / "taxtracker" / "secret_key"
@@ -180,7 +192,7 @@ WSGI_APPLICATION = "lifetracker.wsgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
-# Set LIFETRACKER_DB_PATH (or LIFETRACKER_DATA_VOLUME, above) to keep the
+# Set LIFETRACKER_DB_PATH (or LIFETRACKER_DATA_DIR, above) to keep the
 # database outside the source tree.
 
 _default_db_path = (_data_dir or BASE_DIR) / "db.sqlite3"
