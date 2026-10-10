@@ -19,6 +19,9 @@ just docker-run
 
 and open <http://localhost:8000/admin/>.
 
+`just docker-run` publishes the port on `127.0.0.1` only. The app runs with `DEBUG`
+on and isn't hardened for network exposure, so don't publish it on other interfaces.
+
 The container startup path runs `upgrade_legacy_db`, then `migrate`, then
 `ensure_superuser`, then starts the Gunicorn WSGI server on `0.0.0.0:${PORT:-8000}`.
 On first start, `ensure_superuser` creates an `admin` user with a random password and
