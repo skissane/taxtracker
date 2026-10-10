@@ -95,6 +95,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -125,11 +126,13 @@ WSGI_APPLICATION = "lifetracker.wsgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
+# Set LIFETRACKER_DB_PATH to keep the database outside the source tree (e.g. on
+# a Docker volume).
 
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": Path(os.environ.get("LIFETRACKER_DB_PATH", BASE_DIR / "db.sqlite3")),
     }
 }
 
@@ -169,6 +172,11 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = "static/"
+# Gunicorn doesn't serve static files the way runserver does, so WhiteNoise does.
+# The Docker image sets LIFETRACKER_STATIC_ROOT and runs `collectstatic` into it at
+# build time; elsewhere it's unset, and WhiteNoise serves straight from the apps'
+# static directories while DEBUG is on.
+STATIC_ROOT = os.environ.get("LIFETRACKER_STATIC_ROOT")
 
 # Media files (uploads)
 # https://docs.djangoproject.com/en/6.0/topics/files/

@@ -861,5 +861,6 @@ class DockerEntrypointTests(TestCase):
             [
                 "manage.py upgrade_legacy_db",
                 "manage.py migrate",
+                "manage.py ensure_superuser",
             ],
         )

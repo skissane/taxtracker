@@ -5,6 +5,7 @@ cd "${LIFETRACKER_APP_DIR:-/app}"
 
 python manage.py upgrade_legacy_db
 python manage.py migrate
+python manage.py ensure_superuser
 
 if [ "$#" -gt 0 ]; then
   exec "$@"
