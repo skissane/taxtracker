@@ -59,6 +59,7 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 python_files = ["tests.py", "test_*.py", "*_tests.py"]
 addopts = "-n auto"
+filterwarnings = ["error"]
 
 [tool.coverage.run]
 source = ["src/lifetracker"]
