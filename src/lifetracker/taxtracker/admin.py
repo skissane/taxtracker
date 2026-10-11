@@ -1103,6 +1103,10 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # ------------------------------------------------------------------
 
     def _run_cloud_backup_now(self):
+        """Run a cloud backup upload.
+
+        Callers must enforce authorization before invoking this method.
+        """
         engine = settings.DATABASES["default"]["ENGINE"]
         if engine != "django.db.backends.sqlite3":
             raise RuntimeError("Cloud backup is only available for SQLite databases.")
@@ -1130,17 +1134,22 @@ class FinancialYearAdmin(admin.ModelAdmin):
             Body=backup_bytes,
             ContentType="application/x-sqlite3",
         )
-        status, _ = CloudBackupStatus.objects.get_or_create(pk=CLOUD_BACKUP_STATUS_PK)
-        status.last_backup_at = backup_time
-        status.last_backup_object_key = object_key
-        status.save(update_fields=["last_backup_at", "last_backup_object_key"])
+        CloudBackupStatus.objects.update_or_create(
+            pk=CLOUD_BACKUP_STATUS_PK,
+            defaults={
+                "last_backup_at": backup_time,
+                "last_backup_object_key": object_key,
+            },
+        )
         return object_key
 
     def cloud_backup_status_view(self, request):
         if not request.user.is_superuser:
             raise PermissionDenied
 
-        status, _ = CloudBackupStatus.objects.get_or_create(pk=CLOUD_BACKUP_STATUS_PK)
+        status = CloudBackupStatus.objects.filter(pk=CLOUD_BACKUP_STATUS_PK).first()
+        if status is None:
+            status = CloudBackupStatus()
         config = {
             "endpoint_url": settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL,
             "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
