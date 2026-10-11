@@ -102,6 +102,12 @@
           </td>
         </tr>
       {% endif %}
+      {% if status.last_backup_size is not None %}
+        <tr>
+          <th class="tt-label">Size</th>
+          <td>{{ status.last_backup_size|filesizeformat }}</td>
+        </tr>
+      {% endif %}
     </table>
   </div>
   <form method="post" class="tt-footer">

@@ -26,6 +26,14 @@ class Migration(migrations.Migration):
                     "last_backup_object_key",
                     models.CharField(blank=True, max_length=255),
                 ),
+                (
+                    "last_backup_size",
+                    models.PositiveBigIntegerField(
+                        blank=True,
+                        help_text="Size of the last backup, in bytes.",
+                        null=True,
+                    ),
+                ),
             ],
             options={
                 "verbose_name": "Cloud Backup Status",

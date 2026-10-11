@@ -656,11 +656,13 @@ class AdminViewTests(TestCase):
             pk=CLOUD_BACKUP_STATUS_PK,
             last_backup_at=timezone.now() - datetime.timedelta(days=4, hours=3),
             last_backup_object_key="host/db-backup.2026-01-01.00.00.00.sqlite3",
+            last_backup_size=3 * 1024 * 1024,
         )
         url = reverse("admin:taxtracker_financialyear_cloud_backup_status")
         response = self.client.get(url)
         self.assertContains(response, "(4\xa0days ago)")
         self.assertNotContains(response, "hours")
+        self.assertContains(response, "<td>3.0\xa0MB</td>", html=True)
 
     def test_cloud_backup_status_requires_superuser(self):
         non_super = User.objects.create_user("regular2", "r2@example.com", "pass")
@@ -712,6 +714,9 @@ class AdminViewTests(TestCase):
         self.assertIsNotNone(status.last_backup_at)
         self.assertEqual(
             status.last_backup_object_key, put_object.call_args.kwargs["Key"]
+        )
+        self.assertEqual(
+            status.last_backup_size, len(put_object.call_args.kwargs["Body"])
         )
 
     @override_settings(

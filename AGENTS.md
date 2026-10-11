@@ -71,7 +71,7 @@ tests.cli` still works as an unparallelised fallback, referencing these as `test
 - **`FileType` / `MimeType` / `FileExtension`** (core) — file type registry. Each `FileType` must have exactly one primary MIME type and one primary extension; enforced by `_AtLeastOnePrimaryFormSet`.
 - **`DBStoredFile`** (core) — raw binary storage row; managed by `DatabaseStorage`.
 - **`Attachment`** (taxtracker) — file attached to an `Item`. On `save()`, auto-populates `title` from filename, `file_type` by extension lookup, and `date` by regex-extracting ISO/compact dates from the filename.
-- **`CloudBackupStatus`** (taxtracker) — single row (`CLOUD_BACKUP_STATUS_PK`) recording the time and S3 object key of the last successful cloud backup.
+- **`CloudBackupStatus`** (taxtracker) — single row (`CLOUD_BACKUP_STATUS_PK`) recording the time, S3 object key and size (bytes) of the last successful cloud backup.
 
 ## Admin extensions
 

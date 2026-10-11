@@ -1173,6 +1173,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
                 defaults={
                     "last_backup_at": backup_time,
                     "last_backup_object_key": object_key,
+                    "last_backup_size": len(backup_bytes),
                 },
             )
         except Exception as exc:

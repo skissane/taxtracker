@@ -167,6 +167,9 @@ class CloudBackupStatus(models.Model):
 
     last_backup_at = models.DateTimeField(null=True, blank=True)
     last_backup_object_key = models.CharField(max_length=255, blank=True)
+    last_backup_size = models.PositiveBigIntegerField(
+        null=True, blank=True, help_text="Size of the last backup, in bytes."
+    )
 
     class Meta:
         verbose_name = "Cloud Backup Status"
