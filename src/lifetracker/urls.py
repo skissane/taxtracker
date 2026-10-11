@@ -3,6 +3,7 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import path
 from django.utils.html import format_html
+from django.views.generic import RedirectView
 
 # Git's default abbreviated object name length (core.abbrev's minimum), also what
 # GitHub displays.
@@ -35,5 +36,8 @@ admin.site.site_title = "Life Tracker"
 admin.site.index_title = "Administration"
 
 urlpatterns = [
+    # There's no non-admin site yet, so send the root URL to the admin. Temporary
+    # (302) rather than permanent, so browsers don't cache it once there is one.
+    path("", RedirectView.as_view(pattern_name="admin:index"), name="root"),
     path("admin/", admin.site.urls),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
