@@ -1114,9 +1114,15 @@ class FinancialYearAdmin(admin.ModelAdmin):
         return [
             key
             for key, value in {
-                "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
-                "access_key_id": settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID,
-                "secret_access_key": settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY,
+                "LIFETRACKER_BACKUP_S3_BUCKET_NAME": (
+                    settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME
+                ),
+                "LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID": (
+                    settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID
+                ),
+                "LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY": (
+                    settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY
+                ),
             }.items()
             if not value
         ]
