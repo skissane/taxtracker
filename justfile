@@ -48,7 +48,7 @@ coverage:
 
 # Build the container image
 docker-build:
-    docker build -t lifetracker .
+    docker build --build-arg LIFETRACKER_COMMIT_ID="$(git rev-parse HEAD)" -t lifetracker .
 
 # Host config directory (secret key, initial admin password) that `just
 # docker-run` mounts read-only, the same one ./run.sh uses by default. Made

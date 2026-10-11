@@ -78,6 +78,8 @@ tests.cli` still works as an unparallelised fallback, referencing these as `test
 
 ## Admin extensions
 
+The admin header (`admin.site.site_header`, built once in `urls.py` by `_build_admin_site_header`) shows the running commit and instance name: `LIFETRACKER_COMMIT_ID` as a short ID linking to `LIFETRACKER_COMMIT_URL_BASE` (default: this repo's GitHub commit URL), and `LIFETRACKER_BACKUP_HOSTNAME` (see Cloud backup below). `run.sh` sets the commit ID from `git rev-parse HEAD`; `just docker-build` (which CI uses) bakes it into the image as a build arg. With no commit ID, only the instance name is shown.
+
 `FinancialYearAdmin` adds:
 - **Summary view** (`/admin/taxtracker/financialyear/<pk>/summary/`) — item tree with done/pending counts.
 - **Single-year ZIP** (`download-zip/`) — all attachments in a folder hierarchy with an `index.md`.
