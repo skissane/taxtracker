@@ -106,6 +106,10 @@ The Django `SECRET_KEY` is stored in `~/.config/lifetracker/secret_key` (auto-ge
 
 `run.sh` loads a `.env` file from the repo root, if present, by exporting `UV_ENV_FILE=.env` so every `uv run` it makes sees the same variables (skipped if `UV_ENV_FILE` is already set). uv parses it as dotenv, not shell, so it isn't executed. Variables already set in the shell override the file. A missing file is a hard error in uv, hence the existence check. For ad-hoc commands outside `run.sh`, use `UV_ENV_FILE=.env uv run python manage.py ...`. `.env` and `.env.*` are gitignored. Its main use is holding the cloud backup's `LIFETRACKER_BACKUP_S3_*` credentials, so they don't have to be exported in every shell. `just docker-run` also passes it to the container via `--env-file`; Docker keeps quotes as part of the value (uv strips them), so values in `.env` should be unquoted. The recipe's own `-e` flags override the file.
 
+## Deployment
+
+Production runs on Fly.io as the app `lifetracker-skissane` (Sydney), configured by `fly.toml`: one Machine built from the `Dockerfile` by `fly deploy` (no external registry), with a Fly volume mounted at `/data` for the database and secret key, and auto-stop/start when idle. Non-secret settings (`LIFETRACKER_ALLOWED_HOSTS` etc.) are in `fly.toml`'s `[env]`; the `LIFETRACKER_BACKUP_S3_*` credentials are Fly secrets (`fly secrets set`), never in `fly.toml`. A volume attaches to one Machine, so the app must never be scaled past one (use `fly deploy --ha=false` on first deploy). `.env` is in `.dockerignore` so `fly deploy` doesn't upload it to the remote builder.
+
 ## Linting config
 
 Ruff: rules E, F, W, I, UP; line length 88; migrations excluded. djlint: profile=django, indent=2.
