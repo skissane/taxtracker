@@ -40,6 +40,8 @@ from lifetracker.taxtracker.models import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+CLOUD_BACKUP_STATUS_PK = 1
+
 
 def _attachment_date_warning(obj):
     """Return an HTML warning span if *obj*'s date falls outside its financial year."""
@@ -1108,7 +1110,8 @@ class FinancialYearAdmin(admin.ModelAdmin):
         with connections["default"].cursor() as cursor:
             backup_bytes = cursor.connection.serialize()
 
-        timestamp = timezone.now().strftime("%Y-%m-%d.%H.%M.%S")
+        backup_time = timezone.now()
+        timestamp = backup_time.strftime("%Y-%m-%d.%H.%M.%S")
         object_key = f"db-backup.{timestamp}.sqlite3"
         endpoint_url = settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL or None
         s3_client = boto3.client(
@@ -1124,8 +1127,8 @@ class FinancialYearAdmin(admin.ModelAdmin):
             Body=backup_bytes,
             ContentType="application/x-sqlite3",
         )
-        status, _ = CloudBackupStatus.objects.get_or_create(pk=1)
-        status.last_backup_at = timezone.now()
+        status, _ = CloudBackupStatus.objects.get_or_create(pk=CLOUD_BACKUP_STATUS_PK)
+        status.last_backup_at = backup_time
         status.last_backup_object_key = object_key
         status.save(update_fields=["last_backup_at", "last_backup_object_key"])
         return object_key
@@ -1134,7 +1137,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
         if not request.user.is_superuser:
             raise PermissionDenied
 
-        status, _ = CloudBackupStatus.objects.get_or_create(pk=1)
+        status, _ = CloudBackupStatus.objects.get_or_create(pk=CLOUD_BACKUP_STATUS_PK)
         config = {
             "endpoint_url": settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL,
             "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
