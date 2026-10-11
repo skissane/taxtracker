@@ -1150,7 +1150,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
         backup_time = timezone.now()
         timestamp = backup_time.strftime("%Y-%m-%d.%H.%M.%S")
         object_key = (
-            f"{settings.LIFETRACKER_BACKUP_HOSTNAME}.db-backup.{timestamp}.sqlite3"
+            f"{settings.LIFETRACKER_BACKUP_HOSTNAME}/db-backup.{timestamp}.sqlite3"
         )
         endpoint_url = settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL or None
         region_name = settings.LIFETRACKER_BACKUP_S3_REGION_NAME or None

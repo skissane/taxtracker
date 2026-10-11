@@ -655,7 +655,7 @@ class AdminViewTests(TestCase):
         CloudBackupStatus.objects.create(
             pk=CLOUD_BACKUP_STATUS_PK,
             last_backup_at=timezone.now() - datetime.timedelta(days=4, hours=3),
-            last_backup_object_key="host.db-backup.2026-01-01.00.00.00.sqlite3",
+            last_backup_object_key="host/db-backup.2026-01-01.00.00.00.sqlite3",
         )
         url = reverse("admin:taxtracker_financialyear_cloud_backup_status")
         response = self.client.get(url)
@@ -701,7 +701,7 @@ class AdminViewTests(TestCase):
         )
         self.assertRegex(
             put_object.call_args.kwargs["Key"],
-            r"^test-host\.local\.db-backup\."
+            r"^test-host\.local/db-backup\."
             r"\d{4}-\d{2}-\d{2}\.\d{2}\.\d{2}\.\d{2}\.sqlite3$",
         )
         self.assertTrue(
