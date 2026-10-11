@@ -24,11 +24,14 @@ FROM python:3.14-slim
 # Links the image CI pushes to GHCR to this repository.
 LABEL org.opencontainers.image.source="https://github.com/skissane/taxtracker"
 
+ARG LIFETRACKER_COMMIT_ID=""
+
 WORKDIR /app
 
 ENV PATH="/app/.venv/bin:${PATH}"
 ENV PYTHONUNBUFFERED=1
 ENV LIFETRACKER_STATIC_ROOT=/app/staticfiles
+ENV LIFETRACKER_COMMIT_ID="${LIFETRACKER_COMMIT_ID}"
 # Keep the database and secret key on a volume so they survive container
 # restarts and image rebuilds.
 ENV LIFETRACKER_DATA_DIR=/data

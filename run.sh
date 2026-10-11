@@ -9,6 +9,8 @@ if [ -f .env ] && [ -z "${UV_ENV_FILE:-}" ]; then
     export UV_ENV_FILE=.env
 fi
 
+export LIFETRACKER_COMMIT_ID="$(git rev-parse HEAD)"
+
 uv sync
 uv run python manage.py upgrade_legacy_db
 uv run python manage.py migrate

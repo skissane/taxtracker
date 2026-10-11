@@ -34,6 +34,7 @@ from lifetracker.core.models import (
     FileType,
     MimeType,
 )
+from lifetracker.urls import _build_admin_site_header
 from lifetracker.wsgi import application as wsgi_application
 
 
@@ -583,6 +584,35 @@ class ProjectEntryPointTests(TestCase):
         self.assertTrue(callable(asgi_application))
 
 
+class AdminSiteHeaderTests(TestCase):
+    def test_includes_commit_link_and_instance_name(self):
+        self.assertEqual(
+            str(
+                _build_admin_site_header(
+                    commit_id="abc123",
+                    commit_url_base="https://github.com/skissane/taxtracker/commit/",
+                    instance_name="instance.local",
+                )
+            ),
+            (
+                'Life Tracker <code><a href="https://github.com/skissane/taxtracker/commit/abc123">'
+                "abc123</a></code> <code>instance.local</code>"
+            ),
+        )
+
+    def test_omits_commit_link_when_no_commit_id(self):
+        self.assertEqual(
+            str(
+                _build_admin_site_header(
+                    commit_id="",
+                    commit_url_base="https://github.com/skissane/taxtracker/commit/",
+                    instance_name="instance.local",
+                )
+            ),
+            "Life Tracker <code>instance.local</code>",
+        )
+
+
 class _SettingsSubprocessMixin:
     """settings.py computes its values at import time, from files under $HOME
     and from environment variables, before Django is even configured. They can
@@ -880,6 +910,37 @@ class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
         self.assertTrue(debug)
         self.assertEqual(origins, ["https://tax.example.com"])
         self.assertEqual(proxy_header, ("HTTP_X_FORWARDED_PROTO", "https"))
+
+
+class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
+    EXPR = (
+        "(s.LIFETRACKER_COMMIT_URL_BASE, s.LIFETRACKER_COMMIT_ID,"
+        " s.LIFETRACKER_BACKUP_HOSTNAME)"
+    )
+
+    def _settings(self, **env):
+        with tempfile.TemporaryDirectory() as home:
+            proc = self._run(home, extra_env=env, expr=self.EXPR)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return ast.literal_eval(proc.stdout.strip())
+
+    def test_defaults(self):
+        commit_url_base, commit_id, backup_hostname = self._settings()
+        self.assertEqual(
+            commit_url_base, "https://github.com/skissane/taxtracker/commit/"
+        )
+        self.assertEqual(commit_id, "")
+        self.assertTrue(backup_hostname)
+
+    def test_reads_commit_values_from_environment(self):
+        self.assertEqual(
+            self._settings(
+                LIFETRACKER_COMMIT_URL_BASE="https://example.invalid/commit/",
+                LIFETRACKER_COMMIT_ID="deadbeef",
+                LIFETRACKER_BACKUP_HOSTNAME="test-instance",
+            ),
+            ("https://example.invalid/commit/", "deadbeef", "test-instance"),
+        )
 
 
 class InitialAdminPasswordFileTests(TestCase):

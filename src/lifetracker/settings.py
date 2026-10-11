@@ -223,6 +223,10 @@ LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID = os.environ.get(
 LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY = os.environ.get(
     "LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY", ""
 ).strip()
+LIFETRACKER_COMMIT_URL_BASE = os.environ.get(
+    "LIFETRACKER_COMMIT_URL_BASE", "https://github.com/skissane/taxtracker/commit/"
+).strip()
+LIFETRACKER_COMMIT_ID = os.environ.get("LIFETRACKER_COMMIT_ID", "").strip()
 # Prefixed to backup object keys so backups from different environments (e.g.
 # local dev vs. Docker, which use separate databases) are distinguishable.
 LIFETRACKER_BACKUP_HOSTNAME = (

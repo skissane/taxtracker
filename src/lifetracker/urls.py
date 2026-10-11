@@ -1,9 +1,28 @@
+from urllib.parse import urljoin
+
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import path
+from django.utils.html import format_html
 
-admin.site.site_header = "Life Tracker"
+
+def _build_admin_site_header(*, commit_id, commit_url_base, instance_name):
+    if commit_id:
+        return format_html(
+            'Life Tracker <code><a href="{}">{}</a></code> <code>{}</code>',
+            urljoin(commit_url_base, commit_id),
+            commit_id,
+            instance_name,
+        )
+    return format_html("Life Tracker <code>{}</code>", instance_name)
+
+
+admin.site.site_header = _build_admin_site_header(
+    commit_id=settings.LIFETRACKER_COMMIT_ID,
+    commit_url_base=settings.LIFETRACKER_COMMIT_URL_BASE,
+    instance_name=settings.LIFETRACKER_BACKUP_HOSTNAME,
+)
 admin.site.site_title = "Life Tracker"
 admin.site.index_title = "Administration"
 
