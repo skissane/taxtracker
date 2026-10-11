@@ -1,43 +1,104 @@
 {% extends "admin/base_site.html" %}
 
-{% load i18n %}
+{% load i18n static %}
 
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'taxtracker/buttons.css' %}">
+  <style>
+  .tt-info-box {
+    background: var(--darkened-bg);
+    border: 1px solid var(--border-color);
+    padding: 1em 1.5em;
+    border-radius: 4px;
+    margin-bottom: 1.5em;
+  }
+
+  .tt-table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  .tt-label {
+    text-align: left;
+    padding: 4px 12px 4px 0;
+  }
+
+  .tt-footer {
+    margin-top: 1.5em;
+  }
+  </style>
+{% endblock extrastyle %}
 {% block breadcrumbs %}
-  <div class="breadcrumbs">
-    <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> ›
-    <a href="{% url 'admin:taxtracker_financialyear_changelist' %}">Financial Years</a> ›
-    Cloud Backup Status
-  </div>
+  <ol class="breadcrumbs">
+    <li><a href="{% url 'admin:index' %}">{% trans "Home" %}</a></li>
+    <li><a href="{% url 'admin:app_list' app_label='taxtracker' %}">Tax Tracker</a></li>
+    <li><a href="{% url 'admin:taxtracker_financialyear_changelist' %}">Financial Years</a></li>
+    <li aria-current="page">Cloud Backup Status</li>
+  </ol>
 {% endblock breadcrumbs %}
 {% block content %}
-  <p>
-    Destination:
-    {% if config.endpoint_url %}
-      {{ config.endpoint_url }}
-    {% else %}
-      AWS S3 default endpoint
-    {% endif %}
-    / {{ config.bucket_name|default:"(not configured)" }}
-    (region: {{ config.region_name|default:"(not configured)" }})
-  </p>
-  <p>
-    Last successful backup:
-    {% if status.last_backup_at %}
-      {{ status.last_backup_at|date:"Y-m-d H:i:s T" }}
-      {% if status.last_backup_object_key %}
-        ({{ status.last_backup_object_key }})
-      {% endif %}
-    {% else %}
-      Never
-    {% endif %}
-  </p>
   {% if missing_required %}
     <p class="errornote">
       Backup upload is disabled until these settings are configured:
-      {{ missing_required|join:", " }}
+      {% for name in missing_required %}
+        <code>{{ name }}</code>{% if not forloop.last %},{% endif %}
+      {% endfor %}
     </p>
   {% endif %}
-  <form method="post">
+  <div class="tt-info-box">
+    <table class="tt-table">
+      <tr>
+        <th class="tt-label">Endpoint</th>
+        <td>
+          {% if config.endpoint_url %}
+            <code>{{ config.endpoint_url }}</code>
+          {% else %}
+            AWS S3 default
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <th class="tt-label">Bucket</th>
+        <td>
+          {% if config.bucket_name %}
+            <code>{{ config.bucket_name }}</code>
+          {% else %}
+            Not configured
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <th class="tt-label">Region</th>
+        <td>
+          {% if config.region_name %}
+            <code>{{ config.region_name }}</code>
+          {% else %}
+            Not configured
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <th class="tt-label">Last Successful Backup</th>
+        <td>
+          {% if status.last_backup_at %}
+            {{ status.last_backup_at|date:"Y-m-d H:i:s T" }}
+          {% else %}
+            Never
+          {% endif %}
+        </td>
+      </tr>
+      {% if status.last_backup_object_key %}
+        <tr>
+          <th class="tt-label">Object Key</th>
+          <td>
+            <code>{{ status.last_backup_object_key }}</code>
+          </td>
+        </tr>
+      {% endif %}
+    </table>
+  </div>
+  <form method="post" class="tt-footer">
     {% csrf_token %}
     <button type="submit"
             class="button default"

@@ -1,13 +1,18 @@
 {% extends "admin/base_site.html" %}
 
-{% load i18n %}
+{% load i18n static %}
 
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'taxtracker/buttons.css' %}">
+{% endblock extrastyle %}
 {% block breadcrumbs %}
-  <div class="breadcrumbs">
-    <a href="{% url 'admin:index' %}">{% trans "Home" %}</a> ›
-    <a href="{% url 'admin:taxtracker_receiveddocument_changelist' %}">Received Documents</a> ›
-    Import Archive
-  </div>
+  <ol class="breadcrumbs">
+    <li><a href="{% url 'admin:index' %}">{% trans "Home" %}</a></li>
+    <li><a href="{% url 'admin:app_list' app_label='taxtracker' %}">Tax Tracker</a></li>
+    <li><a href="{% url 'admin:taxtracker_receiveddocument_changelist' %}">Received Documents</a></li>
+    <li aria-current="page">Import Archive</li>
+  </ol>
 {% endblock breadcrumbs %}
 {% block content %}
   <p>

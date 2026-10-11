@@ -1,0 +1,27 @@
+/* Shared button sizing for taxtracker's custom admin pages.
+
+   Django's admin CSS sizes buttons inconsistently on these pages: `form .button`
+   (2px 3px) squashes <button class="button"> inside a form, `a.button` (4px 5px)
+   makes link buttons smaller and inline, and its link-underline rule
+   (`a:not(..., #content-main.app-list a, ...)`) is as specific as its strongest
+   exclusion, so link buttons stay underlined. The rules below outrank all
+   three, so every button and link button on the page gets the same full size
+   as the admin's own submit inputs. */
+#content .button,
+#content form input[type="submit"] {
+  display: inline-block;
+  padding: 10px 15px;
+  font-size: .8125rem;
+  line-height: 1.2;
+  vertical-align: middle;
+}
+
+#content a.button:link,
+#content a.button:visited {
+  text-decoration: none;
+}
+
+#content .button + .button,
+#content input[type="submit"] + .button {
+  margin-left: 8px;
+}
