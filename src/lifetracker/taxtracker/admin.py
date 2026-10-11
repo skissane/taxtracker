@@ -1102,12 +1102,8 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # Cloud backup status / run backup now view
     # ------------------------------------------------------------------
 
-    def _run_cloud_backup_now(self):
-        """Run a cloud backup upload.
-
-        Callers must enforce authorization before invoking this method.
-        """
-        missing_required = [
+    def _missing_cloud_backup_settings(self):
+        return [
             key
             for key, value in {
                 "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
@@ -1116,6 +1112,13 @@ class FinancialYearAdmin(admin.ModelAdmin):
             }.items()
             if not value
         ]
+
+    def _run_cloud_backup_now(self):
+        """Run a cloud backup upload.
+
+        Callers must enforce authorization before invoking this method.
+        """
+        missing_required = self._missing_cloud_backup_settings()
         if missing_required:
             raise RuntimeError(
                 "Cloud backup settings are incomplete. Missing: "
@@ -1175,15 +1178,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
             "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
             "region_name": settings.LIFETRACKER_BACKUP_S3_REGION_NAME,
         }
-        missing_required = [
-            key
-            for key, value in {
-                "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
-                "access_key_id": settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID,
-                "secret_access_key": settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY,
-            }.items()
-            if not value
-        ]
+        missing_required = self._missing_cloud_backup_settings()
 
         if request.method == "POST":
             if missing_required:
