@@ -15,6 +15,8 @@ This deliberately does NOT try to be a full act replacement:
   - `if:` conditions are not evaluated — all steps run. Comment out ones
     you don't want, or use --only / --skip.
   - Matrix builds are not expanded — pick one combo yourself if needed.
+  - `needs:` is ignored — only the one job (--job, default the first in
+    the file) runs.
 
 What it DOES support, because these are the common bits that make a
 job's shell steps actually work correctly when chained together:
@@ -28,7 +30,7 @@ job's shell steps actually work correctly when chained together:
 
 Usage:
   uv run python run_workflow_local.py .github/workflows/ci.yml
-  uv run python run_workflow_local.py .github/workflows/ci.yml --job build
+  uv run python run_workflow_local.py .github/workflows/ci.yml --job test
   uv run python run_workflow_local.py .github/workflows/ci.yml --list
   uv run python run_workflow_local.py .github/workflows/ci.yml --only "Run tests"
   uv run python run_workflow_local.py .github/workflows/ci.yml --dry-run
@@ -75,10 +77,10 @@ def pick_job(workflow: dict, job_name: str) -> tuple[str, dict]:
         if job_name not in jobs:
             sys.exit(f"Job {job_name!r} not found. Available: {', '.join(jobs)}")
         return job_name, jobs[job_name]
-    if len(jobs) == 1:
-        only = next(iter(jobs))
-        return only, jobs[only]
-    sys.exit(f"Multiple jobs present: {', '.join(jobs)}. Pass --job <name>.")
+    # Default to the first job in file order (YAML mappings keep it), so a
+    # later job such as ci.yml's deploy never runs without being named.
+    first = next(iter(jobs))
+    return first, jobs[first]
 
 
 def apply_github_env_file(path: str, env: dict[str, str]) -> None:
@@ -185,7 +187,7 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("workflow", help="path to .github/workflows/*.yml")
-    ap.add_argument("--job", help="job name (required if workflow has >1 job)")
+    ap.add_argument("--job", help="job name (default: first job in the workflow)")
     ap.add_argument("--list", action="store_true", help="list jobs/steps and exit")
     ap.add_argument(
         "--only",

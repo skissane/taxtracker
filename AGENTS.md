@@ -13,9 +13,10 @@ everything CI runs, or `just --list` to see individual recipes (`lint`, `fmt-che
 avoids that by parsing the workflow YAML directly and running its `run:` steps as written
 (see its docstring for what it does and doesn't support). After `just coverage` runs, CI uploads
 `coverage.xml` to Codecov (`codecov/codecov-action`); this step needs a `CODECOV_TOKEN` repo
-secret from codecov.io and is skipped by `run_workflow_local.py` since it's a `uses:` step. `ci.yml` has two jobs, `test` and `deploy` (see Deployment), so
-`run_workflow_local.py` needs `--job test`; don't run `--job deploy` locally, since it doesn't
-evaluate `if:` and would deploy your working tree to production.
+secret from codecov.io and is skipped by `run_workflow_local.py` since it's a `uses:` step. `ci.yml` has two jobs, `test` and `deploy` (see Deployment);
+`run_workflow_local.py` runs the first job in the file unless given `--job`, so keep `test` first.
+Don't run `--job deploy` locally: it doesn't evaluate `if:`, so it would deploy your working tree
+to production.
 
 ```bash
 # Start the app (sync deps, upgrade legacy DB schema if needed, migrate,
