@@ -584,6 +584,17 @@ class ProjectEntryPointTests(TestCase):
         self.assertTrue(callable(asgi_application))
 
 
+class RootRedirectTests(TestCase):
+    def test_root_redirects_to_admin_index(self):
+        response = Client().get("/")
+        self.assertRedirects(
+            response,
+            reverse("admin:index"),
+            status_code=302,
+            fetch_redirect_response=False,
+        )
+
+
 class AdminSiteHeaderTests(TestCase):
     COMMIT_ID = "0123abc456def7890123abc456def7890123abcd"
 

@@ -46,7 +46,7 @@ uv run lifetracker-cli --help
 
 ## Architecture
 
-**Stack:** Django 6.0, Python 3.14, SQLite, `uv` for package management. The entire UI is the Django admin — there are no custom non-admin views (except file serving). No frontend framework.
+**Stack:** Django 6.x, Python 3.14, SQLite, `uv` for package management. The entire UI is the Django admin — there are no custom non-admin views (except file serving), and `/` redirects to `/admin/`. No frontend framework.
 
 **Package layout:** `src/lifetracker/` is the Django project (settings, urls). It contains two apps:
 - `src/lifetracker/core/` (label `core`) — generic infrastructure any future module can reuse: the file-type registry (`FileType`/`MimeType`/`FileExtension`) and DB-backed file storage (`DBStoredFile`/`DatabaseStorage`), plus the file-serving admin view.
