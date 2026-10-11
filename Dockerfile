@@ -21,6 +21,9 @@ RUN LIFETRACKER_SECRET_KEY_FILE=/tmp/secret_key \
 
 FROM python:3.14-slim
 
+# Links the image CI pushes to GHCR to this repository.
+LABEL org.opencontainers.image.source="https://github.com/skissane/taxtracker"
+
 WORKDIR /app
 
 ENV PATH="/app/.venv/bin:${PATH}"
