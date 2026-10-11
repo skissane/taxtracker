@@ -96,6 +96,11 @@ The image defaults to `LIFETRACKER_DEBUG=0`, and then refuses to start unless
 | `LIFETRACKER_ALLOWED_HOSTS` | Required. Hostnames the app answers to, e.g. `tax.example.com`. |
 | `LIFETRACKER_CSRF_TRUSTED_ORIGINS` | Public origins, e.g. `https://tax.example.com`. Needed behind a TLS-terminating reverse proxy, or the admin login fails its CSRF check. |
 | `LIFETRACKER_TRUST_X_FORWARDED_PROTO` | Set to `1` instead of listing origins, if the proxy always sets `X-Forwarded-Proto` and the container is reachable only through it. |
+| `LIFETRACKER_BACKUP_S3_ENDPOINT_URL` | Optional S3-compatible endpoint (for R2/B2/etc). Leave empty for AWS S3. |
+| `LIFETRACKER_BACKUP_S3_BUCKET_NAME` | Bucket/container name for cloud DB backups. |
+| `LIFETRACKER_BACKUP_S3_REGION_NAME` | Region name for the S3-compatible provider (for example `ap-southeast-2`, or `auto` for R2). |
+| `LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID` | Access key ID for cloud backup uploads. |
+| `LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY` | Secret access key for cloud backup uploads. |
 
 For example:
 

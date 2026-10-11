@@ -3,6 +3,7 @@ import datetime
 import io
 import json
 import zipfile
+from unittest import mock
 
 import pytest
 from django.contrib.auth.models import Permission, User
@@ -29,6 +30,7 @@ from lifetracker.taxtracker.archives import (
 from lifetracker.taxtracker.forms import AttachmentForm, FlexibleDateField
 from lifetracker.taxtracker.models import (
     Attachment,
+    CloudBackupStatus,
     FinancialYear,
     FinancialYearStatusHistory,
     Item,
@@ -614,6 +616,70 @@ class AdminViewTests(TestCase):
         )
         self.assertContains(
             response, "DB backup is only available for SQLite databases."
+        )
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_ENDPOINT_URL="https://example.invalid",
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_REGION_NAME="auto",
+    )
+    def test_cloud_backup_status_view(self):
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_status")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "https://example.invalid")
+        self.assertContains(response, "test-bucket")
+        self.assertContains(response, "auto")
+        self.assertContains(response, "Never")
+
+    def test_cloud_backup_status_requires_superuser(self):
+        non_super = User.objects.create_user("regular2", "r2@example.com", "pass")
+        non_super.is_staff = True
+        non_super.save()
+        client = Client()
+        client.login(username="regular2", **{"password": "pass"})
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_status")
+        response = client.get(url)
+        self.assertEqual(response.status_code, 403)
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_ENDPOINT_URL="https://example.invalid",
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_REGION_NAME="auto",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    )
+    @mock.patch("lifetracker.taxtracker.admin.boto3.client")
+    def test_cloud_backup_status_view_run_backup_updates_status(self, mock_client):
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_status")
+        response = self.client.post(url, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Cloud backup uploaded successfully")
+        mock_client.assert_called_once_with(
+            "s3",
+            endpoint_url="https://example.invalid",
+            region_name="auto",
+            aws_access_key_id="access-key",
+            aws_secret_access_key="secret-key",
+        )
+        put_object = mock_client.return_value.put_object
+        put_object.assert_called_once()
+        self.assertEqual(put_object.call_args.kwargs["Bucket"], "test-bucket")
+        self.assertEqual(
+            put_object.call_args.kwargs["ContentType"], "application/x-sqlite3"
+        )
+        self.assertRegex(
+            put_object.call_args.kwargs["Key"],
+            r"^db-backup\.\d{4}-\d{2}-\d{2}\.\d{2}\.\d{2}\.\d{2}\.sqlite3$",
+        )
+        self.assertTrue(
+            put_object.call_args.kwargs["Body"].startswith(b"SQLite format 3\x00")
+        )
+
+        status = CloudBackupStatus.objects.get(pk=1)
+        self.assertIsNotNone(status.last_backup_at)
+        self.assertEqual(
+            status.last_backup_object_key, put_object.call_args.kwargs["Key"]
         )
 
     def test_item_changelist_shows_year_link(self):

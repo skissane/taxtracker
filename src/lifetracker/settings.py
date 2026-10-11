@@ -205,6 +205,24 @@ DATABASES = {
     }
 }
 
+# S3-compatible cloud backup destination (supports AWS S3, Cloudflare R2,
+# Backblaze B2 S3 API, etc.). The endpoint is optional (leave blank for AWS).
+LIFETRACKER_BACKUP_S3_ENDPOINT_URL = os.environ.get(
+    "LIFETRACKER_BACKUP_S3_ENDPOINT_URL", ""
+).strip()
+LIFETRACKER_BACKUP_S3_BUCKET_NAME = os.environ.get(
+    "LIFETRACKER_BACKUP_S3_BUCKET_NAME", ""
+).strip()
+LIFETRACKER_BACKUP_S3_REGION_NAME = os.environ.get(
+    "LIFETRACKER_BACKUP_S3_REGION_NAME", ""
+).strip()
+LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID = os.environ.get(
+    "LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID", ""
+).strip()
+LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY = os.environ.get(
+    "LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY", ""
+).strip()
+
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators

@@ -162,6 +162,22 @@ class FinancialYearStatusHistory(models.Model):
         )
 
 
+class CloudBackupStatus(models.Model):
+    """Tracks the latest successful cloud backup upload."""
+
+    last_backup_at = models.DateTimeField(null=True, blank=True)
+    last_backup_object_key = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        verbose_name = "Cloud Backup Status"
+        verbose_name_plural = "Cloud Backup Status"
+
+    def __str__(self):
+        if self.last_backup_at is None:
+            return "Cloud backup status: never backed up"
+        return f"Cloud backup status: last backup at {self.last_backup_at}"
+
+
 class Item(models.Model):
     """A tax return checklist item, optionally nested under a parent item."""
 

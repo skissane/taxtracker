@@ -3,6 +3,8 @@ import re
 import zipfile
 from pathlib import Path
 
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
@@ -26,6 +28,7 @@ from lifetracker.taxtracker.forms import (
 )
 from lifetracker.taxtracker.models import (
     Attachment,
+    CloudBackupStatus,
     FinancialYear,
     FinancialYearStatusHistory,
     Item,
@@ -901,6 +904,11 @@ class FinancialYearAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.download_multi_zip_view),
                 name="taxtracker_financialyear_download_multi_zip",
             ),
+            path(
+                "cloud-backup/",
+                self.admin_site.admin_view(self.cloud_backup_status_view),
+                name="taxtracker_financialyear_cloud_backup_status",
+            ),
         ]
         return custom + super().get_urls()
 
@@ -971,6 +979,9 @@ class FinancialYearAdmin(admin.ModelAdmin):
         )
         extra_context["download_multi_zip_url"] = reverse(
             "admin:taxtracker_financialyear_download_multi_zip"
+        )
+        extra_context["cloud_backup_status_url"] = reverse(
+            "admin:taxtracker_financialyear_cloud_backup_status"
         )
         return super().changelist_view(request, extra_context)
 
@@ -1082,6 +1093,94 @@ class FinancialYearAdmin(admin.ModelAdmin):
         return render(
             request,
             "admin/taxtracker/financialyear/download_multi_zip.html",
+            context,
+        )
+
+    # ------------------------------------------------------------------
+    # Cloud backup status / run backup now view
+    # ------------------------------------------------------------------
+
+    def _run_cloud_backup_now(self):
+        engine = settings.DATABASES["default"]["ENGINE"]
+        if engine != "django.db.backends.sqlite3":
+            raise RuntimeError("Cloud backup is only available for SQLite databases.")
+
+        with connections["default"].cursor() as cursor:
+            backup_bytes = cursor.connection.serialize()
+
+        timestamp = timezone.now().strftime("%Y-%m-%d.%H.%M.%S")
+        object_key = f"db-backup.{timestamp}.sqlite3"
+        endpoint_url = settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL or None
+        s3_client = boto3.client(
+            "s3",
+            endpoint_url=endpoint_url,
+            region_name=settings.LIFETRACKER_BACKUP_S3_REGION_NAME,
+            aws_access_key_id=settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY,
+        )
+        s3_client.put_object(
+            Bucket=settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
+            Key=object_key,
+            Body=backup_bytes,
+            ContentType="application/x-sqlite3",
+        )
+        status, _ = CloudBackupStatus.objects.get_or_create(pk=1)
+        status.last_backup_at = timezone.now()
+        status.last_backup_object_key = object_key
+        status.save(update_fields=["last_backup_at", "last_backup_object_key"])
+        return object_key
+
+    def cloud_backup_status_view(self, request):
+        if not request.user.is_superuser:
+            raise PermissionDenied
+
+        status, _ = CloudBackupStatus.objects.get_or_create(pk=1)
+        config = {
+            "endpoint_url": settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL,
+            "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
+            "region_name": settings.LIFETRACKER_BACKUP_S3_REGION_NAME,
+        }
+        missing_required = [
+            key
+            for key, value in {
+                "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
+                "access_key_id": settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID,
+                "secret_access_key": settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY,
+            }.items()
+            if not value
+        ]
+
+        if request.method == "POST":
+            if missing_required:
+                messages.error(
+                    request,
+                    "Cloud backup settings are incomplete. Missing: "
+                    f"{', '.join(missing_required)}.",
+                )
+            else:
+                try:
+                    object_key = self._run_cloud_backup_now()
+                    messages.success(
+                        request,
+                        f"Cloud backup uploaded successfully as {object_key}.",
+                    )
+                    return redirect(
+                        reverse("admin:taxtracker_financialyear_cloud_backup_status")
+                    )
+                except (BotoCoreError, ClientError, RuntimeError) as exc:
+                    messages.error(request, f"Cloud backup failed: {exc}")
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Cloud Backup Status",
+            "config": config,
+            "status": status,
+            "missing_required": missing_required,
+            "opts": self.model._meta,
+        }
+        return render(
+            request,
+            "admin/taxtracker/financialyear/cloud_backup_status.html",
             context,
         )
 
