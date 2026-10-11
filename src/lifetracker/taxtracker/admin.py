@@ -43,6 +43,14 @@ from lifetracker.taxtracker.models import (
 CLOUD_BACKUP_STATUS_PK = 1
 
 
+class CloudBackupStatusUpdateError(RuntimeError):
+    """Raised when upload succeeds but persisting backup status fails."""
+
+    def __init__(self, object_key):
+        super().__init__("Cloud backup uploaded, but failed to record backup status.")
+        self.object_key = object_key
+
+
 def _attachment_date_warning(obj):
     """Return an HTML warning span if *obj*'s date falls outside its financial year."""
     if not obj.pk or not obj.date:
@@ -1137,14 +1145,12 @@ class FinancialYearAdmin(admin.ModelAdmin):
         object_key = f"db-backup.{timestamp}.sqlite3"
         endpoint_url = settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL or None
         region_name = settings.LIFETRACKER_BACKUP_S3_REGION_NAME or None
-        access_key_id = settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID or None
-        secret_access_key = settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY or None
         s3_client = boto3.client(
             "s3",
             endpoint_url=endpoint_url,
             region_name=region_name,
-            aws_access_key_id=access_key_id,
-            aws_secret_access_key=secret_access_key,
+            aws_access_key_id=settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY,
         )
         s3_client.put_object(
             Bucket=settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
@@ -1161,9 +1167,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
                 },
             )
         except Exception as exc:  # pragma: no cover - defensive fallback
-            raise RuntimeError(
-                "Cloud backup uploaded, but failed to record backup status."
-            ) from exc
+            raise CloudBackupStatusUpdateError(object_key) from exc
         return object_key
 
     def cloud_backup_status_view(self, request):
@@ -1196,6 +1200,12 @@ class FinancialYearAdmin(admin.ModelAdmin):
                     )
                     return redirect(
                         reverse("admin:taxtracker_financialyear_cloud_backup_status")
+                    )
+                except CloudBackupStatusUpdateError as exc:
+                    messages.warning(
+                        request,
+                        "Cloud backup uploaded successfully as "
+                        f"{exc.object_key}, but failed to record backup status.",
                     )
                 except (BotoCoreError, ClientError, RuntimeError) as exc:
                     messages.error(request, f"Cloud backup failed: {exc}")
