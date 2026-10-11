@@ -170,7 +170,7 @@ class CloudBackupStatus(models.Model):
 
     class Meta:
         verbose_name = "Cloud Backup Status"
-        verbose_name_plural = "Cloud Backup Status"
+        verbose_name_plural = "Cloud Backup Statuses"
 
     def __str__(self):
         if self.last_backup_at is None:

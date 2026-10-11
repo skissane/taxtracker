@@ -19,6 +19,7 @@ from django.utils import timezone
 
 from lifetracker.core.models import DBStoredFile, FileExtension, FileType
 from lifetracker.taxtracker.admin import (
+    CLOUD_BACKUP_STATUS_PK,
     _adjust_notes_headings,
     _attachment_date_warning,
 )
@@ -676,7 +677,7 @@ class AdminViewTests(TestCase):
             put_object.call_args.kwargs["Body"].startswith(b"SQLite format 3\x00")
         )
 
-        status = CloudBackupStatus.objects.get(pk=1)
+        status = CloudBackupStatus.objects.get(pk=CLOUD_BACKUP_STATUS_PK)
         self.assertIsNotNone(status.last_backup_at)
         self.assertEqual(
             status.last_backup_object_key, put_object.call_args.kwargs["Key"]

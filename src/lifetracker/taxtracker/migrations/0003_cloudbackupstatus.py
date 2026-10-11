@@ -29,7 +29,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 "verbose_name": "Cloud Backup Status",
-                "verbose_name_plural": "Cloud Backup Status",
+                "verbose_name_plural": "Cloud Backup Statuses",
             },
         ),
     ]

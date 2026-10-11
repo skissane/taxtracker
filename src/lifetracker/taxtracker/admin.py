@@ -1114,12 +1114,15 @@ class FinancialYearAdmin(admin.ModelAdmin):
         timestamp = backup_time.strftime("%Y-%m-%d.%H.%M.%S")
         object_key = f"db-backup.{timestamp}.sqlite3"
         endpoint_url = settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL or None
+        region_name = settings.LIFETRACKER_BACKUP_S3_REGION_NAME or None
+        access_key_id = settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID or None
+        secret_access_key = settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY or None
         s3_client = boto3.client(
             "s3",
             endpoint_url=endpoint_url,
-            region_name=settings.LIFETRACKER_BACKUP_S3_REGION_NAME,
-            aws_access_key_id=settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY,
+            region_name=region_name,
+            aws_access_key_id=access_key_id,
+            aws_secret_access_key=secret_access_key,
         )
         s3_client.put_object(
             Bucket=settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
