@@ -1148,7 +1148,9 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
         backup_time = timezone.now()
         timestamp = backup_time.strftime("%Y-%m-%d.%H.%M.%S")
-        object_key = f"db-backup.{timestamp}.sqlite3"
+        object_key = (
+            f"{settings.LIFETRACKER_BACKUP_HOSTNAME}.db-backup.{timestamp}.sqlite3"
+        )
         endpoint_url = settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL or None
         region_name = settings.LIFETRACKER_BACKUP_S3_REGION_NAME or None
         s3_client = boto3.client(
@@ -1187,6 +1189,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
             "endpoint_url": settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL,
             "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
             "region_name": settings.LIFETRACKER_BACKUP_S3_REGION_NAME,
+            "hostname": settings.LIFETRACKER_BACKUP_HOSTNAME,
         }
         missing_required = self._missing_cloud_backup_settings()
 

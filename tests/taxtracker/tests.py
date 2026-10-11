@@ -639,6 +639,7 @@ class AdminViewTests(TestCase):
         LIFETRACKER_BACKUP_S3_ENDPOINT_URL="https://example.invalid",
         LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
         LIFETRACKER_BACKUP_S3_REGION_NAME="auto",
+        LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
     )
     def test_cloud_backup_status_view(self):
         url = reverse("admin:taxtracker_financialyear_cloud_backup_status")
@@ -647,6 +648,7 @@ class AdminViewTests(TestCase):
         self.assertContains(response, "https://example.invalid")
         self.assertContains(response, "test-bucket")
         self.assertContains(response, "auto")
+        self.assertContains(response, "<code>test-host.local</code>", html=True)
         self.assertContains(response, "Never")
 
     def test_cloud_backup_status_requires_superuser(self):
@@ -665,6 +667,7 @@ class AdminViewTests(TestCase):
         LIFETRACKER_BACKUP_S3_REGION_NAME="auto",
         LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
         LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+        LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
     )
     @mock.patch("lifetracker.taxtracker.admin.boto3.client")
     def test_cloud_backup_status_view_run_backup_updates_status(self, mock_client):
@@ -687,7 +690,8 @@ class AdminViewTests(TestCase):
         )
         self.assertRegex(
             put_object.call_args.kwargs["Key"],
-            r"^db-backup\.\d{4}-\d{2}-\d{2}\.\d{2}\.\d{2}\.\d{2}\.sqlite3$",
+            r"^test-host\.local\.db-backup\."
+            r"\d{4}-\d{2}-\d{2}\.\d{2}\.\d{2}\.\d{2}\.sqlite3$",
         )
         self.assertTrue(
             put_object.call_args.kwargs["Body"].startswith(b"SQLite format 3\x00")

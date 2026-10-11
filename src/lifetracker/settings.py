@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 import os
 import secrets
+import socket
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -222,6 +223,11 @@ LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID = os.environ.get(
 LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY = os.environ.get(
     "LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY", ""
 ).strip()
+# Prefixed to backup object keys so backups from different environments (e.g.
+# local dev vs. Docker, which use separate databases) are distinguishable.
+LIFETRACKER_BACKUP_HOSTNAME = (
+    os.environ.get("LIFETRACKER_BACKUP_HOSTNAME", "").strip() or socket.gethostname()
+)
 
 
 # Password validation

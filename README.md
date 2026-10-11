@@ -10,8 +10,10 @@ Financial Years list), you can upload one to an S3-compatible bucket: AWS S3,
 Cloudflare R2, Backblaze B2 and others. Open **☁️ Cloud Backup Status** on the
 Financial Years list (superusers only) to see when the last backup ran and to click
 **Run Backup Now**. Each backup is uploaded as a new object named
-`db-backup.<YYYY-MM-DD.HH.MM.SS>.sqlite3`. Backups only run when you click the button;
-nothing schedules them.
+`<hostname>.db-backup.<YYYY-MM-DD.HH.MM.SS>.sqlite3`, e.g.
+`my-laptop.local.db-backup.2026-10-11.01.13.53.sqlite3`, so backups from different
+machines or environments are easy to tell apart. Backups only run when you click the
+button; nothing schedules them.
 
 The bucket and credentials come from these environment variables:
 
@@ -22,6 +24,7 @@ The bucket and credentials come from these environment variables:
 | `LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY` | Required. Secret access key. |
 | `LIFETRACKER_BACKUP_S3_ENDPOINT_URL` | The provider's S3 endpoint, e.g. `https://<account-id>.r2.cloudflarestorage.com`. Leave unset for AWS S3. |
 | `LIFETRACKER_BACKUP_S3_REGION_NAME` | Region, e.g. `ap-southeast-2` (use `auto` for R2). |
+| `LIFETRACKER_BACKUP_HOSTNAME` | Overrides the `<hostname>` object key prefix (default: the machine's hostname, as `hostname` prints it). `just docker-run` sets it to `docker.<host's hostname>`, since the Docker container has its own separate database and a meaningless hostname. |
 
 Until the required ones are set, the button is disabled and the page lists the
 missing variables.
@@ -140,6 +143,7 @@ The image defaults to `LIFETRACKER_DEBUG=0`, and then refuses to start unless
 | `LIFETRACKER_CSRF_TRUSTED_ORIGINS` | Public origins, e.g. `https://tax.example.com`. Needed behind a TLS-terminating reverse proxy, or the admin login fails its CSRF check. |
 | `LIFETRACKER_TRUST_X_FORWARDED_PROTO` | Set to `1` instead of listing origins, if the proxy always sets `X-Forwarded-Proto` and the container is reachable only through it. |
 | `LIFETRACKER_BACKUP_S3_*` | Optional. Cloud backup bucket and credentials; see [Cloud backup](#cloud-backup). |
+| `LIFETRACKER_BACKUP_HOSTNAME` | Recommended with cloud backup. Prefix for backup object keys; without it the prefix is the container's hostname, a random ID by default. |
 
 For example:
 

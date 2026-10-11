@@ -71,13 +71,15 @@ config_dir := absolute_path(env("LIFETRACKER_CONFIG_DIR", env("HOME") / ".config
 # server container (same container name); use docker-shell for that.
 # Like run.sh, it passes ./.env to the container (--env-file) if present, e.g.
 # for the LIFETRACKER_BACKUP_S3_* settings; the recipe's own -e flags win over
-# the file.
+# the file. It sets LIFETRACKER_BACKUP_HOSTNAME to docker.<host's hostname>, since
+# the container's own hostname is a meaningless ID and its database is separate
+# from local dev's, so their cloud backups need distinct prefixes.
 
 # Run the app container locally (DEBUG on, loopback only, host config read-only)
 [positional-arguments]
 docker-run *args:
     LIFETRACKER_CONFIG_DIR="{{ config_dir }}" uv run python manage.py check
-    docker run -i $([ -t 0 ] && echo -t) --rm --name=lifetracker -p 127.0.0.1:${LIFETRACKER_DOCKER_PORT:-8000}:8000 $([ -f .env ] && echo --env-file .env) -e LIFETRACKER_DEBUG=1 -v lifetracker-data:/data -v "{{ config_dir }}:/config:ro" -e LIFETRACKER_CONFIG_DIR=/config -e LIFETRACKER_UID="$(id -u)" -e LIFETRACKER_GID="$(id -g)" lifetracker "$@"
+    docker run -i $([ -t 0 ] && echo -t) --rm --name=lifetracker -p 127.0.0.1:${LIFETRACKER_DOCKER_PORT:-8000}:8000 $([ -f .env ] && echo --env-file .env) -e LIFETRACKER_DEBUG=1 -e LIFETRACKER_BACKUP_HOSTNAME="docker.$(hostname)" -v lifetracker-data:/data -v "{{ config_dir }}:/config:ro" -e LIFETRACKER_CONFIG_DIR=/config -e LIFETRACKER_UID="$(id -u)" -e LIFETRACKER_GID="$(id -g)" lifetracker "$@"
 
 # docker-shell's arguments replace bash with a command run in the running
 # container, e.g. `just docker-shell python manage.py shell`. -t only with a
