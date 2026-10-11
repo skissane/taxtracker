@@ -1,4 +1,5 @@
 import io
+import logging
 import re
 import zipfile
 from pathlib import Path
@@ -42,6 +43,9 @@ from lifetracker.taxtracker.models import (
 # ---------------------------------------------------------------------------
 
 CLOUD_BACKUP_STATUS_PK = 1
+
+
+logger = logging.getLogger(__name__)
 
 
 class CloudBackupStatusUpdateError(RuntimeError):
@@ -1133,16 +1137,17 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
         Callers must enforce authorization before invoking this method.
         """
+        # Checked first: unlike missing settings, configuration can't fix this.
+        engine = settings.DATABASES["default"]["ENGINE"]
+        if engine != "django.db.backends.sqlite3":
+            raise RuntimeError("Cloud backup is only available for SQLite databases.")
+
         missing_required = self._missing_cloud_backup_settings()
         if missing_required:
             raise RuntimeError(
                 "Cloud backup settings are incomplete. Missing: "
                 f"{', '.join(missing_required)}."
             )
-
-        engine = settings.DATABASES["default"]["ENGINE"]
-        if engine != "django.db.backends.sqlite3":
-            raise RuntimeError("Cloud backup is only available for SQLite databases.")
 
         with connections["default"].cursor() as cursor:
             backup_bytes = cursor.connection.serialize()
@@ -1196,30 +1201,25 @@ class FinancialYearAdmin(admin.ModelAdmin):
         missing_required = self._missing_cloud_backup_settings()
 
         if request.method == "POST":
-            if missing_required:
-                messages.error(
+            try:
+                object_key = self._run_cloud_backup_now()
+                messages.success(
                     request,
-                    "Cloud backup settings are incomplete. Missing: "
-                    f"{', '.join(missing_required)}.",
+                    f"Cloud backup uploaded successfully as {object_key}.",
                 )
-            else:
-                try:
-                    object_key = self._run_cloud_backup_now()
-                    messages.success(
-                        request,
-                        f"Cloud backup uploaded successfully as {object_key}.",
-                    )
-                    return redirect(
-                        reverse("admin:taxtracker_financialyear_cloud_backup_status")
-                    )
-                except CloudBackupStatusUpdateError as exc:
-                    messages.warning(
-                        request,
-                        "Cloud backup uploaded successfully as "
-                        f"{exc.object_key}, but failed to record backup status.",
-                    )
-                except (BotoCoreError, ClientError, RuntimeError) as exc:
-                    messages.error(request, f"Cloud backup failed: {exc}")
+                return redirect(
+                    reverse("admin:taxtracker_financialyear_cloud_backup_status")
+                )
+            except CloudBackupStatusUpdateError as exc:
+                # The message doesn't include the cause, so log it.
+                logger.exception("Failed to record cloud backup status")
+                messages.warning(
+                    request,
+                    "Cloud backup uploaded successfully as "
+                    f"{exc.object_key}, but failed to record backup status.",
+                )
+            except (BotoCoreError, ClientError, RuntimeError) as exc:
+                messages.error(request, f"Cloud backup failed: {exc}")
 
         context = {
             **self.admin_site.each_context(request),

@@ -10,8 +10,8 @@ Financial Years list), you can upload one to an S3-compatible bucket: AWS S3,
 Cloudflare R2, Backblaze B2 and others. Open **☁️ Cloud Backup Status** on the
 Financial Years list (superusers only) to see when the last backup ran and to click
 **Run Backup Now**. Each backup is uploaded as a new object named
-`<hostname>/db-backup.<YYYY-MM-DD.HH.MM.SS>.sqlite3`, e.g.
-`my-laptop.local/db-backup.2026-10-11.01.13.53.sqlite3`, so backups from each
+`<hostname>/db-backup.<YYYY-MM-DD.HH.MM.SS>.sqlite3` (the timestamp is in UTC),
+e.g. `my-laptop.local/db-backup.2026-10-11.01.13.53.sqlite3`, so backups from each
 machine or environment sit in their own folder. Backups only run when you click the
 button; nothing schedules them.
 

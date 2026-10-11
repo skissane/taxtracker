@@ -750,6 +750,27 @@ class AdminViewTests(TestCase):
             model_admin._run_cloud_backup_now()
 
     @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="",
+    )
+    def test_run_cloud_backup_now_checks_engine_before_settings(self):
+        model_admin = admin.site._registry[FinancialYear]
+        with pytest.warns(UserWarning, match="Overriding setting DATABASES"):
+            with override_settings(
+                DATABASES={
+                    "default": {
+                        "ENGINE": "django.db.backends.postgresql",
+                        "NAME": "irrelevant",
+                    }
+                }
+            ):
+                with self.assertRaisesMessage(
+                    RuntimeError, "only available for SQLite databases"
+                ):
+                    model_admin._run_cloud_backup_now()
+
+    @override_settings(
         LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
         LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
         LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
@@ -805,7 +826,9 @@ class AdminViewTests(TestCase):
             "update_or_create",
             side_effect=IntegrityError("boom"),
         ):
-            response = self.client.post(url)
+            with self.assertLogs("lifetracker.taxtracker.admin", "ERROR") as logs:
+                response = self.client.post(url)
+        self.assertIn("IntegrityError: boom", logs.output[0])
         mock_client.return_value.put_object.assert_called_once()
         key = mock_client.return_value.put_object.call_args.kwargs["Key"]
         self.assertContains(
