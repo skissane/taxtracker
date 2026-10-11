@@ -52,6 +52,21 @@ jobs:
       - name: Build Docker image
         run: just docker-build
 
+      # Hand the tested image to the publish job, so the image pushed to GHCR
+      # is the one built and checked here, not a rebuild. This job only needs
+      # read access; pushing happens in publish, which doesn't run repo code.
+      - name: Save Docker image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: docker save -o lifetracker-image.tar lifetracker
+
+      - name: Upload Docker image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: lifetracker-image.tar
+          retention-days: 1
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
@@ -59,9 +74,49 @@ jobs:
           files: coverage.xml
           fail_ci_if_error: true
 
-  # Deploy master to Fly.io once everything above passes. FLY_API_TOKEN is a
-  # deploy token scoped to the lifetracker-skissane app. fly deploy rebuilds the
-  # image on Fly's remote builder rather than reusing the one built above.
+  # Push the image the test job built to GHCR, tagged with the commit SHA and
+  # latest. The image output (<repo>@sha256:<digest>) is for deploying exactly
+  # that image; deploy doesn't use it yet.
+  publish:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
+
+    steps:
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+
+      - name: Load Docker image
+        run: docker load -i lifetracker-image.tar
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push to GHCR
+        id: push
+        run: |
+          docker tag lifetracker "$IMAGE:$GITHUB_SHA"
+          docker tag lifetracker "$IMAGE:latest"
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE:latest"
+          # RepoDigests holds <repo>@sha256:<digest> once pushed.
+          echo "image=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
+
+  # Deploy master to Fly.io once tests pass. FLY_API_TOKEN is a deploy token
+  # scoped to the lifetracker-skissane app. fly deploy rebuilds the image on
+  # Fly's remote builder rather than using the one pushed to GHCR above.
   deploy:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'

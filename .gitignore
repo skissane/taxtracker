@@ -33,3 +33,6 @@ coverage.xml
 .idea/
 .vscode/
 *.swp
+
+# Docker image saved by CI for the publish job
+lifetracker-image.tar
