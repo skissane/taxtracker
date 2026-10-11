@@ -1107,6 +1107,21 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
         Callers must enforce authorization before invoking this method.
         """
+        missing_required = [
+            key
+            for key, value in {
+                "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
+                "access_key_id": settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID,
+                "secret_access_key": settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY,
+            }.items()
+            if not value
+        ]
+        if missing_required:
+            raise RuntimeError(
+                "Cloud backup settings are incomplete. Missing: "
+                f"{', '.join(missing_required)}."
+            )
+
         engine = settings.DATABASES["default"]["ENGINE"]
         if engine != "django.db.backends.sqlite3":
             raise RuntimeError("Cloud backup is only available for SQLite databases.")
@@ -1134,13 +1149,18 @@ class FinancialYearAdmin(admin.ModelAdmin):
             Body=backup_bytes,
             ContentType="application/x-sqlite3",
         )
-        CloudBackupStatus.objects.update_or_create(
-            pk=CLOUD_BACKUP_STATUS_PK,
-            defaults={
-                "last_backup_at": backup_time,
-                "last_backup_object_key": object_key,
-            },
-        )
+        try:
+            CloudBackupStatus.objects.update_or_create(
+                pk=CLOUD_BACKUP_STATUS_PK,
+                defaults={
+                    "last_backup_at": backup_time,
+                    "last_backup_object_key": object_key,
+                },
+            )
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            raise RuntimeError(
+                "Cloud backup uploaded, but failed to record backup status."
+            ) from exc
         return object_key
 
     def cloud_backup_status_view(self, request):
