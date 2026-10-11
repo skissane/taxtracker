@@ -1,0 +1,47 @@
+# Fly.io deployment (see issue #47). Deploy with `fly deploy`, which builds
+# the Dockerfile on Fly's remote builder; no external registry is needed.
+#
+# One-time setup before the first deploy:
+#   fly apps create lifetracker-skissane
+#   fly volumes create lifetracker_data --region syd --size 1
+#   fly secrets set LIFETRACKER_BACKUP_S3_BUCKET_NAME=... \
+#     LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID=... \
+#     LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY=...
+#
+# On first boot, ensure_superuser creates `admin` with a random password and
+# prints it to `fly logs`, unless /data/initial_admin_password already exists.
+
+app = "lifetracker-skissane"
+primary_region = "syd"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  LIFETRACKER_ALLOWED_HOSTS = "lifetracker-skissane.fly.dev"
+  # Fly's proxy terminates TLS and always sets X-Forwarded-Proto.
+  LIFETRACKER_TRUST_X_FORWARDED_PROTO = "1"
+  # The Machine's own hostname is a random ID that changes when it's replaced.
+  LIFETRACKER_BACKUP_HOSTNAME = "fly.lifetracker-skissane"
+
+# The volume holds the SQLite database and secret key (LIFETRACKER_DATA_DIR is
+# /data in the image). A volume attaches to a single Machine, so the app must
+# run exactly one: deploy with `fly deploy --ha=false` the first time.
+[mounts]
+  source = "lifetracker_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  # Stop the Machine when idle and start it on the next request. The first
+  # request after a stop waits for boot and migrations (a few seconds).
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  # 256MB is tight for Django plus the cloud backup, which holds a serialised
+  # copy of the whole database in memory.
+  memory = "512mb"
