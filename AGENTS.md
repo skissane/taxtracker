@@ -13,7 +13,10 @@ everything CI runs, or `just --list` to see individual recipes (`lint`, `fmt-che
 avoids that by parsing the workflow YAML directly and running its `run:` steps as written
 (see its docstring for what it does and doesn't support). After `just coverage` runs, CI uploads
 `coverage.xml` to Codecov (`codecov/codecov-action`); this step needs a `CODECOV_TOKEN` repo
-secret from codecov.io and is skipped by `run_workflow_local.py` since it's a `uses:` step.
+secret from codecov.io and is skipped by `run_workflow_local.py` since it's a `uses:` step. `ci.yml` has two jobs, `test` and `deploy` (see Deployment);
+`run_workflow_local.py` runs the first job in the file unless given `--job`, so keep `test` first.
+Don't run `--job deploy` locally: it doesn't evaluate `if:`, so it would deploy your working tree
+to production.
 
 ```bash
 # Start the app (sync deps, upgrade legacy DB schema if needed, migrate,
@@ -108,7 +111,7 @@ The Django `SECRET_KEY` is stored in `~/.config/lifetracker/secret_key` (auto-ge
 
 ## Deployment
 
-Production runs on Fly.io as the app `lifetracker-skissane` (Sydney), configured by `fly.toml`: one Machine built from the `Dockerfile` by `fly deploy` (no external registry), with a Fly volume mounted at `/data` for the database and secret key, and auto-stop/start when idle. Non-secret settings (`LIFETRACKER_ALLOWED_HOSTS` etc.) are in `fly.toml`'s `[env]`; the `LIFETRACKER_BACKUP_S3_*` credentials are Fly secrets (`fly secrets set`), never in `fly.toml`. A volume attaches to one Machine, so the app must never be scaled past one (use `fly deploy --ha=false` on first deploy). `.env` is in `.dockerignore` so `fly deploy` doesn't upload it to the remote builder.
+Production runs on Fly.io as the app `lifetracker-skissane` (Sydney), configured by `fly.toml`: one Machine built from the `Dockerfile` by `fly deploy` (no external registry), with a Fly volume mounted at `/data` for the database and secret key, and auto-stop/start when idle. Non-secret settings (`LIFETRACKER_ALLOWED_HOSTS` etc.) are in `fly.toml`'s `[env]`; the `LIFETRACKER_BACKUP_S3_*` credentials are Fly secrets (`fly secrets set`), never in `fly.toml`. A volume attaches to one Machine, so the app must never be scaled past one (use `fly deploy --ha=false` on first deploy). `.env` is in `.dockerignore` so `fly deploy` doesn't upload it to the remote builder. CI's `deploy` job runs `flyctl deploy --remote-only` on every push to `master` once the `test` job passes, using the `FLY_API_TOKEN` repo secret (a deploy token scoped to the app); deploys queue rather than cancel each other. Every boot runs `migrate` against the only copy of the data, so run a cloud backup before merging a risky migration (Fly's daily volume snapshots are the only automatic fallback).
 
 ## Linting config
 

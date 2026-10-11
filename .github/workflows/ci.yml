@@ -58,3 +58,28 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
           fail_ci_if_error: true
+
+  # Deploy master to Fly.io once everything above passes. FLY_API_TOKEN is a
+  # deploy token scoped to the lifetracker-skissane app. fly deploy rebuilds the
+  # image on Fly's remote builder rather than reusing the one built above.
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # Queue rather than cancel: a cancelled deploy can leave the Machine half
+    # updated, and the later run deploys the newer commit anyway.
+    concurrency:
+      group: fly-deploy
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@1.6
+
+      - name: Deploy to Fly.io
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
