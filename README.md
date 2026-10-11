@@ -3,6 +3,52 @@
 Personal life admin tracker app. Tax return tracking (`taxtracker`) is currently its
 only module.
 
+## Cloud backup
+
+As well as downloading a backup of the database (**💾 Download DB Backup** on the
+Financial Years list), you can upload one to an S3-compatible bucket: AWS S3,
+Cloudflare R2, Backblaze B2 and others. Open **☁️ Cloud Backup Status** on the
+Financial Years list (superusers only) to see when the last backup ran and to click
+**Run Backup Now**. Each backup is uploaded as a new object named
+`<hostname>/db-backup.<YYYY-MM-DD.HH.MM.SS>.sqlite3` (the timestamp is in UTC),
+e.g. `my-laptop.local/db-backup.2026-10-11.01.13.53.sqlite3`, so backups from each
+machine or environment sit in their own folder. Backups only run when you click the
+button; nothing schedules them.
+
+The bucket and credentials come from these environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `LIFETRACKER_BACKUP_S3_BUCKET_NAME` | Required. Bucket to upload to. |
+| `LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID` | Required. Access key ID. |
+| `LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY` | Required. Secret access key. |
+| `LIFETRACKER_BACKUP_S3_ENDPOINT_URL` | The provider's S3 endpoint, e.g. `https://<account-id>.r2.cloudflarestorage.com`. Leave unset for AWS S3. |
+| `LIFETRACKER_BACKUP_S3_REGION_NAME` | Region, e.g. `ap-southeast-2` (use `auto` for R2). |
+| `LIFETRACKER_BACKUP_HOSTNAME` | Overrides the `<hostname>` object key prefix (default: the machine's hostname, as `hostname` prints it). `just docker-run` sets it to `docker.<host's hostname>`, since the Docker container has its own separate database and a meaningless hostname. |
+
+Until the required ones are set, the button is disabled and the page lists the
+missing variables.
+
+When running with `./run.sh`, the easiest place for them is a `.env` file in the
+repo root, which `run.sh` loads automatically:
+
+```dotenv
+LIFETRACKER_BACKUP_S3_BUCKET_NAME=my-lifetracker-backups
+LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID=...
+LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY=...
+```
+
+It's in dotenv format (`NAME=value` lines, `#` comments), read by uv rather than
+run as a shell script. Variables already set in your shell take precedence over the
+file. `.env` is gitignored, but since it holds credentials, also make it readable
+only by you (`chmod 600 .env`). To use the same file for a one-off command, run
+`UV_ENV_FILE=.env uv run python manage.py ...`.
+
+`just docker-run` passes the same `.env` to the container with `--env-file`. With
+plain `docker run`, pass the variables with `-e`, or the file with `--env-file .env`.
+Docker reads the file more literally than uv does: it doesn't strip quotes, so leave
+values unquoted.
+
 ## Docker
 
 Build the image with:
@@ -96,6 +142,8 @@ The image defaults to `LIFETRACKER_DEBUG=0`, and then refuses to start unless
 | `LIFETRACKER_ALLOWED_HOSTS` | Required. Hostnames the app answers to, e.g. `tax.example.com`. |
 | `LIFETRACKER_CSRF_TRUSTED_ORIGINS` | Public origins, e.g. `https://tax.example.com`. Needed behind a TLS-terminating reverse proxy, or the admin login fails its CSRF check. |
 | `LIFETRACKER_TRUST_X_FORWARDED_PROTO` | Set to `1` instead of listing origins, if the proxy always sets `X-Forwarded-Proto` and the container is reachable only through it. |
+| `LIFETRACKER_BACKUP_S3_*` | Optional. Cloud backup bucket and credentials; see [Cloud backup](#cloud-backup). |
+| `LIFETRACKER_BACKUP_HOSTNAME` | Recommended with cloud backup. Prefix for backup object keys; without it the prefix is the container's hostname, a random ID by default. |
 
 For example:
 

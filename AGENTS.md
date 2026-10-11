@@ -71,6 +71,7 @@ tests.cli` still works as an unparallelised fallback, referencing these as `test
 - **`FileType` / `MimeType` / `FileExtension`** (core) — file type registry. Each `FileType` must have exactly one primary MIME type and one primary extension; enforced by `_AtLeastOnePrimaryFormSet`.
 - **`DBStoredFile`** (core) — raw binary storage row; managed by `DatabaseStorage`.
 - **`Attachment`** (taxtracker) — file attached to an `Item`. On `save()`, auto-populates `title` from filename, `file_type` by extension lookup, and `date` by regex-extracting ISO/compact dates from the filename.
+- **`CloudBackupStatus`** (taxtracker) — single row (`CLOUD_BACKUP_STATUS_PK`) recording the time, S3 object key and size (bytes) of the last successful cloud backup.
 
 ## Admin extensions
 
@@ -79,6 +80,7 @@ tests.cli` still works as an unparallelised fallback, referencing these as `test
 - **Single-year ZIP** (`download-zip/`) — all attachments in a folder hierarchy with an `index.md`.
 - **Multi-year ZIP** (`download-multi-zip/`) — multiple FYs, each under a top-level `FY<year>/` prefix. Also supports "View Index (Markdown)" action.
 - **DB backup** (`download-db-backup/`) — superuser-only SQLite serialise download.
+- **Cloud backup** (`cloud-backup/`) — superuser-only status page with a "Run Backup Now" button that uploads the same serialised SQLite DB to an S3-compatible bucket (via `boto3`) as `<hostname>/db-backup.<YYYY-MM-DD.HH.MM.SS>.sqlite3`, where `<hostname>` is `LIFETRACKER_BACKUP_HOSTNAME` if set, else `socket.gethostname()` (`just docker-run` sets it to `docker.$(hostname)`, as the container's DB is separate from local dev's and its own hostname is a random ID); the status page shows it. Manual only; nothing schedules it. Configured by the `LIFETRACKER_BACKUP_S3_*` env vars read in `settings.py`: `BUCKET_NAME`, `ACCESS_KEY_ID` and `SECRET_ACCESS_KEY` are required (the button is disabled and the missing names are listed until they're set); `ENDPOINT_URL` (blank = AWS) and `REGION_NAME` are optional. Locally, these normally go in `.env` (see below).
 - **Copy to new year** (`copy-to-new-year/`) — clones the item tree (without notes/status/attachments) into `year+1`.
 
 `ItemAdmin` adds:
@@ -101,6 +103,8 @@ tests.cli` still works as an unparallelised fallback, referencing these as `test
 ## Secret key
 
 The Django `SECRET_KEY` is stored in `~/.config/lifetracker/secret_key` (auto-generated on first run). Override with `LIFETRACKER_SECRET_KEY_FILE`. On first run under the new config location, if a key from the pre-rename `~/.config/taxtracker/secret_key` exists, it's copied forward automatically so existing sessions/logins survive. The key's directory is `settings.LIFETRACKER_CONFIG_DIR`: `$LIFETRACKER_CONFIG_DIR` if set, else `$LIFETRACKER_DATA_DIR` if set (the Docker image sets it to `/data`), else `~/.config/lifetracker`; the legacy-key copy only happens for the `~/.config` default. `LIFETRACKER_DATA_DIR` also moves the database to `$LIFETRACKER_DATA_DIR/db.sqlite3` (overridable with `LIFETRACKER_DB_PATH`). The `ensure_superuser` command reads an optional initial admin password from `initial_admin_password` in the config directory, overridable with `LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE`.
+
+`run.sh` loads a `.env` file from the repo root, if present, by exporting `UV_ENV_FILE=.env` so every `uv run` it makes sees the same variables (skipped if `UV_ENV_FILE` is already set). uv parses it as dotenv, not shell, so it isn't executed. Variables already set in the shell override the file. A missing file is a hard error in uv, hence the existence check. For ad-hoc commands outside `run.sh`, use `UV_ENV_FILE=.env uv run python manage.py ...`. `.env` and `.env.*` are gitignored. Its main use is holding the cloud backup's `LIFETRACKER_BACKUP_S3_*` credentials, so they don't have to be exported in every shell. `just docker-run` also passes it to the container via `--env-file`; Docker keeps quotes as part of the value (uv strips them), so values in `.env` should be unquoted. The recipe's own `-e` flags override the file.
 
 ## Linting config
 

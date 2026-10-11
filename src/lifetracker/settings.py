@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 import os
 import secrets
+import socket
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -204,6 +205,29 @@ DATABASES = {
         "NAME": Path(os.environ.get("LIFETRACKER_DB_PATH", _default_db_path)),
     }
 }
+
+# S3-compatible cloud backup destination (supports AWS S3, Cloudflare R2,
+# Backblaze B2 S3 API, etc.). The endpoint is optional (leave blank for AWS).
+LIFETRACKER_BACKUP_S3_ENDPOINT_URL = os.environ.get(
+    "LIFETRACKER_BACKUP_S3_ENDPOINT_URL", ""
+).strip()
+LIFETRACKER_BACKUP_S3_BUCKET_NAME = os.environ.get(
+    "LIFETRACKER_BACKUP_S3_BUCKET_NAME", ""
+).strip()
+LIFETRACKER_BACKUP_S3_REGION_NAME = os.environ.get(
+    "LIFETRACKER_BACKUP_S3_REGION_NAME", ""
+).strip()
+LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID = os.environ.get(
+    "LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID", ""
+).strip()
+LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY = os.environ.get(
+    "LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY", ""
+).strip()
+# Prefixed to backup object keys so backups from different environments (e.g.
+# local dev vs. Docker, which use separate databases) are distinguishable.
+LIFETRACKER_BACKUP_HOSTNAME = (
+    os.environ.get("LIFETRACKER_BACKUP_HOSTNAME", "").strip() or socket.gethostname()
+)
 
 
 # Password validation
