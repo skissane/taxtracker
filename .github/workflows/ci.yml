@@ -53,7 +53,7 @@ jobs:
         run: just docker-build
 
       # Hand the tested image to the publish job, so the image pushed to GHCR
-      # is the one built and checked here, not a rebuild. This job only needs
+      # and deployed is the one built and checked here, not a rebuild. This job only needs
       # read access; pushing happens in publish, which doesn't run repo code.
       - name: Save Docker image
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
@@ -75,8 +75,7 @@ jobs:
           fail_ci_if_error: true
 
   # Push the image the test job built to GHCR, tagged with the commit SHA and
-  # latest. The image output (<repo>@sha256:<digest>) is for deploying exactly
-  # that image; deploy doesn't use it yet.
+  # latest. Its image output (<repo>@sha256:<digest>) is what deploy deploys.
   publish:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
@@ -114,12 +113,13 @@ jobs:
           # RepoDigests holds <repo>@sha256:<digest> once pushed.
           echo "image=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
 
-  # Deploy master to Fly.io once tests pass. FLY_API_TOKEN is a deploy token
-  # scoped to the lifetracker-skissane app. fly deploy rebuilds the image on
-  # Fly's remote builder rather than using the one pushed to GHCR above.
+  # Deploy master to Fly.io once the image is published. FLY_API_TOKEN is a
+  # deploy token scoped to the lifetracker-skissane app. Fly pulls the image
+  # from GHCR by digest, so it's exactly the one the test job built; that
+  # overrides fly.toml's [build] image (:latest), which could have moved on if
+  # a later run has published since. The checkout is only for fly.toml.
   deploy:
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: publish
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -135,6 +135,9 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@1.6
 
       - name: Deploy to Fly.io
-        run: flyctl deploy --remote-only
+        # Fail rather than fall back to fly.toml's :latest if publish produced
+        # no digest.
+        run: flyctl deploy --image "${IMAGE:?publish output no image}"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          IMAGE: ${{ needs.publish.outputs.image }}

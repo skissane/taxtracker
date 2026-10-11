@@ -1,5 +1,7 @@
-# Fly.io deployment (see issue #47). Deploy with `fly deploy`, which builds
-# the Dockerfile on Fly's remote builder; no external registry is needed.
+# Fly.io deployment (see issue #47). Fly runs the image CI publishes to GHCR
+# from master; nothing is built on Fly. CI deploys each commit's image by
+# digest (`fly deploy --image ...@sha256:...`); a manual `fly deploy` deploys
+# whatever :latest is, i.e. master's most recently published image.
 #
 # One-time setup before the first deploy:
 #   fly apps create lifetracker-skissane
@@ -15,7 +17,7 @@ app = "lifetracker-skissane"
 primary_region = "syd"
 
 [build]
-  dockerfile = "Dockerfile"
+  image = "ghcr.io/skissane/taxtracker:latest"
 
 [env]
   LIFETRACKER_ALLOWED_HOSTS = "lifetracker-skissane.fly.dev"
