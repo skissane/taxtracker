@@ -1172,7 +1172,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
                     "last_backup_object_key": object_key,
                 },
             )
-        except Exception as exc:  # pragma: no cover - defensive fallback
+        except Exception as exc:
             raise CloudBackupStatusUpdateError(object_key) from exc
         return object_key
 

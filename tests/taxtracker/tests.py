@@ -6,6 +6,8 @@ import zipfile
 from unittest import mock
 
 import pytest
+from botocore.exceptions import ClientError
+from django.contrib import admin
 from django.contrib.auth.models import Permission, User
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
@@ -223,6 +225,20 @@ class ReceivedDocumentModelTests(TestCase):
         docs = list(ReceivedDocument.objects.all())
         # Default ordering is descending by date.
         self.assertEqual(docs, [later, earlier])
+
+
+class CloudBackupStatusModelTests(TestCase):
+    def test_str_never_backed_up(self):
+        self.assertEqual(
+            str(CloudBackupStatus()), "Cloud backup status: never backed up"
+        )
+
+    def test_str_with_last_backup(self):
+        backup_time = datetime.datetime(2026, 1, 2, 3, 4, 5, tzinfo=datetime.UTC)
+        status = CloudBackupStatus(last_backup_at=backup_time)
+        self.assertEqual(
+            str(status), f"Cloud backup status: last backup at {backup_time}"
+        )
 
 
 class CopyItemsTests(TestCase):
@@ -681,6 +697,101 @@ class AdminViewTests(TestCase):
         self.assertIsNotNone(status.last_backup_at)
         self.assertEqual(
             status.last_backup_object_key, put_object.call_args.kwargs["Key"]
+        )
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="",
+    )
+    @mock.patch("lifetracker.taxtracker.admin.boto3.client")
+    def test_cloud_backup_post_with_missing_settings_shows_error(self, mock_client):
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_status")
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Cloud backup settings are incomplete. Missing: "
+            "LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID, "
+            "LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY.",
+        )
+        mock_client.assert_not_called()
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    )
+    def test_run_cloud_backup_now_rejects_missing_settings(self):
+        model_admin = admin.site._registry[FinancialYear]
+        with self.assertRaisesMessage(
+            RuntimeError, "Missing: LIFETRACKER_BACKUP_S3_BUCKET_NAME."
+        ):
+            model_admin._run_cloud_backup_now()
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    )
+    @mock.patch("lifetracker.taxtracker.admin.boto3.client")
+    def test_cloud_backup_rejects_non_sqlite_engine(self, mock_client):
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_status")
+        with pytest.warns(UserWarning, match="Overriding setting DATABASES"):
+            with override_settings(
+                DATABASES={
+                    "default": {
+                        "ENGINE": "django.db.backends.postgresql",
+                        "NAME": "irrelevant",
+                    }
+                }
+            ):
+                response = self.client.post(url)
+        self.assertContains(
+            response,
+            "Cloud backup failed: Cloud backup is only available for SQLite databases.",
+        )
+        mock_client.assert_not_called()
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    )
+    @mock.patch("lifetracker.taxtracker.admin.boto3.client")
+    def test_cloud_backup_upload_error_shows_error(self, mock_client):
+        mock_client.return_value.put_object.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
+            "PutObject",
+        )
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_status")
+        response = self.client.post(url)
+        self.assertContains(response, "Cloud backup failed:")
+        self.assertContains(response, "AccessDenied")
+        self.assertFalse(
+            CloudBackupStatus.objects.filter(pk=CLOUD_BACKUP_STATUS_PK).exists()
+        )
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    )
+    @mock.patch("lifetracker.taxtracker.admin.boto3.client")
+    def test_cloud_backup_status_write_failure_shows_warning(self, mock_client):
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_status")
+        with mock.patch.object(
+            CloudBackupStatus.objects,
+            "update_or_create",
+            side_effect=IntegrityError("boom"),
+        ):
+            response = self.client.post(url)
+        mock_client.return_value.put_object.assert_called_once()
+        key = mock_client.return_value.put_object.call_args.kwargs["Key"]
+        self.assertContains(
+            response,
+            f"Cloud backup uploaded successfully as {key}, but failed to record "
+            "backup status.",
         )
 
     def test_item_changelist_shows_year_link(self):
