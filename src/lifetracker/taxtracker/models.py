@@ -162,6 +162,10 @@ class FinancialYearStatusHistory(models.Model):
         )
 
 
+# The only allowed primary key for CloudBackupStatus, which is a single row.
+CLOUD_BACKUP_STATUS_PK = 1
+
+
 class CloudBackupStatus(models.Model):
     """Tracks the latest successful cloud backup upload."""
 
@@ -174,6 +178,12 @@ class CloudBackupStatus(models.Model):
     class Meta:
         verbose_name = "Cloud Backup Status"
         verbose_name_plural = "Cloud Backup Statuses"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(pk=CLOUD_BACKUP_STATUS_PK),
+                name="cloudbackupstatus_singleton",
+            ),
+        ]
 
     def __str__(self):
         if self.last_backup_at is None:

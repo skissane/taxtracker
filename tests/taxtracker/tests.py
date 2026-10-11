@@ -21,7 +21,6 @@ from django.utils import timezone
 
 from lifetracker.core.models import DBStoredFile, FileExtension, FileType
 from lifetracker.taxtracker.admin import (
-    CLOUD_BACKUP_STATUS_PK,
     _adjust_notes_headings,
     _attachment_date_warning,
 )
@@ -32,6 +31,7 @@ from lifetracker.taxtracker.archives import (
 )
 from lifetracker.taxtracker.forms import AttachmentForm, FlexibleDateField
 from lifetracker.taxtracker.models import (
+    CLOUD_BACKUP_STATUS_PK,
     Attachment,
     CloudBackupStatus,
     FinancialYear,
@@ -239,6 +239,11 @@ class CloudBackupStatusModelTests(TestCase):
         self.assertEqual(
             str(status), f"Cloud backup status: last backup at {backup_time}"
         )
+
+    def test_only_singleton_pk_allowed(self):
+        CloudBackupStatus.objects.create(pk=CLOUD_BACKUP_STATUS_PK)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            CloudBackupStatus.objects.create(pk=CLOUD_BACKUP_STATUS_PK + 1)
 
 
 class CopyItemsTests(TestCase):

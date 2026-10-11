@@ -29,6 +29,7 @@ from lifetracker.taxtracker.forms import (
     ReceivedDocumentImportArchiveForm,
 )
 from lifetracker.taxtracker.models import (
+    CLOUD_BACKUP_STATUS_PK,
     Attachment,
     CloudBackupStatus,
     FinancialYear,
@@ -41,9 +42,6 @@ from lifetracker.taxtracker.models import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-CLOUD_BACKUP_STATUS_PK = 1
-
 
 logger = logging.getLogger(__name__)
 

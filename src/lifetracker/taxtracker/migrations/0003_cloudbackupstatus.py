@@ -38,6 +38,12 @@ class Migration(migrations.Migration):
             options={
                 "verbose_name": "Cloud Backup Status",
                 "verbose_name_plural": "Cloud Backup Statuses",
+                "constraints": [
+                    models.CheckConstraint(
+                        condition=models.Q(("pk", 1)),
+                        name="cloudbackupstatus_singleton",
+                    )
+                ],
             },
         ),
     ]
