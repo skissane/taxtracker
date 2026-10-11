@@ -24,7 +24,7 @@ class Migration(migrations.Migration):
                 ("last_backup_at", models.DateTimeField(blank=True, null=True)),
                 (
                     "last_backup_object_key",
-                    models.CharField(blank=True, max_length=255),
+                    models.CharField(blank=True, max_length=1024),
                 ),
                 (
                     "last_backup_size",

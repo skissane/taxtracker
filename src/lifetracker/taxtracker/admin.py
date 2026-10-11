@@ -5,6 +5,7 @@ import zipfile
 from pathlib import Path
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 from django.contrib import admin, messages
@@ -44,6 +45,15 @@ from lifetracker.taxtracker.models import (
 # ---------------------------------------------------------------------------
 
 logger = logging.getLogger(__name__)
+
+# The upload runs inside the request, so bound how long a hung endpoint can stall
+# it: botocore's defaults (60s timeouts, several retries) can outlast gunicorn's
+# 120s worker timeout. These are per socket operation, not for the whole upload.
+CLOUD_BACKUP_S3_CONFIG = Config(
+    connect_timeout=10,
+    read_timeout=30,
+    retries={"mode": "standard", "max_attempts": 2},
+)
 
 
 class CloudBackupStatusUpdateError(RuntimeError):
@@ -1157,13 +1167,18 @@ class FinancialYearAdmin(admin.ModelAdmin):
         )
         endpoint_url = settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL or None
         region_name = settings.LIFETRACKER_BACKUP_S3_REGION_NAME or None
-        s3_client = boto3.client(
-            "s3",
-            endpoint_url=endpoint_url,
-            region_name=region_name,
-            aws_access_key_id=settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY,
-        )
+        try:
+            s3_client = boto3.client(
+                "s3",
+                endpoint_url=endpoint_url,
+                region_name=region_name,
+                aws_access_key_id=settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY,
+                config=CLOUD_BACKUP_S3_CONFIG,
+            )
+        except ValueError as exc:
+            # e.g. a malformed endpoint URL ("Invalid endpoint: ...").
+            raise RuntimeError(f"Invalid S3 configuration: {exc}") from exc
         s3_client.put_object(
             Bucket=settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
             Key=object_key,

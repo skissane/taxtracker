@@ -170,7 +170,8 @@ class CloudBackupStatus(models.Model):
     """Tracks the latest successful cloud backup upload."""
 
     last_backup_at = models.DateTimeField(null=True, blank=True)
-    last_backup_object_key = models.CharField(max_length=255, blank=True)
+    # 1024 is S3's maximum object key length.
+    last_backup_object_key = models.CharField(max_length=1024, blank=True)
     last_backup_size = models.PositiveBigIntegerField(
         null=True, blank=True, help_text="Size of the last backup, in bytes."
     )

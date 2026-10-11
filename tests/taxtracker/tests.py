@@ -21,6 +21,7 @@ from django.utils import timezone
 
 from lifetracker.core.models import DBStoredFile, FileExtension, FileType
 from lifetracker.taxtracker.admin import (
+    CLOUD_BACKUP_S3_CONFIG,
     _adjust_notes_headings,
     _attachment_date_warning,
 )
@@ -699,6 +700,7 @@ class AdminViewTests(TestCase):
             region_name="auto",
             aws_access_key_id="access-key",
             aws_secret_access_key="secret-key",
+            config=CLOUD_BACKUP_S3_CONFIG,
         )
         put_object = mock_client.return_value.put_object
         put_object.assert_called_once()
@@ -798,6 +800,25 @@ class AdminViewTests(TestCase):
             "Cloud backup failed: Cloud backup is only available for SQLite databases.",
         )
         mock_client.assert_not_called()
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_ENDPOINT_URL="not a url",
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    )
+    def test_cloud_backup_invalid_endpoint_shows_error(self):
+        # Uses the real boto3.client, which raises ValueError for this endpoint.
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_status")
+        response = self.client.post(url)
+        self.assertContains(
+            response,
+            "Cloud backup failed: Invalid S3 configuration: "
+            "Invalid endpoint: not a url",
+        )
+        self.assertFalse(
+            CloudBackupStatus.objects.filter(pk=CLOUD_BACKUP_STATUS_PK).exists()
+        )
 
     @override_settings(
         LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
