@@ -585,18 +585,23 @@ class ProjectEntryPointTests(TestCase):
 
 
 class AdminSiteHeaderTests(TestCase):
+    COMMIT_ID = "0123abc456def7890123abc456def7890123abcd"
+
     def test_includes_commit_link_and_instance_name(self):
         self.assertEqual(
             str(
                 _build_admin_site_header(
-                    commit_id="abc123",
+                    commit_id=self.COMMIT_ID,
                     commit_url_base="https://github.com/skissane/taxtracker/commit/",
                     instance_name="instance.local",
                 )
             ),
             (
-                'Life Tracker <code><a href="https://github.com/skissane/taxtracker/commit/abc123">'
-                "abc123</a></code> <code>instance.local</code>"
+                "Life Tracker <code><a"
+                f' href="https://github.com/skissane/taxtracker/commit/{self.COMMIT_ID}"'
+                ' target="_blank" rel="noopener noreferrer"'
+                f' title="{self.COMMIT_ID}">0123abc</a></code>'
+                " <code>instance.local</code>"
             ),
         )
 
@@ -616,14 +621,17 @@ class AdminSiteHeaderTests(TestCase):
         self.assertEqual(
             str(
                 _build_admin_site_header(
-                    commit_id="abc123",
+                    commit_id=self.COMMIT_ID,
                     commit_url_base="https://github.com/skissane/taxtracker/commit",
                     instance_name="instance.local",
                 )
             ),
             (
-                'Life Tracker <code><a href="https://github.com/skissane/taxtracker/commit/abc123">'
-                "abc123</a></code> <code>instance.local</code>"
+                "Life Tracker <code><a"
+                f' href="https://github.com/skissane/taxtracker/commit/{self.COMMIT_ID}"'
+                ' target="_blank" rel="noopener noreferrer"'
+                f' title="{self.COMMIT_ID}">0123abc</a></code>'
+                " <code>instance.local</code>"
             ),
         )
 
