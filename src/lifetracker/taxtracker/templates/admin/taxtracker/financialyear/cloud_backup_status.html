@@ -88,7 +88,7 @@
         <th class="tt-label">Last Successful Backup</th>
         <td>
           {% if status.last_backup_at %}
-            {{ status.last_backup_at|date:"Y-m-d H:i:s T" }}
+            {{ status.last_backup_at|date:"Y-m-d H:i:s T" }} ({{ last_backup_ago }} ago)
           {% else %}
             Never
           {% endif %}

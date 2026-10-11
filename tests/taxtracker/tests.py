@@ -651,6 +651,17 @@ class AdminViewTests(TestCase):
         self.assertContains(response, "<code>test-host.local</code>", html=True)
         self.assertContains(response, "Never")
 
+    def test_cloud_backup_status_view_shows_time_since_last_backup(self):
+        CloudBackupStatus.objects.create(
+            pk=CLOUD_BACKUP_STATUS_PK,
+            last_backup_at=timezone.now() - datetime.timedelta(days=4, hours=3),
+            last_backup_object_key="host.db-backup.2026-01-01.00.00.00.sqlite3",
+        )
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_status")
+        response = self.client.get(url)
+        self.assertContains(response, "(4\xa0days ago)")
+        self.assertNotContains(response, "hours")
+
     def test_cloud_backup_status_requires_superuser(self):
         non_super = User.objects.create_user("regular2", "r2@example.com", "pass")
         non_super.is_staff = True

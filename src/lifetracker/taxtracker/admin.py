@@ -15,6 +15,7 @@ from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
+from django.utils.timesince import timesince
 
 from lifetracker.core.models import DBStoredFile
 from lifetracker.taxtracker.archives import (
@@ -1224,6 +1225,12 @@ class FinancialYearAdmin(admin.ModelAdmin):
             "title": "Cloud Backup Status",
             "config": config,
             "status": status,
+            # One unit only ("4 days", not "4 days, 3 hours"), for a quick glance.
+            "last_backup_ago": (
+                timesince(status.last_backup_at, depth=1)
+                if status.last_backup_at
+                else None
+            ),
             "missing_required": missing_required,
             "opts": self.model._meta,
         }
