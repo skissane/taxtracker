@@ -612,6 +612,21 @@ class AdminSiteHeaderTests(TestCase):
             "Life Tracker <code>instance.local</code>",
         )
 
+    def test_accepts_base_url_without_trailing_slash(self):
+        self.assertEqual(
+            str(
+                _build_admin_site_header(
+                    commit_id="abc123",
+                    commit_url_base="https://github.com/skissane/taxtracker/commit",
+                    instance_name="instance.local",
+                )
+            ),
+            (
+                'Life Tracker <code><a href="https://github.com/skissane/taxtracker/commit/abc123">'
+                "abc123</a></code> <code>instance.local</code>"
+            ),
+        )
+
 
 class _SettingsSubprocessMixin:
     """settings.py computes its values at import time, from files under $HOME

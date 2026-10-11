@@ -1,5 +1,3 @@
-from urllib.parse import urljoin
-
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
@@ -7,11 +5,15 @@ from django.urls import path
 from django.utils.html import format_html
 
 
+def _commit_url(commit_url_base, commit_id):
+    return f"{commit_url_base.rstrip('/')}/{commit_id}"
+
+
 def _build_admin_site_header(*, commit_id, commit_url_base, instance_name):
     if commit_id:
         return format_html(
             'Life Tracker <code><a href="{}">{}</a></code> <code>{}</code>',
-            urljoin(commit_url_base, commit_id),
+            _commit_url(commit_url_base, commit_id),
             commit_id,
             instance_name,
         )
