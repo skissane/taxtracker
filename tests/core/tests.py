@@ -1,4 +1,5 @@
 import ast
+import importlib
 import io
 import os
 import subprocess
@@ -16,7 +17,7 @@ from django.core.files.base import ContentFile
 from django.core.management import call_command
 from django.db import IntegrityError
 from django.forms import inlineformset_factory
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from lifetracker.asgi import application as asgi_application
@@ -54,9 +55,20 @@ class GoogleSSOSettingsTests(TestCase):
             "lifetracker.google_sso.pre_create_user",
         )
 
+    @override_settings(
+        GOOGLE_SSO_ENABLED=True,
+        GOOGLE_SSO_CLIENT_ID="test-client-id",
+        GOOGLE_SSO_CLIENT_SECRET="test-client-secret",
+        GOOGLE_SSO_ADMIN_ENABLED=True,
+    )
     def test_google_sso_admin_login_button_renders_when_enabled(self):
-        self.assertTrue(settings.GOOGLE_SSO_ADMIN_ENABLED)
-        response = self.client.get(reverse("admin:login"))
+        importlib.reload(importlib.import_module("django_google_sso.urls"))
+        admin.site.login_template = "google_sso/login.html"
+        try:
+            response = self.client.get(reverse("admin:login"))
+        finally:
+            admin.site.login_template = None
+
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Sign in with Google")
         self.assertContains(response, 'href="/google_sso/login/"')
