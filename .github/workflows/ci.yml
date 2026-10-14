@@ -8,6 +8,8 @@ on:
 
 jobs:
   test:
+    needs: dependabot-fix
+    if: ${{ always() && (needs.dependabot-fix.result == 'skipped' || needs.dependabot-fix.outputs.pushed_changes == 'false') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -33,6 +35,9 @@ jobs:
 
       - name: Install dependencies
         run: just sync
+
+      - name: Check dependency minimum versions
+        run: just requirements-check
 
       - name: Lint with ruff
         run: just lint
@@ -73,6 +78,64 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
           fail_ci_if_error: true
+
+  dependabot-fix:
+    if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      pushed_changes: ${{ steps.commit-and-push.outputs.pushed }}
+
+    steps:
+      - name: Check token configuration
+        run: |
+          if [ -z "${{ secrets.DEPENDABOT_FIX_TOKEN }}" ]; then
+            echo "DEPENDABOT_FIX_TOKEN secret is not set" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.DEPENDABOT_FIX_TOKEN }}
+          ref: ${{ github.head_ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.10"
+
+      - name: Set up Python
+        run: uv python install 3.14.3
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+        with:
+          just-version: "1.58.0"
+
+      - name: Install dependencies
+        run: just sync
+
+      - name: Update dependency minimum versions
+        run: just requirements-fix
+
+      - name: Update lockfile
+        run: uv lock
+
+      - name: Commit and push if needed
+        id: commit-and-push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml uv.lock
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "chore: sync dependency minimum versions"
+            git push
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          fi
 
   # Push the image the test job built to GHCR, tagged with the commit SHA and
   # latest. Its image output (<repo>@sha256:<digest>) is what deploy deploys.

@@ -10,6 +10,14 @@ lock-check:
 sync:
     uv sync --group dev
 
+# Check that dependency minimums in pyproject.toml match installed versions
+requirements-check:
+    uv run --group dev python scripts/requirements_min_versions.py check
+
+# Rewrite dependency minimums in pyproject.toml to installed versions
+requirements-fix:
+    uv run --group dev python scripts/requirements_min_versions.py fix
+
 # Lint Python code with ruff
 lint:
     uv run --group dev ruff check .
@@ -98,4 +106,4 @@ check: lint fmt-check lint-templates fmt-check-templates
 fix: lint-fix fmt fmt-templates
 
 # Run everything the CI workflow runs
-ci: lock-check sync check coverage docker-build
+ci: lock-check sync requirements-check check coverage docker-build
