@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 import coverage
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -17,8 +18,6 @@ from django.db import IntegrityError
 from django.forms import inlineformset_factory
 from django.test import Client, TestCase
 from django.urls import reverse
-
-from django.conf import settings
 
 from lifetracker.asgi import application as asgi_application
 from lifetracker.core.admin import (
@@ -46,8 +45,14 @@ class GoogleSSOSettingsTests(TestCase):
     def test_google_sso_defaults_block_new_accounts(self):
         self.assertFalse(settings.GOOGLE_SSO_AUTO_CREATE_USERS)
         self.assertFalse(settings.GOOGLE_SSO_AUTO_CREATE_FIRST_SUPERUSER)
-        self.assertEqual(settings.GOOGLE_SSO_PRE_VALIDATE_CALLBACK, "lifetracker.google_sso.pre_validate_user")
-        self.assertEqual(settings.GOOGLE_SSO_PRE_CREATE_CALLBACK, "lifetracker.google_sso.pre_create_user")
+        self.assertEqual(
+            settings.GOOGLE_SSO_PRE_VALIDATE_CALLBACK,
+            "lifetracker.google_sso.pre_validate_user",
+        )
+        self.assertEqual(
+            settings.GOOGLE_SSO_PRE_CREATE_CALLBACK,
+            "lifetracker.google_sso.pre_create_user",
+        )
 
     def test_google_sso_admin_login_button_renders_when_enabled(self):
         self.assertTrue(settings.GOOGLE_SSO_ADMIN_ENABLED)

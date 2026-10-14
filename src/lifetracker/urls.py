@@ -39,6 +39,9 @@ urlpatterns = [
     # There's no non-admin site yet, so send the root URL to the admin. Temporary
     # (302) rather than permanent, so browsers don't cache it once there is one.
     path("", RedirectView.as_view(pattern_name="admin:index"), name="root"),
-    path("google_sso/", include("django_google_sso.urls", namespace="django_google_sso")),
+    path(
+        "google_sso/",
+        include("django_google_sso.urls", namespace="django_google_sso"),
+    ),
     path("admin/", admin.site.urls),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
