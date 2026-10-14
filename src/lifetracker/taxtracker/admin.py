@@ -820,7 +820,7 @@ def _build_fy_index_md(fy, prefix="", zf=None):
                         zf.writestr(zip_path, fh.read())
                 else:
                     attachment.file.open("rb").close()
-            except OSError, DBStoredFile.DoesNotExist, ValueError:
+            except (OSError, DBStoredFile.DoesNotExist, ValueError):
                 # File missing or stored blob reference is invalid/corrupt –
                 # skip but record in index.
                 missing = True

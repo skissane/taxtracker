@@ -165,6 +165,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django_google_sso",
     "lifetracker.core",
     "lifetracker.taxtracker",
     "lifetracker.tasktracker",
@@ -246,6 +247,47 @@ LIFETRACKER_BACKUP_HOSTNAME = (
     or socket.gethostname()
 )
 
+# Google SSO: disabled by default unless credentials are configured. When enabled,
+# only explicitly allowlisted Google identities may sign in. New users are never
+# auto-created; an operator must explicitly add a matching email to the Django
+# user record (or allowlist) before the Google account can log in.
+_google_sso_client_id = (
+    os.environ.get("GOOGLE_SSO_CLIENT_ID")
+    or os.environ.get("LIFETRACKER_GOOGLE_SSO_CLIENT_ID", "")
+).strip()
+_google_sso_client_secret = (
+    os.environ.get("GOOGLE_SSO_CLIENT_SECRET")
+    or os.environ.get("LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET", "")
+).strip()
+_google_sso_project_id = (
+    os.environ.get("GOOGLE_SSO_PROJECT_ID")
+    or os.environ.get("LIFETRACKER_GOOGLE_SSO_PROJECT_ID", "")
+).strip()
+GOOGLE_SSO_ENABLED = bool(_google_sso_client_id and _google_sso_client_secret)
+GOOGLE_SSO_CLIENT_ID = _google_sso_client_id
+GOOGLE_SSO_PROJECT_ID = _google_sso_project_id
+GOOGLE_SSO_CLIENT_SECRET = _google_sso_client_secret
+GOOGLE_SSO_ALLOWABLE_DOMAINS = _env_list("LIFETRACKER_GOOGLE_SSO_ALLOWABLE_DOMAINS")
+_google_sso_allowed_emails = _env_list("LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS")
+GOOGLE_SSO_ALLOWABLE_EMAILS = _google_sso_allowed_emails
+GOOGLE_SSO_ALLOWED_EMAILS = _google_sso_allowed_emails
+GOOGLE_SSO_STAFF_LIST = _env_list("LIFETRACKER_GOOGLE_SSO_STAFF_LIST")
+GOOGLE_SSO_SUPERUSER_LIST = _env_list("LIFETRACKER_GOOGLE_SSO_SUPERUSER_LIST")
+GOOGLE_SSO_AUTO_CREATE_USERS = False
+GOOGLE_SSO_AUTO_CREATE_FIRST_SUPERUSER = False
+GOOGLE_SSO_PRE_VALIDATE_CALLBACK = "lifetracker.google_sso.pre_validate_user"
+GOOGLE_SSO_PRE_CREATE_CALLBACK = "lifetracker.google_sso.pre_create_user"
+GOOGLE_SSO_PRE_LOGIN_CALLBACK = "lifetracker.google_sso.pre_login_user"
+GOOGLE_SSO_LOGIN_FAILED_URL = "admin:index"
+GOOGLE_SSO_NEXT_URL = "admin:index"
+GOOGLE_SSO_SHOW_FAILED_LOGIN_MESSAGE = True
+GOOGLE_SSO_ADMIN_ENABLED = True
+GOOGLE_SSO_PAGES_ENABLED = False
+_google_sso_callback_domain = (
+    os.environ.get("GOOGLE_SSO_CALLBACK_DOMAIN")
+    or os.environ.get("LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN", "")
+).strip()
+GOOGLE_SSO_CALLBACK_DOMAIN = _google_sso_callback_domain or None
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
