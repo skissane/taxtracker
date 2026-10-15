@@ -1,5 +1,5 @@
 import ast
-import importlib
+import importlib.util
 import io
 import os
 import subprocess
@@ -39,6 +39,14 @@ from lifetracker.core.models import (
 from lifetracker.urls import _build_admin_site_header
 from lifetracker.wsgi import application as wsgi_application
 
+_GOOGLE_SSO_ENABLED_SETTINGS = {
+    "GOOGLE_SSO_ENABLED": True,
+    "GOOGLE_SSO_CLIENT_ID": "test-client-id",
+    "GOOGLE_SSO_CLIENT_SECRET": "test-client-secret",
+    "GOOGLE_SSO_PROJECT_ID": "test-project-id",
+    "GOOGLE_SSO_CALLBACK_DOMAIN": "testserver",
+}
+
 
 class GoogleSSOSettingsTests(TestCase):
     """Tests for the locked-down Google SSO defaults."""
@@ -55,23 +63,67 @@ class GoogleSSOSettingsTests(TestCase):
             "lifetracker.google_sso.pre_create_user",
         )
 
-    @override_settings(
-        GOOGLE_SSO_ENABLED=True,
-        GOOGLE_SSO_CLIENT_ID="test-client-id",
-        GOOGLE_SSO_CLIENT_SECRET="test-client-secret",
-        GOOGLE_SSO_ADMIN_ENABLED=True,
-    )
     def test_google_sso_admin_login_button_renders_when_enabled(self):
-        importlib.reload(importlib.import_module("django_google_sso.urls"))
-        admin.site.login_template = "google_sso/login.html"
-        try:
+        with override_settings(**_GOOGLE_SSO_ENABLED_SETTINGS):
             response = self.client.get(reverse("admin:login"))
-        finally:
-            admin.site.login_template = None
-
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Sign in with Google")
         self.assertContains(response, 'href="/google_sso/login/"')
+
+    @override_settings(GOOGLE_SSO_ENABLED=False)
+    def test_google_sso_admin_login_button_hidden_when_disabled(self):
+        response = self.client.get(reverse("admin:login"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Sign in with Google")
+        # The stock username/password form must still be there.
+        self.assertContains(response, 'id="login-form"')
+
+    def test_google_sso_start_login_redirects_to_google_when_enabled(self):
+        with override_settings(**_GOOGLE_SSO_ENABLED_SETTINGS):
+            response = self.client.get(reverse("django_google_sso:oauth_start_login"))
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response["Location"].startswith("https://accounts.google.com/"),
+            response["Location"],
+        )
+
+    @override_settings(GOOGLE_SSO_ENABLED=False)
+    def test_google_sso_routes_404_when_disabled(self):
+        for name in ("oauth_start_login", "oauth_callback"):
+            with self.subTest(name=name):
+                response = self.client.get(reverse(f"django_google_sso:{name}"))
+                self.assertEqual(response.status_code, 404)
+
+    def test_google_sso_urls_match_library(self):
+        """lifetracker.google_sso_urls must mirror django_google_sso.urls.
+
+        Parsed rather than imported: the library module's urlpatterns depend on
+        whether SSO was enabled when it was first imported. If this fails after
+        upgrading django-google-sso, update lifetracker/google_sso_urls.py.
+        """
+
+        def routes(module_name):
+            origin = importlib.util.find_spec(module_name).origin
+            tree = ast.parse(Path(origin).read_text())
+            found = set()
+            for node in ast.walk(tree):
+                if not (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "path"
+                ):
+                    continue
+                route, view = node.args
+                # Unwrap our _require_sso_enabled(views.x) to views.x.
+                if isinstance(view, ast.Call):
+                    (view,) = view.args
+                (name,) = (kw.value.value for kw in node.keywords if kw.arg == "name")
+                found.add((route.value, ast.unparse(view), name))
+            return found
+
+        library_routes = routes("django_google_sso.urls")
+        self.assertTrue(library_routes)
+        self.assertEqual(routes("lifetracker.google_sso_urls"), library_routes)
 
 
 class FileTypeModelTests(TestCase):

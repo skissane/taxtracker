@@ -34,6 +34,10 @@ admin.site.site_header = _build_admin_site_header(
 )
 admin.site.site_title = "Life Tracker"
 admin.site.index_title = "Administration"
+# django_google_sso only sets this if SSO is enabled at import time. Set it
+# unconditionally: the template's tag checks per request whether SSO is enabled,
+# and renders the stock admin login (no Google button) when it isn't.
+admin.site.login_template = "google_sso/login.html"
 
 urlpatterns = [
     # There's no non-admin site yet, so send the root URL to the admin. Temporary
@@ -41,7 +45,7 @@ urlpatterns = [
     path("", RedirectView.as_view(pattern_name="admin:index"), name="root"),
     path(
         "google_sso/",
-        include("django_google_sso.urls", namespace="django_google_sso"),
+        include("lifetracker.google_sso_urls"),
     ),
     path("admin/", admin.site.urls),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
