@@ -19,6 +19,7 @@ from django.db import IntegrityError
 from django.forms import inlineformset_factory
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
+from django_google_sso.main import GoogleAuth
 
 from lifetracker import google_sso
 from lifetracker.asgi import application as asgi_application
@@ -53,15 +54,10 @@ class GoogleSSOSettingsTests(TestCase):
     """Tests for the locked-down Google SSO defaults."""
 
     def test_google_sso_defaults_block_new_accounts(self):
-        self.assertFalse(settings.GOOGLE_SSO_AUTO_CREATE_USERS)
-        self.assertFalse(settings.GOOGLE_SSO_AUTO_CREATE_FIRST_SUPERUSER)
+        self.assertIs(settings.GOOGLE_SSO_AUTO_CREATE_USERS, False)
         self.assertEqual(
             settings.GOOGLE_SSO_PRE_VALIDATE_CALLBACK,
             "lifetracker.google_sso.pre_validate_user",
-        )
-        self.assertEqual(
-            settings.GOOGLE_SSO_PRE_CREATE_CALLBACK,
-            "lifetracker.google_sso.pre_create_user",
         )
 
     def test_google_sso_admin_login_button_renders_when_enabled(self):
@@ -131,8 +127,16 @@ class GoogleSSOSettingsTests(TestCase):
 class GoogleSSOCallbackTests(TestCase):
     """Tests for the lifetracker.google_sso callbacks django_google_sso invokes."""
 
-    def _validate(self, email):
-        return google_sso.pre_validate_user({"email": email}, request=None)
+    def _validate(self, email, verified_email=True):
+        return google_sso.pre_validate_user(
+            {"email": email, "verified_email": verified_email}, request=None
+        )
+
+    def test_rejects_unverified_email(self):
+        with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@x.com"]):
+            for verified_email in (False, None, "true"):
+                with self.subTest(verified_email=verified_email):
+                    self.assertFalse(self._validate("a@x.com", verified_email))
 
     def test_rejects_missing_or_blank_email(self):
         with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@x.com"]):
@@ -152,11 +156,61 @@ class GoogleSSOCallbackTests(TestCase):
         ):
             self.assertTrue(self._validate(" a@EXAMPLE.com "))
 
-    def test_pre_create_user_returns_empty_dict(self):
-        self.assertEqual(google_sso.pre_create_user({"email": "a@x"}, None), {})
-
     def test_pre_login_user_is_noop(self):
         self.assertIsNone(google_sso.pre_login_user(User(), None))
+
+
+@override_settings(
+    **_GOOGLE_SSO_ENABLED_SETTINGS,
+    LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@example.com"],
+)
+class GoogleSSOLoginFlowTests(TestCase):
+    """End-to-end tests of the library's callback view with our settings, with
+    only the calls out to Google mocked."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            "alice", email="A@example.com", is_staff=True
+        )
+
+    def _callback(self, **user_info):
+        user_info = {"email": "a@example.com", "verified_email": True} | user_info
+        session = self.client.session
+        session["sso_state"] = "test-state"
+        session.save()
+        with (
+            mock.patch.object(GoogleAuth, "flow", new_callable=mock.PropertyMock),
+            mock.patch.object(GoogleAuth, "get_user_info", return_value=user_info),
+        ):
+            return self.client.get(
+                reverse("django_google_sso:oauth_callback"),
+                {"code": "test-code", "state": "test-state"},
+            )
+
+    def _logged_in_user_id(self):
+        return self.client.session.get("_auth_user_id")
+
+    def test_allowlisted_verified_existing_user_logs_in(self):
+        response = self._callback()
+        self.assertRedirects(response, reverse("admin:index"))
+        self.assertEqual(self._logged_in_user_id(), str(self.user.pk))
+
+    def test_rejects_email_not_in_allowlist(self):
+        User.objects.create_user("bob", email="b@example.com", is_staff=True)
+        self._callback(email="b@example.com")
+        self.assertIsNone(self._logged_in_user_id())
+
+    def test_rejects_unverified_email(self):
+        for verified in (False, None):
+            with self.subTest(verified=verified):
+                self._callback(verified_email=verified)
+                self.assertIsNone(self._logged_in_user_id())
+
+    def test_does_not_create_missing_user(self):
+        self.user.delete()
+        self._callback()
+        self.assertIsNone(self._logged_in_user_id())
+        self.assertFalse(User.objects.filter(email__iexact="a@example.com").exists())
 
 
 class FileTypeModelTests(TestCase):

@@ -22,16 +22,12 @@ def _allowed_google_emails():
 
 
 def pre_validate_user(google_user_info: dict, request: HttpRequest) -> bool:
-    """Allow only explicitly enabled Google identities to log in."""
+    """Allow only verified, explicitly allowlisted Google emails to log in."""
     email = _normalise_email(google_user_info.get("email"))
-    if not email:
+    # The v2 userinfo endpoint the library calls reports this as "verified_email".
+    if not email or google_user_info.get("verified_email") is not True:
         return False
     return email in _allowed_google_emails()
-
-
-def pre_create_user(google_user_info: dict, request: HttpRequest) -> dict | None:
-    """Disallow auto-creation of new users from Google SSO."""
-    return {}
 
 
 def pre_login_user(user, request: HttpRequest) -> None:
