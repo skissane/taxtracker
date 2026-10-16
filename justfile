@@ -92,8 +92,9 @@ docker-shell *args:
     [ $# -gt 0 ] || set -- /bin/bash; docker exec -i $([ -t 0 ] && echo -t) -u lifetracker lifetracker "$@"
 
 # Create whatever's missing of the Fly app, volume and secrets from .env
-fly-setup:
-    ./fly-setup.sh
+[positional-arguments]
+fly-setup *args:
+    ./fly-setup.sh "$@"
 
 # Run every ruff/djlint lint and format-check step (no fixes, no tests)
 check: lint fmt-check lint-templates fmt-check-templates

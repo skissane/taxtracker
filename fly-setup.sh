@@ -2,13 +2,27 @@
 # One-time setup of the production Fly.io app (see README.md's Fly.io section).
 # Reads FLY_APP and the LIFETRACKER_BACKUP_S3_* settings from ./.env, then
 # creates whatever is missing: the Fly app, its volume, its S3 secrets, and the
-# FLY_APP GitHub Actions secret. Safe to re-run: it never changes anything that
+# FLY_APP and FLY_API_TOKEN GitHub Actions secrets (the latter a new deploy
+# token scoped to the app). Safe to re-run: it never changes anything that
 # already exists, so to change a value, use `fly secrets set` / `gh secret set`.
+#
+# The exception is --replace-token, which always creates a new deploy token
+# and overwrites FLY_API_TOKEN with it, e.g. after moving to a new app (an
+# existing token is scoped to the old one) or to rotate it. It doesn't revoke
+# the old token; see `fly tokens list -a <app>` and `fly tokens revoke`.
 #
 # It doesn't print the app name, which is kept out of the public repo, so its
 # output is safe to paste.
 set -euo pipefail
 cd "$(dirname "$0")"
+
+replace_token=false
+for arg in "$@"; do
+  case "$arg" in
+    --replace-token) replace_token=true ;;
+    *) echo "usage: $0 [--replace-token]" >&2; exit 2 ;;
+  esac
+done
 
 s3_secrets=(
   LIFETRACKER_BACKUP_S3_ENDPOINT_URL
@@ -88,9 +102,26 @@ if [ -n "$to_import" ]; then
   printf '%s' "$to_import" | fly secrets import -a "$FLY_APP"
 fi
 
-if gh secret list --json name --jq '.[].name' | grep -qx FLY_APP; then
+github_secrets=$(gh secret list --json name --jq '.[].name')
+
+if grep -qx FLY_APP <<<"$github_secrets"; then
   echo "GitHub secret FLY_APP: already set"
 else
   echo "GitHub secret FLY_APP: setting"
   printf '%s' "$FLY_APP" | gh secret set FLY_APP
+fi
+
+if $replace_token || ! grep -qx FLY_API_TOKEN <<<"$github_secrets"; then
+  echo "GitHub secret FLY_API_TOKEN: setting to a new deploy token"
+  # Into a variable first rather than piped straight to gh, which would store
+  # an empty secret if fly failed. Named so it's recognisable in `fly tokens
+  # list`.
+  token=$(fly tokens create deploy -a "$FLY_APP" --name "GitHub Actions")
+  if [ -z "$token" ]; then
+    echo "error: fly tokens create deploy printed no token" >&2
+    exit 1
+  fi
+  printf '%s' "$token" | gh secret set FLY_API_TOKEN
+else
+  echo "GitHub secret FLY_API_TOKEN: already set (--replace-token to replace)"
 fi

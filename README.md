@@ -191,14 +191,16 @@ configuration.
    [Cloud backup](#cloud-backup)).
 2. Run `just fly-setup` (you need `fly`, `gh` and `jq` installed and logged in). It
    creates whatever's missing of: the Fly app, its volume (name and region from
-   `fly.toml`), the S3 settings as Fly secrets, and the `FLY_APP` GitHub Actions
-   secret. It's safe to re-run, and never changes anything that already exists; to
+   `fly.toml`), the S3 settings as Fly secrets, and the `FLY_APP` and
+   `FLY_API_TOKEN` GitHub Actions secrets, the latter a new deploy token scoped to
+   the app. It's safe to re-run, and never changes anything that already exists; to
    change a value, use `fly secrets set` or `gh secret set` directly.
-3. Export `FLY_APP` in your shell for the remaining manual steps (`fly` doesn't read
-   `.env`). Create a deploy token scoped to the app with `fly tokens create deploy`,
-   and store it as the `FLY_API_TOKEN` repository secret
-   (`gh secret set FLY_API_TOKEN`, then paste it).
-4. Deploy once by hand with `fly deploy --ha=false`. A volume attaches to only one
+3. If `FLY_API_TOKEN` already existed (e.g. from an earlier app, which its token
+   is scoped to), run `just fly-setup --replace-token`. That always creates a new
+   deploy token and overwrites the secret with it, so also use it to rotate the
+   token. It doesn't revoke the old token: export `FLY_APP` (`fly` doesn't read
+   `.env`), then use `fly tokens list` and `fly tokens revoke`.
+4. With `FLY_APP` exported, deploy once by hand with `fly deploy --ha=false`. A volume attaches to only one
    Machine, so the app must never run more than one; `--ha=false` stops the first
    deploy creating two. Later deploys, including CI's, keep the existing Machine.
 5. On first boot, `ensure_superuser` creates `admin` with a random password and

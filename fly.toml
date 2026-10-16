@@ -10,7 +10,7 @@
 # which Fly sets at runtime (see settings.py).
 #
 # One-time setup: `just fly-setup` (see fly-setup.sh and README.md) creates the
-# app, the volume below and the S3 secrets from .env.
+# app, the volume below, the S3 secrets and the GitHub secrets from .env.
 #
 # On first boot, ensure_superuser creates `admin` with a random password and
 # prints it to `fly logs`, unless /data/initial_admin_password already exists.
