@@ -139,11 +139,11 @@ The image defaults to `LIFETRACKER_DEBUG=0`, and then refuses to start unless
 
 | Variable | Purpose |
 |---|---|
-| `LIFETRACKER_ALLOWED_HOSTS` | Required. Hostnames the app answers to, e.g. `tax.example.com`. |
+| `LIFETRACKER_ALLOWED_HOSTS` | Required, except on Fly.io, where it defaults to `<app>.fly.dev`. Hostnames the app answers to, e.g. `tax.example.com`. |
 | `LIFETRACKER_CSRF_TRUSTED_ORIGINS` | Public origins, e.g. `https://tax.example.com`. Needed behind a TLS-terminating reverse proxy, or the admin login fails its CSRF check. |
 | `LIFETRACKER_TRUST_X_FORWARDED_PROTO` | Set to `1` instead of listing origins, if the proxy always sets `X-Forwarded-Proto` and the container is reachable only through it. |
 | `LIFETRACKER_BACKUP_S3_*` | Optional. Cloud backup bucket and credentials; see [Cloud backup](#cloud-backup). |
-| `LIFETRACKER_BACKUP_HOSTNAME` | Recommended with cloud backup. Prefix for backup object keys, also shown as the instance name in the admin header; without it the container's hostname is used, a random ID by default. |
+| `LIFETRACKER_BACKUP_HOSTNAME` | Recommended with cloud backup. Prefix for backup object keys, also shown as the instance name in the admin header; without it the container's hostname is used, a random ID by default. On Fly.io it defaults to `fly.<app>`. |
 | `LIFETRACKER_COMMIT_ID` | Optional. Commit shown in the admin header. `just docker-build` and `./run.sh` set it automatically from `git rev-parse HEAD`. |
 | `LIFETRACKER_COMMIT_URL_BASE` | Optional. Base URL used for the commit link in the admin header. Defaults to `https://github.com/skissane/taxtracker/commit/`. |
 
@@ -160,3 +160,56 @@ With `DEBUG` off, session and CSRF cookies are marked `Secure`, so the app must 
 served over HTTPS (typically via the reverse proxy); over plain HTTP you can't log in.
 The app doesn't redirect HTTP to HTTPS or send an HSTS header itself; configure
 both on the reverse proxy.
+
+### Fly.io
+
+Production runs on [Fly.io](https://fly.io), configured by `fly.toml`: one Machine
+in Sydney, a volume at `/data` for the database and secret key, and auto-stop when
+idle. Every push to `master` deploys automatically once CI passes: CI pushes the
+tested image to GHCR, then deploys that exact image to Fly.
+
+The app's name is deliberately kept out of this public repo. `fly.toml` has no
+`app` line; CI reads the name from the `FLY_APP` repository secret, and `flyctl`
+reads it from the `FLY_APP` environment variable. When you run `fly` commands
+yourself, export it first (or pass `-a <name>` to each command):
+
+```bash
+export FLY_APP=<app-name>
+fly status
+fly logs
+```
+
+Don't commit the name anywhere, including in issues, PRs or pasted command output.
+On the Machine, `LIFETRACKER_ALLOWED_HOSTS` and `LIFETRACKER_BACKUP_HOSTNAME`
+default from the name (via `FLY_APP_NAME`, which Fly sets), so they need no
+configuration.
+
+#### One-time setup
+
+1. Pick a name that can't be guessed, e.g. `lifetracker-<random>`, and create the
+   app, its volume and its secrets:
+
+   ```bash
+   export FLY_APP=<app-name>
+   fly apps create "$FLY_APP"
+   fly volumes create lifetracker_data --region syd --size 1
+   fly secrets set LIFETRACKER_BACKUP_S3_BUCKET_NAME=... \
+     LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID=... \
+     LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY=...
+   ```
+
+2. Create a deploy token scoped to the app with `fly tokens create deploy`.
+3. In the GitHub repo's **Settings → Secrets and variables → Actions**, set two
+   repository secrets: `FLY_APP` (the app name) and `FLY_API_TOKEN` (the token).
+4. Deploy once by hand with `fly deploy --ha=false`. A volume attaches to only one
+   Machine, so the app must never run more than one; `--ha=false` stops the first
+   deploy creating two. Later deploys, including CI's, keep the existing Machine.
+5. On first boot, `ensure_superuser` creates `admin` with a random password and
+   prints it to `fly logs`.
+
+A manual `fly deploy` deploys `:latest`, i.e. master's most recently published
+image. To deploy local changes, merge them to `master` rather than building on Fly.
+
+Every boot runs migrations against the only copy of the data, so run a cloud backup
+before merging a risky migration. Fly's daily volume snapshots are the only
+automatic fallback.
