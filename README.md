@@ -201,6 +201,8 @@ configuration.
 2. Create a deploy token scoped to the app with `fly tokens create deploy`.
 3. In the GitHub repo's **Settings → Secrets and variables → Actions**, set two
    repository secrets: `FLY_APP` (the app name) and `FLY_API_TOKEN` (the token).
+   CI checks on every run, PRs included, that both are set and that the token can
+   see the app, and fails otherwise.
 4. Deploy once by hand with `fly deploy --ha=false`. A volume attaches to only one
    Machine, so the app must never run more than one; `--ha=false` stops the first
    deploy creating two. Later deploys, including CI's, keep the existing Machine.
