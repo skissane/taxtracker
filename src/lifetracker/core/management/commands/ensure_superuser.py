@@ -34,7 +34,7 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
 
-def _initial_admin_password_file():
+def _initial_admin_password_file() -> Path:
     override = os.environ.get("LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE")
     if override:
         return Path(override)
@@ -97,7 +97,7 @@ class Command(BaseCommand):
             user.is_superuser = True
             user.save()
 
-    def _read_initial_password(self):
+    def _read_initial_password(self) -> tuple[str, str] | None:
         """(password, description of where it came from), or None."""
         password = os.environ.get("LIFETRACKER_INITIAL_ADMIN_PASSWORD", "").strip()
         if password:
