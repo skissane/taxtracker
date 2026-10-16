@@ -9,12 +9,8 @@
 # The Machine's ALLOWED_HOSTS and backup hostname default from FLY_APP_NAME,
 # which Fly sets at runtime (see settings.py).
 #
-# One-time setup before the first deploy (with FLY_APP exported):
-#   fly apps create "$FLY_APP"
-#   fly volumes create lifetracker_data --region syd --size 1
-#   fly secrets set LIFETRACKER_BACKUP_S3_BUCKET_NAME=... \
-#     LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID=... \
-#     LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY=...
+# One-time setup: `just fly-setup` (see fly-setup.sh and README.md) creates the
+# app, the volume below and the S3 secrets from .env.
 #
 # On first boot, ensure_superuser creates `admin` with a random password and
 # prints it to `fly logs`, unless /data/initial_admin_password already exists.

@@ -186,23 +186,18 @@ configuration.
 
 #### One-time setup
 
-1. Pick a name that can't be guessed, e.g. `lifetracker-<random>`, and create the
-   app, its volume and its secrets:
-
-   ```bash
-   export FLY_APP=<app-name>
-   fly apps create "$FLY_APP"
-   fly volumes create lifetracker_data --region syd --size 1
-   fly secrets set LIFETRACKER_BACKUP_S3_BUCKET_NAME=... \
-     LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID=... \
-     LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY=...
-   ```
-
-2. Create a deploy token scoped to the app with `fly tokens create deploy`.
-3. In the GitHub repo's **Settings → Secrets and variables → Actions**, set two
-   repository secrets: `FLY_APP` (the app name) and `FLY_API_TOKEN` (the token).
-   CI checks on every run, PRs included, that both are set and that the token can
-   see the app, and fails otherwise.
+1. Pick a name that can't be guessed, e.g. `lifetracker-<random>`, and add it to
+   `.env` as `FLY_APP`, along with all five `LIFETRACKER_BACKUP_S3_*` settings (see
+   [Cloud backup](#cloud-backup)).
+2. Run `just fly-setup` (you need `fly`, `gh` and `jq` installed and logged in). It
+   creates whatever's missing of: the Fly app, its volume (name and region from
+   `fly.toml`), the S3 settings as Fly secrets, and the `FLY_APP` GitHub Actions
+   secret. It's safe to re-run, and never changes anything that already exists; to
+   change a value, use `fly secrets set` or `gh secret set` directly.
+3. Export `FLY_APP` in your shell for the remaining manual steps (`fly` doesn't read
+   `.env`). Create a deploy token scoped to the app with `fly tokens create deploy`,
+   and store it as the `FLY_API_TOKEN` repository secret
+   (`gh secret set FLY_API_TOKEN`, then paste it).
 4. Deploy once by hand with `fly deploy --ha=false`. A volume attaches to only one
    Machine, so the app must never run more than one; `--ha=false` stops the first
    deploy creating two. Later deploys, including CI's, keep the existing Machine.
