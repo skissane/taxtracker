@@ -89,13 +89,13 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@1.6
 
       - name: Check Fly.io secrets and app
+        # FLY_API_TOKEN is a deploy token scoped to the app, which can't list
+        # apps (that's org-wide), so query the app itself.
         run: |
-          set -o pipefail
           : "${FLY_APP:?FLY_APP secret is not set}"
           : "${FLY_API_TOKEN:?FLY_API_TOKEN secret is not set}"
-          count=$(flyctl apps list --json | jq '[.[].ID|select(.==$ENV.FLY_APP)]|length')
-          if [ "$count" != 1 ]; then
-            echo "::error::FLY_APP names no app visible to FLY_API_TOKEN (matches: $count)"
+          if ! flyctl status -a "$FLY_APP" >/dev/null; then
+            echo "::error::FLY_APP names no app FLY_API_TOKEN can access"
             exit 1
           fi
         env:

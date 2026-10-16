@@ -11,9 +11,6 @@
 # and overwrites FLY_API_TOKEN with it, e.g. after moving to a new app (an
 # existing token is scoped to the old one) or to rotate it. It doesn't revoke
 # the old token; see `fly tokens list -a <app>` and `fly tokens revoke`.
-#
-# It doesn't print the app name, which is kept out of the public repo, so its
-# output is safe to paste.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -123,6 +120,16 @@ if $replace_token || ! grep -qx FLY_API_TOKEN <<<"$github_secrets"; then
   token=$(fly tokens create deploy -a "$FLY_APP" --name "GitHub Actions")
   if [ -z "$token" ]; then
     echo "error: fly tokens create deploy printed no token" >&2
+    exit 1
+  fi
+  # The same check CI's check-fly job makes, so a token that would fail it is
+  # never stored. Via the environment rather than --access-token, to keep it
+  # out of the process list; FLY_ACCESS_TOKEN too, as it takes precedence
+  # over FLY_API_TOKEN if already set.
+  if ! FLY_ACCESS_TOKEN="$token" FLY_API_TOKEN="$token" \
+    fly status -a "$FLY_APP" >/dev/null; then
+    echo "error: fly status failed with the new deploy token, so FLY_API_TOKEN" \
+      "was not set; revoke the token with \`fly tokens revoke\`" >&2
     exit 1
   fi
   printf '%s' "$token" | gh secret set FLY_API_TOKEN
