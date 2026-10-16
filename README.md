@@ -49,6 +49,122 @@ plain `docker run`, pass the variables with `-e`, or the file with `--env-file .
 Docker reads the file more literally than uv does: it doesn't strip quotes, so leave
 values unquoted.
 
+## Google sign-in
+
+As well as the usual username and password, the admin login page can offer **Sign
+in with Google**. It's off until it's configured, and even then it's locked down:
+a Google account can sign in only if all of these hold:
+
+- Google reports its email address as verified;
+- the email is in `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS`;
+- an existing, active Django user has that email address (compared
+  case-insensitively).
+
+Google sign-in never creates users, and never changes an existing user's
+permissions. The user also needs **Staff status** to get into the admin, as with
+password login. Password login keeps working alongside it.
+
+It's configured with these environment variables (lists are comma-separated):
+
+| Variable | Purpose |
+|---|---|
+| `LIFETRACKER_GOOGLE_SSO_CLIENT_ID` | Required. The OAuth client ID from Google Cloud, ending in `.apps.googleusercontent.com`. |
+| `LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET` | Required. The OAuth client's secret. Google sign-in is enabled only when both this and the client ID are set; otherwise the login page shows no Google button and `/google_sso/` returns 404. |
+| `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS` | Google email addresses allowed to sign in, e.g. `me@gmail.com`. Empty (the default) means no one can, even with the client configured. |
+| `LIFETRACKER_GOOGLE_SSO_PROJECT_ID` | Optional. The Google Cloud project ID; not needed to sign in. |
+| `LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN` | Optional. Host (and port, if any) used to build the callback URL that Google redirects back to, e.g. `tax.example.com`. Defaults to the host of the request, which is normally right; set it if the app is reached through a proxy that rewrites the `Host` header. |
+
+The callback URL is `<scheme>://<host>/google_sso/callback/`, and it must exactly
+match one of the client's authorized redirect URIs in Google Cloud, or Google
+rejects the sign-in with `redirect_uri_mismatch`. The scheme is the request's, or
+the `X-Forwarded-Proto` header's when a proxy sets one.
+
+### Creating the Google OAuth client
+
+You need a Google Cloud project with an OAuth client. Do this once for local
+development and once for production (a separate client for each keeps the
+production secret off your laptop); the steps are the same except for the redirect
+URI.
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a
+   project (or pick an existing one).
+2. Open **Google Auth Platform** (**APIs & Services → OAuth consent screen**) and
+   click **Get started** if the project doesn't have one yet. Give it an app name
+   and your email as the support and developer contact, and choose **External** as
+   the audience (the only option for a personal Google account).
+3. Under **Audience**, leave the publishing status as **Testing** and add each
+   Google account that will sign in under **Test users**. In testing mode, Google
+   itself refuses sign-in by anyone else, which is an extra lock on top of
+   `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS`. The app only asks for the basic
+   `openid`, `email` and `profile` scopes, so it doesn't need Google's verification.
+4. Under **Clients**, click **Create client**, choose **Web application**, and add
+   the callback URL under **Authorized redirect URIs** (see below for the value).
+   Leave **Authorized JavaScript origins** empty.
+5. Click **Create**, then copy the client ID and client secret. Google may only
+   show the secret once, so store it safely (e.g. in a password manager).
+
+### Local development
+
+1. Create an OAuth client as above, with the redirect URI
+   `http://localhost:8000/google_sso/callback/`. Google allows plain `http` only for
+   `localhost` and loopback addresses. The host must match how you open the app:
+   if you browse to `http://127.0.0.1:8000/` instead, register
+   `http://127.0.0.1:8000/google_sso/callback/` (or both). With
+   `LIFETRACKER_DOCKER_PORT` or a different `runserver` port, use that port.
+2. Add the client and your email to `.env` in the repo root (see
+   [Cloud backup](#cloud-backup) for how `.env` is loaded; leave values unquoted):
+
+   ```dotenv
+   LIFETRACKER_GOOGLE_SSO_CLIENT_ID=1234567890-abc.apps.googleusercontent.com
+   LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET=...
+   LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=me@gmail.com
+   ```
+
+3. Start the app with `./run.sh` (or `just docker-run`; `.env` reaches the
+   container too).
+4. Give your Django user the same email: log in with your password, open
+   **Users**, edit your user, set **Email address** to your Google email, and save.
+5. Log out, open <http://localhost:8000/admin/>, and click **Sign in with Google**.
+   If sign-in fails, the login page shows why (e.g. "Email address not allowed" or
+   "User not found").
+
+### Production (Fly.io)
+
+1. Create a separate OAuth client as above, with the redirect URI
+   `https://lifetracker-skissane.fly.dev/google_sso/callback/` (or
+   `https://<your domain>/google_sso/callback/` if you've attached a custom
+   domain; register each hostname you use). The `https` comes from Fly's proxy,
+   which sets `X-Forwarded-Proto`; `LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN` isn't
+   needed.
+2. Set the variables as Fly secrets, not in `fly.toml`, which is in this public
+   repo. Setting secrets restarts the Machine with them:
+
+   ```bash
+   fly secrets set \
+     LIFETRACKER_GOOGLE_SSO_CLIENT_ID=1234567890-abc.apps.googleusercontent.com \
+     LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET=... \
+     LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=me@gmail.com
+   ```
+
+   To keep the secret out of your shell history, put the `NAME=value` lines in a
+   file and run `fly secrets import < that-file` instead, then delete the file.
+3. Log in to production with your password and set your user's **Email address**
+   to your Google email, as in local development. The database is separate, so this
+   has to be done on each instance.
+4. Log out and test **Sign in with Google** at
+   <https://lifetracker-skissane.fly.dev/admin/>.
+
+To add or remove an allowed account later, run `fly secrets set
+LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=...` with the full new list (and update the
+test users in Google Cloud). To turn Google sign-in off, run `fly secrets unset
+LIFETRACKER_GOOGLE_SSO_CLIENT_ID LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET`.
+
+For another host, pass the same variables to the container with `-e` or
+`--env-file`, as in [Production deployment](#production-deployment). Serve it over
+HTTPS through a proxy that sets `X-Forwarded-Proto: https`, so the callback URL is
+`https`; the callback URL takes the scheme from that header regardless of
+`LIFETRACKER_TRUST_X_FORWARDED_PROTO`.
+
 ## Docker
 
 Build the image with:
@@ -147,6 +263,7 @@ The image defaults to `LIFETRACKER_DEBUG=0`, and then refuses to start unless
 | `LIFETRACKER_CSRF_TRUSTED_ORIGINS` | Public origins, e.g. `https://tax.example.com`. Needed behind a TLS-terminating reverse proxy, or the admin login fails its CSRF check. |
 | `LIFETRACKER_TRUST_X_FORWARDED_PROTO` | Set to `1` instead of listing origins, if the proxy always sets `X-Forwarded-Proto` and the container is reachable only through it. |
 | `LIFETRACKER_BACKUP_S3_*` | Optional. Cloud backup bucket and credentials; see [Cloud backup](#cloud-backup). |
+| `LIFETRACKER_GOOGLE_SSO_*` | Optional. Google sign-in client and allowed emails; see [Google sign-in](#google-sign-in). |
 | `LIFETRACKER_BACKUP_HOSTNAME` | Recommended with cloud backup. Prefix for backup object keys, also shown as the instance name in the admin header; without it the container's hostname is used, a random ID by default. On Fly.io it defaults to `<app>.fly.dev`. |
 | `LIFETRACKER_COMMIT_ID` | Optional. Commit shown in the admin header. `just docker-build` and `./run.sh` set it automatically from `git rev-parse HEAD`. |
 | `LIFETRACKER_COMMIT_URL_BASE` | Optional. Base URL used for the commit link in the admin header. Defaults to `https://github.com/skissane/taxtracker/commit/`. |
