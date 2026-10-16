@@ -251,22 +251,12 @@ LIFETRACKER_BACKUP_HOSTNAME = (
 # a Google account may sign in only if its email is verified, is in
 # LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS, and matches an existing active Django
 # user's email. New users are never auto-created.
-_google_sso_client_id = (
-    os.environ.get("GOOGLE_SSO_CLIENT_ID")
-    or os.environ.get("LIFETRACKER_GOOGLE_SSO_CLIENT_ID", "")
+GOOGLE_SSO_CLIENT_ID = os.environ.get("LIFETRACKER_GOOGLE_SSO_CLIENT_ID", "").strip()
+GOOGLE_SSO_CLIENT_SECRET = os.environ.get(
+    "LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET", ""
 ).strip()
-_google_sso_client_secret = (
-    os.environ.get("GOOGLE_SSO_CLIENT_SECRET")
-    or os.environ.get("LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET", "")
-).strip()
-_google_sso_project_id = (
-    os.environ.get("GOOGLE_SSO_PROJECT_ID")
-    or os.environ.get("LIFETRACKER_GOOGLE_SSO_PROJECT_ID", "")
-).strip()
-GOOGLE_SSO_ENABLED = bool(_google_sso_client_id and _google_sso_client_secret)
-GOOGLE_SSO_CLIENT_ID = _google_sso_client_id
-GOOGLE_SSO_PROJECT_ID = _google_sso_project_id
-GOOGLE_SSO_CLIENT_SECRET = _google_sso_client_secret
+GOOGLE_SSO_PROJECT_ID = os.environ.get("LIFETRACKER_GOOGLE_SSO_PROJECT_ID", "").strip()
+GOOGLE_SSO_ENABLED = bool(GOOGLE_SSO_CLIENT_ID and GOOGLE_SSO_CLIENT_SECRET)
 # The library also rejects any email whose domain isn't listed here, unless the
 # Google userinfo has a true "email_verified", which the userinfo endpoint it
 # calls never returns. So accept every domain here, and leave the gating (and
@@ -288,11 +278,9 @@ GOOGLE_SSO_NEXT_URL = "admin:index"
 GOOGLE_SSO_SHOW_FAILED_LOGIN_MESSAGE = True
 GOOGLE_SSO_ADMIN_ENABLED = True
 GOOGLE_SSO_PAGES_ENABLED = False
-_google_sso_callback_domain = (
-    os.environ.get("GOOGLE_SSO_CALLBACK_DOMAIN")
-    or os.environ.get("LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN", "")
-).strip()
-GOOGLE_SSO_CALLBACK_DOMAIN = _google_sso_callback_domain or None
+GOOGLE_SSO_CALLBACK_DOMAIN = (
+    os.environ.get("LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN", "").strip() or None
+)
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators

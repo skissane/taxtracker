@@ -1181,6 +1181,63 @@ class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
         )
 
 
+class SettingsGoogleSSOEnvTests(_SettingsSubprocessMixin, TestCase):
+    """Google SSO is configured only from LIFETRACKER_GOOGLE_SSO_* variables."""
+
+    EXPR = (
+        "(s.GOOGLE_SSO_ENABLED, s.GOOGLE_SSO_CLIENT_ID, s.GOOGLE_SSO_CLIENT_SECRET,"
+        " s.GOOGLE_SSO_PROJECT_ID, s.GOOGLE_SSO_CALLBACK_DOMAIN,"
+        " s.LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS)"
+    )
+
+    def _settings(self, **env):
+        with tempfile.TemporaryDirectory() as home:
+            proc = self._run(home, extra_env=env, expr=self.EXPR)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return ast.literal_eval(proc.stdout.strip())
+
+    def test_defaults_disabled(self):
+        self.assertEqual(self._settings(), (False, "", "", "", None, []))
+
+    def test_reads_lifetracker_variables(self):
+        self.assertEqual(
+            self._settings(
+                LIFETRACKER_GOOGLE_SSO_CLIENT_ID=" id ",
+                LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET=" secret ",
+                LIFETRACKER_GOOGLE_SSO_PROJECT_ID=" project ",
+                LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN=" tax.example.com ",
+                LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=" a@x.com, ,b@x.com,",
+            ),
+            (
+                True,
+                "id",
+                "secret",
+                "project",
+                "tax.example.com",
+                ["a@x.com", "b@x.com"],
+            ),
+        )
+
+    def test_enabled_needs_both_id_and_secret(self):
+        for env in (
+            {"LIFETRACKER_GOOGLE_SSO_CLIENT_ID": "id"},
+            {"LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET": "secret"},
+        ):
+            with self.subTest(env=env):
+                self.assertFalse(self._settings(**env)[0])
+
+    def test_ignores_unprefixed_variables(self):
+        self.assertEqual(
+            self._settings(
+                GOOGLE_SSO_CLIENT_ID="id",
+                GOOGLE_SSO_CLIENT_SECRET="secret",
+                GOOGLE_SSO_PROJECT_ID="project",
+                GOOGLE_SSO_CALLBACK_DOMAIN="tax.example.com",
+            ),
+            (False, "", "", "", None, []),
+        )
+
+
 class InitialAdminPasswordFileTests(TestCase):
     """Where ensure_superuser looks for the initial admin password file."""
 
