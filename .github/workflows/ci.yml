@@ -165,10 +165,11 @@ jobs:
 
       - name: Deploy to Fly.io
         # Fail rather than fall back to fly.toml's :latest if publish produced
-        # no digest.
+        # no digest. --ha=false only matters if the app has no Machine yet
+        # (e.g. its first deploy): the volume attaches to one, so create one.
         run: |
           : "${FLY_APP:?FLY_APP secret is not set}"
-          flyctl deploy --image "${IMAGE:?publish output no image}"
+          flyctl deploy --ha=false --image "${IMAGE:?publish output no image}"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           FLY_APP: ${{ secrets.FLY_APP }}

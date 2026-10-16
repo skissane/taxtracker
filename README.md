@@ -205,9 +205,11 @@ configuration.
    deploy token and overwrites the secret with it, so also use it to rotate the
    token. It doesn't revoke the old token: export `FLY_APP` (`fly` doesn't read
    `.env`), then use `fly tokens list` and `fly tokens revoke`.
-4. With `FLY_APP` exported, deploy once by hand with `fly deploy --ha=false`. A volume attaches to only one
-   Machine, so the app must never run more than one; `--ha=false` stops the first
-   deploy creating two. Later deploys, including CI's, keep the existing Machine.
+4. Push to `master` (e.g. merge a PR); CI's deploy creates the Machine. A volume
+   attaches to only one Machine, so the app must never run more than one; CI
+   passes `--ha=false`, which stops a deploy to an app with no Machine creating
+   two. Pass it too on any manual `fly deploy`. Later deploys keep the existing
+   Machine.
 5. On first boot, `ensure_superuser` creates `admin` with the password from
    `LIFETRACKER_INITIAL_ADMIN_PASSWORD`. Changing that secret later has no effect;
    change the password in the admin instead.
