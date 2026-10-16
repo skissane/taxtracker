@@ -78,7 +78,10 @@ jobs:
   # app the token can see, so a missing or broken setup fails the build rather
   # than only surfacing when master deploys. A separate job, not a step in test,
   # so run_workflow_local.py (which runs test, with no secrets) still works.
+  # Skipped for Dependabot, whose runs get Dependabot secrets, not the repo's
+  # Actions secrets. Merging its PRs still runs it, as the merger is the actor.
   check-fly:
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions: {}
 
