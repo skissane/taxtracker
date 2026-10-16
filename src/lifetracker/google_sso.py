@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 from django.conf import settings
 from django.http import HttpRequest
 
@@ -12,41 +10,14 @@ def _normalise_email(value):
     return str(value).strip().lower()
 
 
-def _iter_setting_values(*names):
-    for name in names:
-        value = getattr(settings, name, None)
-        if value in (None, ""):
-            continue
-        if isinstance(value, str):
-            yield from (item.strip() for item in value.split(",") if item.strip())
-        else:
-            yield from (str(item).strip() for item in value if str(item).strip())
-
-
 def _allowed_google_emails():
-    """Return the explicit Google email allowlist, if any.
+    """Return the explicit Google email allowlist.
 
     This app intentionally keeps Google SSO locked down until an operator adds an
     email address to the allowlist manually. That means no account can log in just
     because it exists in Django; only a deliberately configured email can match.
     """
-    emails = set()
-    for name in (
-        "GOOGLE_SSO_ALLOWABLE_EMAILS",
-        "GOOGLE_SSO_ALLOWED_EMAILS",
-    ):
-        emails.update(_normalise_email(item) for item in _iter_setting_values(name))
-    for env_name in (
-        "LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS",
-        "LIFETRACKER_GOOGLE_SSO_ALLOWABLE_EMAILS",
-        "GOOGLE_SSO_ALLOWED_EMAILS",
-        "GOOGLE_SSO_ALLOWABLE_EMAILS",
-    ):
-        emails.update(
-            _normalise_email(item)
-            for item in os.environ.get(env_name, "").split(",")
-            if item.strip()
-        )
+    emails = map(_normalise_email, settings.LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS)
     return {email for email in emails if email}
 
 

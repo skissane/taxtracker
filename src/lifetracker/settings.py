@@ -268,9 +268,10 @@ GOOGLE_SSO_CLIENT_ID = _google_sso_client_id
 GOOGLE_SSO_PROJECT_ID = _google_sso_project_id
 GOOGLE_SSO_CLIENT_SECRET = _google_sso_client_secret
 GOOGLE_SSO_ALLOWABLE_DOMAINS = _env_list("LIFETRACKER_GOOGLE_SSO_ALLOWABLE_DOMAINS")
-_google_sso_allowed_emails = _env_list("LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS")
-GOOGLE_SSO_ALLOWABLE_EMAILS = _google_sso_allowed_emails
-GOOGLE_SSO_ALLOWED_EMAILS = _google_sso_allowed_emails
+# Read by lifetracker.google_sso.pre_validate_user, not by the library.
+LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS = _env_list(
+    "LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS"
+)
 GOOGLE_SSO_STAFF_LIST = _env_list("LIFETRACKER_GOOGLE_SSO_STAFF_LIST")
 GOOGLE_SSO_SUPERUSER_LIST = _env_list("LIFETRACKER_GOOGLE_SSO_SUPERUSER_LIST")
 GOOGLE_SSO_AUTO_CREATE_USERS = False

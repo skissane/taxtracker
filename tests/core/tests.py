@@ -20,6 +20,7 @@ from django.forms import inlineformset_factory
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
+from lifetracker import google_sso
 from lifetracker.asgi import application as asgi_application
 from lifetracker.core.admin import (
     DBStoredFileAdmin,
@@ -124,6 +125,38 @@ class GoogleSSOSettingsTests(TestCase):
         library_routes = routes("django_google_sso.urls")
         self.assertTrue(library_routes)
         self.assertEqual(routes("lifetracker.google_sso_urls"), library_routes)
+
+
+@override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=[])
+class GoogleSSOCallbackTests(TestCase):
+    """Tests for the lifetracker.google_sso callbacks django_google_sso invokes."""
+
+    def _validate(self, email):
+        return google_sso.pre_validate_user({"email": email}, request=None)
+
+    def test_rejects_missing_or_blank_email(self):
+        with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@x.com"]):
+            self.assertFalse(google_sso.pre_validate_user({}, request=None))
+            self.assertFalse(self._validate("   "))
+
+    def test_rejects_everyone_when_allowlist_empty(self):
+        self.assertFalse(self._validate("a@example.com"))
+
+    def test_rejects_email_not_in_allowlist(self):
+        with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@x.com"]):
+            self.assertFalse(self._validate("b@x.com"))
+
+    def test_allows_allowlisted_email_case_insensitively(self):
+        with override_settings(
+            LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["x@x.com", "A@Example.com"]
+        ):
+            self.assertTrue(self._validate(" a@EXAMPLE.com "))
+
+    def test_pre_create_user_returns_empty_dict(self):
+        self.assertEqual(google_sso.pre_create_user({"email": "a@x"}, None), {})
+
+    def test_pre_login_user_is_noop(self):
+        self.assertIsNone(google_sso.pre_login_user(User(), None))
 
 
 class FileTypeModelTests(TestCase):
