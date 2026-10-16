@@ -10,10 +10,11 @@
 # which Fly sets at runtime (see settings.py).
 #
 # One-time setup: `just fly-setup` (see fly-setup.sh and README.md) creates the
-# app, the volume below, the S3 secrets and the GitHub secrets from .env.
+# app, the volume below, the Fly secrets (initial admin password and S3
+# settings) and the GitHub secrets from .env.
 #
-# On first boot, ensure_superuser creates `admin` with a random password and
-# prints it to `fly logs`, unless /data/initial_admin_password already exists.
+# On first boot, ensure_superuser creates `admin` with the password from the
+# LIFETRACKER_INITIAL_ADMIN_PASSWORD secret.
 
 primary_region = "syd"
 

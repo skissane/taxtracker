@@ -8,8 +8,9 @@ Behaviour
 * ``--email``     (default: ``""``)   — email address (only used on creation).
 
 If the user **does not exist**, a new superuser is created. Its initial
-password is read (stripped) from the initial admin password file if that
-file exists and is non-empty; in that case the password is not printed,
+password is ``$LIFETRACKER_INITIAL_ADMIN_PASSWORD`` (stripped) if that is
+non-blank, else read (stripped) from the initial admin password file if that
+file exists and is non-empty; in either case the password is not printed,
 since it's assumed the operator already knows it. Otherwise a random
 password (``secrets.token_hex(16)``) is generated and printed.
 
@@ -69,14 +70,14 @@ class Command(BaseCommand):
         try:
             user = User.objects.get(**{User.USERNAME_FIELD: username})
         except User.DoesNotExist:
-            initial_password = self._read_initial_password()
-            if initial_password is not None:
+            initial = self._read_initial_password()
+            if initial is not None:
+                initial_password, source = initial
                 User.objects.create_superuser(
                     username=username, email=email, password=initial_password
                 )
                 self.stdout.write(
-                    f"Created superuser '{username}' using password from "
-                    f"{INITIAL_ADMIN_PASSWORD_FILE}."
+                    f"Created superuser '{username}' using password from {source}."
                 )
             else:
                 password = secrets.token_hex(16)
@@ -97,7 +98,11 @@ class Command(BaseCommand):
             user.save()
 
     def _read_initial_password(self):
+        """(password, description of where it came from), or None."""
+        password = os.environ.get("LIFETRACKER_INITIAL_ADMIN_PASSWORD", "").strip()
+        if password:
+            return password, "$LIFETRACKER_INITIAL_ADMIN_PASSWORD"
         if not INITIAL_ADMIN_PASSWORD_FILE.exists():
             return None
         password = INITIAL_ADMIN_PASSWORD_FILE.read_text().strip()
-        return password or None
+        return (password, str(INITIAL_ADMIN_PASSWORD_FILE)) if password else None

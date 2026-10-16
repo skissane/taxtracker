@@ -92,10 +92,14 @@ admin` (or, without `just`, `docker exec -it -u lifetracker lifetracker python
 manage.py changepassword admin`).
 
 To choose the initial password yourself, and keep it out of the log (worth doing in
-production, where logs are often shipped elsewhere), put it in
+production, where logs are often shipped elsewhere), set it in the
+`LIFETRACKER_INITIAL_ADMIN_PASSWORD` environment variable, put it in
 `/data/initial_admin_password` on the volume before the first start, or point
-`LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE` at a file containing it. `ensure_superuser`
-then uses it and doesn't print it.
+`LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE` at a file containing it. The environment
+variable wins over the file if both are set. `ensure_superuser` then uses it and
+doesn't print it. Since `./run.sh` and `just docker-run` both read `.env`, a
+`LIFETRACKER_INITIAL_ADMIN_PASSWORD` there also sets the password of a newly created
+local `admin`.
 
 The SQLite database and secret key live in `/data` inside the container
 (`/data/db.sqlite3` and `/data/secret_key`, because the image sets
@@ -187,13 +191,14 @@ configuration.
 #### One-time setup
 
 1. Pick a name that can't be guessed, e.g. `lifetracker-<random>`, and add it to
-   `.env` as `FLY_APP`, along with all five `LIFETRACKER_BACKUP_S3_*` settings (see
-   [Cloud backup](#cloud-backup)).
+   `.env` as `FLY_APP`, along with `LIFETRACKER_INITIAL_ADMIN_PASSWORD` (the
+   password `admin` gets on first boot) and all five `LIFETRACKER_BACKUP_S3_*`
+   settings (see [Cloud backup](#cloud-backup)).
 2. Run `just fly-setup` (you need `fly`, `gh` and `jq` installed and logged in). It
    creates whatever's missing of: the Fly app, its volume (name and region from
-   `fly.toml`), the S3 settings as Fly secrets, and the `FLY_APP` and
-   `FLY_API_TOKEN` GitHub Actions secrets, the latter a new deploy token scoped to
-   the app. It's safe to re-run, and never changes anything that already exists; to
+   `fly.toml`), the admin password and S3 settings as Fly secrets, and the
+   `FLY_APP` and `FLY_API_TOKEN` GitHub Actions secrets, the latter a new deploy
+   token scoped to the app. It's safe to re-run, and never changes anything that already exists; to
    change a value, use `fly secrets set` or `gh secret set` directly.
 3. If `FLY_API_TOKEN` already existed (e.g. from an earlier app, which its token
    is scoped to), run `just fly-setup --replace-token`. That always creates a new
@@ -203,8 +208,9 @@ configuration.
 4. With `FLY_APP` exported, deploy once by hand with `fly deploy --ha=false`. A volume attaches to only one
    Machine, so the app must never run more than one; `--ha=false` stops the first
    deploy creating two. Later deploys, including CI's, keep the existing Machine.
-5. On first boot, `ensure_superuser` creates `admin` with a random password and
-   prints it to `fly logs`.
+5. On first boot, `ensure_superuser` creates `admin` with the password from
+   `LIFETRACKER_INITIAL_ADMIN_PASSWORD`. Changing that secret later has no effect;
+   change the password in the admin instead.
 
 A manual `fly deploy` deploys `:latest`, i.e. master's most recently published
 image. To deploy local changes, merge them to `master` rather than building on Fly.

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One-time setup of the production Fly.io app (see README.md's Fly.io section).
-# Reads FLY_APP and the LIFETRACKER_BACKUP_S3_* settings from ./.env, then
-# creates whatever is missing: the Fly app, its volume, its S3 secrets, and the
+# Reads FLY_APP, LIFETRACKER_INITIAL_ADMIN_PASSWORD and the
+# LIFETRACKER_BACKUP_S3_* settings from ./.env, then creates whatever is
+# missing: the Fly app, its volume, those settings as Fly secrets, and the
 # FLY_APP and FLY_API_TOKEN GitHub Actions secrets (the latter a new deploy
 # token scoped to the app). Safe to re-run: it never changes anything that
 # already exists, so to change a value, use `fly secrets set` / `gh secret set`.
@@ -24,7 +25,10 @@ for arg in "$@"; do
   esac
 done
 
-s3_secrets=(
+# Set on the app as Fly secrets. The admin password only takes effect when
+# ensure_superuser first creates `admin`, on the first boot.
+fly_secrets=(
+  LIFETRACKER_INITIAL_ADMIN_PASSWORD
   LIFETRACKER_BACKUP_S3_ENDPOINT_URL
   LIFETRACKER_BACKUP_S3_BUCKET_NAME
   LIFETRACKER_BACKUP_S3_REGION_NAME
@@ -51,7 +55,7 @@ dotenv_get() {
 }
 
 missing=()
-for name in FLY_APP "${s3_secrets[@]}"; do
+for name in FLY_APP "${fly_secrets[@]}"; do
   value=$(dotenv_get "$name")
   [ -n "$value" ] || missing+=("$name")
   printf -v "$name" '%s' "$value"
@@ -88,7 +92,7 @@ fi
 
 existing_secrets=$(fly secrets list -a "$FLY_APP" --json | jq -r '(. // [])[].name')
 to_import=""
-for name in "${s3_secrets[@]}"; do
+for name in "${fly_secrets[@]}"; do
   if grep -qx "$name" <<<"$existing_secrets"; then
     echo "Fly secret $name: already set"
   else
