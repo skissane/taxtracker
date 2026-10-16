@@ -935,6 +935,22 @@ class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
             )[0]
         )
 
+    def test_hosts_default_from_fly_app_name(self):
+        self.assertEqual(
+            self._settings(LIFETRACKER_DEBUG="0", FLY_APP_NAME="example-app")[1],
+            ["example-app.fly.dev"],
+        )
+
+    def test_explicit_hosts_override_fly_app_name(self):
+        self.assertEqual(
+            self._settings(
+                LIFETRACKER_DEBUG="0",
+                LIFETRACKER_ALLOWED_HOSTS="tax.example.com",
+                FLY_APP_NAME="example-app",
+            )[1],
+            ["tax.example.com"],
+        )
+
     def test_proxy_settings(self):
         debug, _, origins, proxy_header, _, _ = self._settings(
             LIFETRACKER_DEBUG="true",
@@ -974,6 +990,19 @@ class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
                 LIFETRACKER_BACKUP_HOSTNAME="test-instance",
             ),
             ("https://example.invalid/commit/", "deadbeef", "test-instance"),
+        )
+
+    def test_backup_hostname_defaults_from_fly_app_name(self):
+        self.assertEqual(
+            self._settings(FLY_APP_NAME="example-app")[2], "fly.example-app"
+        )
+
+    def test_explicit_backup_hostname_overrides_fly_app_name(self):
+        self.assertEqual(
+            self._settings(
+                LIFETRACKER_BACKUP_HOSTNAME="test-instance", FLY_APP_NAME="example-app"
+            )[2],
+            "test-instance",
         )
 
 

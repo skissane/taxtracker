@@ -3,8 +3,14 @@
 # digest (`fly deploy --image ...@sha256:...`); a manual `fly deploy` deploys
 # whatever :latest is, i.e. master's most recently published image.
 #
-# One-time setup before the first deploy:
-#   fly apps create lifetracker-skissane
+# The production app's name is deliberately not in this file, to keep it out
+# of the public repo: CI gets it from the FLY_APP repo secret, and flyctl reads
+# FLY_APP from the environment, so export it (or pass -a) for manual commands.
+# The Machine's ALLOWED_HOSTS and backup hostname default from FLY_APP_NAME,
+# which Fly sets at runtime (see settings.py).
+#
+# One-time setup before the first deploy (with FLY_APP exported):
+#   fly apps create "$FLY_APP"
 #   fly volumes create lifetracker_data --region syd --size 1
 #   fly secrets set LIFETRACKER_BACKUP_S3_BUCKET_NAME=... \
 #     LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID=... \
@@ -13,18 +19,14 @@
 # On first boot, ensure_superuser creates `admin` with a random password and
 # prints it to `fly logs`, unless /data/initial_admin_password already exists.
 
-app = "lifetracker-skissane"
 primary_region = "syd"
 
 [build]
   image = "ghcr.io/skissane/taxtracker:latest"
 
 [env]
-  LIFETRACKER_ALLOWED_HOSTS = "lifetracker-skissane.fly.dev"
   # Fly's proxy terminates TLS and always sets X-Forwarded-Proto.
   LIFETRACKER_TRUST_X_FORWARDED_PROTO = "1"
-  # The Machine's own hostname is a random ID that changes when it's replaced.
-  LIFETRACKER_BACKUP_HOSTNAME = "fly.lifetracker-skissane"
 
 # The volume holds the SQLite database and secret key (LIFETRACKER_DATA_DIR is
 # /data in the image). A volume attaches to a single Machine, so the app must

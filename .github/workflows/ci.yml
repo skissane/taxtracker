@@ -113,8 +113,9 @@ jobs:
           # RepoDigests holds <repo>@sha256:<digest> once pushed.
           echo "image=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
 
-  # Deploy master to Fly.io once the image is published. FLY_API_TOKEN is a
-  # deploy token scoped to the lifetracker-skissane app. Fly pulls the image
+  # Deploy master to Fly.io once the image is published. The FLY_APP secret
+  # holds the app's name (kept out of the public repo; see fly.toml) and
+  # FLY_API_TOKEN is a deploy token scoped to that app. Fly pulls the image
   # from GHCR by digest, so it's exactly the one the test job built; that
   # overrides fly.toml's [build] image (:latest), which could have moved on if
   # a later run has published since. The checkout is only for fly.toml.
@@ -137,7 +138,10 @@ jobs:
       - name: Deploy to Fly.io
         # Fail rather than fall back to fly.toml's :latest if publish produced
         # no digest.
-        run: flyctl deploy --image "${IMAGE:?publish output no image}"
+        run: |
+          : "${FLY_APP:?FLY_APP secret is not set}"
+          flyctl deploy --image "${IMAGE:?publish output no image}"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_APP: ${{ secrets.FLY_APP }}
           IMAGE: ${{ needs.publish.outputs.image }}
