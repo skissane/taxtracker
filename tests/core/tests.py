@@ -994,7 +994,7 @@ class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
 
     def test_backup_hostname_defaults_from_fly_app_name(self):
         self.assertEqual(
-            self._settings(FLY_APP_NAME="example-app")[2], "fly.example-app"
+            self._settings(FLY_APP_NAME="example-app")[2], "example-app.fly.dev"
         )
 
     def test_explicit_backup_hostname_overrides_fly_app_name(self):

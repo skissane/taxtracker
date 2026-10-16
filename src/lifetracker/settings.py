@@ -128,13 +128,14 @@ DEBUG = _env_bool("LIFETRACKER_DEBUG", True)
 # default from it so the app name never has to appear in fly.toml, keeping the
 # production app's name out of the public repo.
 _fly_app_name = os.environ.get("FLY_APP_NAME", "").strip()
+_fly_hostname = f"{_fly_app_name}.fly.dev" if _fly_app_name else ""
 
 # Comma-separated, e.g. "tax.example.com"; on Fly, defaults to <app>.fly.dev.
 # With DEBUG on and this empty, Django allows localhost only. With DEBUG off
 # and this empty, Django would start fine and then reject every request with a
 # 400, so fail at startup instead.
 ALLOWED_HOSTS = _env_list("LIFETRACKER_ALLOWED_HOSTS") or (
-    [f"{_fly_app_name}.fly.dev"] if _fly_app_name else []
+    [_fly_hostname] if _fly_hostname else []
 )
 if not DEBUG and not ALLOWED_HOSTS:
     raise ImproperlyConfigured(
@@ -237,11 +238,11 @@ LIFETRACKER_COMMIT_URL_BASE = os.environ.get(
 LIFETRACKER_COMMIT_ID = os.environ.get("LIFETRACKER_COMMIT_ID", "").strip()
 # Prefixed to backup object keys so backups from different environments (e.g.
 # local dev vs. Docker, which use separate databases) are distinguishable. On
-# Fly, defaults to fly.<app>, as the Machine's own hostname is a random ID that
-# changes when it's replaced.
+# Fly, defaults to <app>.fly.dev, as the Machine's own hostname is a random ID
+# that changes when it's replaced.
 LIFETRACKER_BACKUP_HOSTNAME = (
     os.environ.get("LIFETRACKER_BACKUP_HOSTNAME", "").strip()
-    or (f"fly.{_fly_app_name}" if _fly_app_name else "")
+    or _fly_hostname
     or socket.gethostname()
 )
 
