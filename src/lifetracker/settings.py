@@ -124,10 +124,19 @@ def _env_list(name):
 # (and `just docker-run` turns it back on for local use).
 DEBUG = _env_bool("LIFETRACKER_DEBUG", True)
 
-# Comma-separated, e.g. "tax.example.com". With DEBUG on and this empty, Django
-# allows localhost only. With DEBUG off and this empty, Django would start fine
-# and then reject every request with a 400, so fail at startup instead.
-ALLOWED_HOSTS = _env_list("LIFETRACKER_ALLOWED_HOSTS")
+# Fly.io sets FLY_APP_NAME on its Machines. The settings derived from it below
+# default from it so the app name never has to appear in fly.toml, keeping the
+# production app's name out of the public repo.
+_fly_app_name = os.environ.get("FLY_APP_NAME", "").strip()
+_fly_hostname = f"{_fly_app_name}.fly.dev" if _fly_app_name else ""
+
+# Comma-separated, e.g. "tax.example.com"; on Fly, defaults to <app>.fly.dev.
+# With DEBUG on and this empty, Django allows localhost only. With DEBUG off
+# and this empty, Django would start fine and then reject every request with a
+# 400, so fail at startup instead.
+ALLOWED_HOSTS = _env_list("LIFETRACKER_ALLOWED_HOSTS") or (
+    [_fly_hostname] if _fly_hostname else []
+)
 if not DEBUG and not ALLOWED_HOSTS:
     raise ImproperlyConfigured(
         "LIFETRACKER_ALLOWED_HOSTS must be set when LIFETRACKER_DEBUG is off."
@@ -150,12 +159,14 @@ CSRF_COOKIE_SECURE = not DEBUG
 # Application definition
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    # django.contrib.admin, with a custom admin.site (see admin_site.py).
+    "lifetracker.apps.LifetrackerAdminConfig",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django_google_sso",
     "lifetracker.core",
     "lifetracker.taxtracker",
     "lifetracker.tasktracker",
@@ -227,12 +238,60 @@ LIFETRACKER_COMMIT_URL_BASE = os.environ.get(
     "LIFETRACKER_COMMIT_URL_BASE", "https://github.com/skissane/taxtracker/commit/"
 ).strip()
 LIFETRACKER_COMMIT_ID = os.environ.get("LIFETRACKER_COMMIT_ID", "").strip()
+# Shown instead of "Life Tracker" in the admin header and page titles to visitors
+# who aren't logged in, e.g. on the login page.
+LIFETRACKER_UNAUTHENTICATED_SITE_NAME = (
+    os.environ.get("LIFETRACKER_UNAUTHENTICATED_SITE_NAME", "").strip()
+    or "Life Tracker"
+)
 # Prefixed to backup object keys so backups from different environments (e.g.
-# local dev vs. Docker, which use separate databases) are distinguishable.
+# local dev vs. Docker, which use separate databases) are distinguishable. On
+# Fly, defaults to <app>.fly.dev, as the Machine's own hostname is a random ID
+# that changes when it's replaced.
 LIFETRACKER_BACKUP_HOSTNAME = (
-    os.environ.get("LIFETRACKER_BACKUP_HOSTNAME", "").strip() or socket.gethostname()
+    os.environ.get("LIFETRACKER_BACKUP_HOSTNAME", "").strip()
+    or _fly_hostname
+    or socket.gethostname()
 )
 
+# Google SSO: disabled by default unless credentials are configured. When enabled,
+# a Google account may sign in only if its email is verified, is in
+# LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS, and matches an existing active Django
+# user's email (and no other user's). New users are never auto-created.
+GOOGLE_SSO_CLIENT_ID = os.environ.get("LIFETRACKER_GOOGLE_SSO_CLIENT_ID", "").strip()
+GOOGLE_SSO_CLIENT_SECRET = os.environ.get(
+    "LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET", ""
+).strip()
+GOOGLE_SSO_PROJECT_ID = os.environ.get("LIFETRACKER_GOOGLE_SSO_PROJECT_ID", "").strip()
+GOOGLE_SSO_ENABLED = bool(GOOGLE_SSO_CLIENT_ID and GOOGLE_SSO_CLIENT_SECRET)
+# The library also rejects any email whose domain isn't listed here, unless the
+# Google userinfo has a true "email_verified", which the userinfo endpoint it
+# calls never returns. So accept every domain here, and leave the gating (and
+# the verified-email check) to the email allowlist in pre_validate_user.
+GOOGLE_SSO_ALLOWABLE_DOMAINS = ["*"]
+# Read by lifetracker.google_sso.pre_validate_user, not by the library.
+LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS = _env_list(
+    "LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS"
+)
+# Never create users through Google SSO: only look up existing ones. The library
+# defaults this to True, so it must stay explicitly False. With it False, the
+# library's other user-creation settings (staff/superuser lists, first-superuser
+# promotion, pre-create hook) have no effect, so they're left unset. The
+# pre-create hook still runs, but its return value is ignored.
+GOOGLE_SSO_AUTO_CREATE_USERS = False
+GOOGLE_SSO_PRE_VALIDATE_CALLBACK = "lifetracker.google_sso.pre_validate_user"
+GOOGLE_SSO_LOGIN_FAILED_URL = "admin:index"
+GOOGLE_SSO_NEXT_URL = "admin:index"
+GOOGLE_SSO_SHOW_FAILED_LOGIN_MESSAGE = True
+# The library defaults Google sign-in sessions to 1 hour. None makes it call
+# session.set_expiry(None), so they follow Django's global session policy
+# (SESSION_COOKIE_AGE etc.), the same as password login.
+GOOGLE_SSO_SESSION_COOKIE_AGE = None
+GOOGLE_SSO_ADMIN_ENABLED = True
+GOOGLE_SSO_PAGES_ENABLED = False
+GOOGLE_SSO_CALLBACK_DOMAIN = (
+    os.environ.get("LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN", "").strip() or None
+)
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
