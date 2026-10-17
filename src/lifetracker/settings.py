@@ -250,7 +250,7 @@ LIFETRACKER_BACKUP_HOSTNAME = (
 # Google SSO: disabled by default unless credentials are configured. When enabled,
 # a Google account may sign in only if its email is verified, is in
 # LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS, and matches an existing active Django
-# user's email. New users are never auto-created.
+# user's email (and no other user's). New users are never auto-created.
 GOOGLE_SSO_CLIENT_ID = os.environ.get("LIFETRACKER_GOOGLE_SSO_CLIENT_ID", "").strip()
 GOOGLE_SSO_CLIENT_SECRET = os.environ.get(
     "LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET", ""
@@ -272,7 +272,6 @@ LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS = _env_list(
 # promotion, pre-create hook) have no effect, so they're left unset.
 GOOGLE_SSO_AUTO_CREATE_USERS = False
 GOOGLE_SSO_PRE_VALIDATE_CALLBACK = "lifetracker.google_sso.pre_validate_user"
-GOOGLE_SSO_PRE_LOGIN_CALLBACK = "lifetracker.google_sso.pre_login_user"
 GOOGLE_SSO_LOGIN_FAILED_URL = "admin:index"
 GOOGLE_SSO_NEXT_URL = "admin:index"
 GOOGLE_SSO_SHOW_FAILED_LOGIN_MESSAGE = True

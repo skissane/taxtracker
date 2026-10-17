@@ -57,8 +57,8 @@ a Google account can sign in only if all of these hold:
 
 - Google reports its email address as verified;
 - the email is in `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS`;
-- an existing, active Django user has that email address (compared
-  case-insensitively).
+- exactly one Django user has that email address (compared case-insensitively),
+  and that user is active.
 
 Google sign-in never creates users, and never changes an existing user's
 permissions. The user also needs **Staff status** to get into the admin, as with

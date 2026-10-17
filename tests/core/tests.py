@@ -156,8 +156,12 @@ class GoogleSSOCallbackTests(TestCase):
         ):
             self.assertTrue(self._validate(" a@EXAMPLE.com "))
 
-    def test_pre_login_user_is_noop(self):
-        self.assertIsNone(google_sso.pre_login_user(User(), None))
+    def test_rejects_email_shared_by_several_users(self):
+        User.objects.create_user("alice", email="a@example.com")
+        with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@example.com"]):
+            self.assertTrue(self._validate("a@example.com"))
+            User.objects.create_user("alice2", email="A@Example.com")
+            self.assertFalse(self._validate("a@example.com"))
 
 
 @override_settings(
@@ -211,6 +215,14 @@ class GoogleSSOLoginFlowTests(TestCase):
         self._callback()
         self.assertIsNone(self._logged_in_user_id())
         self.assertFalse(User.objects.filter(email__iexact="a@example.com").exists())
+
+    def test_rejects_email_shared_by_several_users(self):
+        User.objects.create_user("alice2", email="a@example.com", is_staff=True)
+        response = self._callback()
+        self.assertRedirects(
+            response, reverse("admin:index"), fetch_redirect_response=False
+        )
+        self.assertIsNone(self._logged_in_user_id())
 
 
 class FileTypeModelTests(TestCase):
