@@ -264,7 +264,7 @@ GOOGLE_SSO_CLIENT_SECRET = os.environ.get(
 ).strip()
 GOOGLE_SSO_PROJECT_ID = os.environ.get("LIFETRACKER_GOOGLE_SSO_PROJECT_ID", "").strip()
 GOOGLE_SSO_ENABLED = bool(GOOGLE_SSO_CLIENT_ID and GOOGLE_SSO_CLIENT_SECRET)
-GOOGLE_SSO_LOGO_URL = "/static/google_sso/google_g_logo.svg"
+GOOGLE_SSO_LOGO_URL = "/static/core/google_g_logo.svg"
 # The library also rejects any email whose domain isn't listed here, unless the
 # Google userinfo has a true "email_verified", which the userinfo endpoint it
 # calls never returns. So accept every domain here, and leave the gating (and

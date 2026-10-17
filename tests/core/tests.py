@@ -12,6 +12,7 @@ import coverage
 from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.models import User
+from django.contrib.staticfiles import finders
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.management import call_command
@@ -70,8 +71,13 @@ class GoogleSSOSettingsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Sign in with Google")
         self.assertContains(response, 'href="/google_sso/login/"')
-        self.assertContains(response, 'src="/static/google_sso/google_g_logo.svg"')
+        self.assertContains(response, 'src="/static/core/google_g_logo.svg"')
         self.assertNotContains(response, "upload.wikimedia.org")
+
+    def test_google_sso_logo_is_a_static_file(self):
+        # Asserting the src attribute alone would pass even if nothing served it.
+        path = settings.GOOGLE_SSO_LOGO_URL.removeprefix(settings.STATIC_URL)
+        self.assertIsNotNone(finders.find(path))
 
     @override_settings(GOOGLE_SSO_ENABLED=False)
     def test_google_sso_admin_login_button_hidden_when_disabled(self):
