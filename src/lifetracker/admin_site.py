@@ -13,11 +13,11 @@ def _commit_url(commit_url_base, commit_id):
     return f"{commit_url_base.rstrip('/')}/{commit_id}"
 
 
-_LINK_COLOR = "#111827"
-# Keep the background tint aligned with the text color so the header stays legible
-# in both the light and dark admin themes.
+# The admin's gold "Life Tracker" color, from its own stylesheet, so the commit ID
+# and instance name match the site name in both the light and dark themes.
+_TEXT_COLOR = "var(--header-branding-color)"
 _CODE_STYLE = (
-    f"color: {_LINK_COLOR}; background-color: rgba(17, 24, 39, 0.08); "
+    f"color: {_TEXT_COLOR}; background-color: rgba(17, 24, 39, 0.08); "
     "border-radius: 0.25rem; padding: 0 0.25em;"
 )
 
@@ -28,7 +28,7 @@ def _build_admin_site_header(
     if commit_id and link_commit:
         return format_html(
             '{} <code style="{}"><a href="{}" target="_blank" rel="noopener noreferrer"'
-            f' title="{{}}" style="color: {_LINK_COLOR};">{{}}</a></code> '
+            f' title="{{}}" style="color: {_TEXT_COLOR};">{{}}</a></code> '
             '<code style="{}">{}</code>',
             site_name,
             _CODE_STYLE,

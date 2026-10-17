@@ -830,7 +830,7 @@ class AdminSiteHeaderTests(TestCase):
         self.assertIn(f'title="{self.COMMIT_ID}"', header)
         self.assertIn("0123abc", header)
         self.assertIn("instance.local", header)
-        self.assertIn('style="color: #111827;', header)
+        self.assertIn('style="color: var(--header-branding-color);', header)
 
     def test_omits_commit_link_when_no_commit_id(self):
         header = str(
@@ -845,9 +845,9 @@ class AdminSiteHeaderTests(TestCase):
         self.assertIn("Life Tracker", header)
         self.assertIn("instance.local", header)
         self.assertNotIn("href=", header)
-        self.assertIn('style="color: #111827;', header)
+        self.assertIn('style="color: var(--header-branding-color);', header)
 
-    def test_uses_accessible_code_style_for_instance_name(self):
+    def test_uses_site_name_color_for_instance_name(self):
         header = str(
             _build_admin_site_header(
                 site_name="Life Tracker",
@@ -858,7 +858,8 @@ class AdminSiteHeaderTests(TestCase):
             )
         )
         self.assertIn(
-            'style="color: #111827; background-color: rgba(17, 24, 39, 0.08);',
+            'style="color: var(--header-branding-color); '
+            "background-color: rgba(17, 24, 39, 0.08);",
             header,
         )
 
