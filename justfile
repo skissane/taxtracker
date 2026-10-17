@@ -50,9 +50,9 @@ fmt-templates:
 test:
     uv run --group dev pytest
 
-# Run the test suite in parallel, print a coverage report, and write coverage.xml
+# Run the test suite in parallel, print a coverage report, and write coverage.xml and junit.xml
 coverage:
-    uv run --group dev pytest --cov=src/lifetracker --cov=scripts --cov-report=term --cov-report=xml
+    uv run --group dev pytest --cov=src/lifetracker --cov=scripts --cov-report=term --cov-report=xml --junitxml=junit.xml -o junit_family=legacy
 
 # Build the container image
 docker-build:
