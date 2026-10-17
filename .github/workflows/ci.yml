@@ -89,8 +89,10 @@ jobs:
 
     steps:
       - name: Check token configuration
+        env:
+          DEPENDABOT_FIX_TOKEN: ${{ secrets.DEPENDABOT_FIX_TOKEN }}
         run: |
-          if [ -z "${{ secrets.DEPENDABOT_FIX_TOKEN }}" ]; then
+          if [ -z "$DEPENDABOT_FIX_TOKEN" ]; then
             echo "DEPENDABOT_FIX_TOKEN secret is not set" >&2
             exit 1
           fi

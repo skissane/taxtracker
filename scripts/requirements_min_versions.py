@@ -100,7 +100,16 @@ def main(mode: str) -> int:
         return 0
 
     for old_dep, new_dep in replacements:
-        pyproject_text = pyproject_text.replace(f'"{old_dep}"', f'"{new_dep}"', 1)
+        # Match the dependency as a whole TOML string, in either quote style.
+        pyproject_text, count = re.subn(
+            rf"""(["']){re.escape(old_dep)}\1""",
+            lambda m: f"{m.group(1)}{new_dep}{m.group(1)}",
+            pyproject_text,
+            count=1,
+        )
+        if count == 0:
+            print(f"Couldn't find {old_dep!r} in pyproject.toml", file=sys.stderr)
+            return 1
 
     pyproject_path.write_text(pyproject_text, encoding="utf-8")
 
