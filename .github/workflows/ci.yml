@@ -93,6 +93,51 @@ jobs:
           files: coverage.xml
           fail_ci_if_error: true
 
+  # Run `just screenshots` and keep the PNGs as a workflow artifact, for eyeballing
+  # UI changes from the run's summary page; nothing posts them to the PR. A job of
+  # its own, so it runs alongside test and installs the screenshots group only here.
+  # Same needs/if as test, so it skips a commit dependabot-fix is replacing.
+  screenshots:
+    needs: dependabot-fix
+    if: ${{ always() && (needs.dependabot-fix.result == 'skipped' || needs.dependabot-fix.outputs.pushed_changes == 'false') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.10"
+
+      - name: Set up Python
+        run: uv python install 3.14.3
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+        with:
+          just-version: "1.58.0"
+
+      # --with-deps also installs Chromium's system libraries, which the runner
+      # may lack; just screenshots' own `playwright install` is then a no-op.
+      - name: Install Playwright Chromium
+        run: uv run --group screenshots playwright install --with-deps chromium
+
+      - name: Take screenshots
+        run: just screenshots
+
+      # Even if a screenshot test failed, the ones taken may show why.
+      - name: Upload screenshots
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/*.png
+          if-no-files-found: error
+          retention-days: 14
+
   # Runs on a Dependabot branch, whose bumped dependency we don't trust, so the
   # write-capable DEPENDABOT_FIX_TOKEN is only exposed to the final push step:
   # checkout doesn't persist credentials, and nothing installs the project or its
