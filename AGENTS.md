@@ -32,7 +32,10 @@ usually bump only `uv.lock`, even with `versioning-strategy: "increase"`, and wo
 `chore: sync dependency minimum versions` commit. It pushes with the `DEPENDABOT_FIX_TOKEN` secret
 (a token with `contents: write` on the repo; it must be a Dependabot secret, as Dependabot runs
 don't get Actions secrets, and the job fails if it's unset), not `GITHUB_TOKEN`, because pushes
-made with `GITHUB_TOKEN` don't trigger new workflow runs. `test` waits on it and runs only if it
+made with `GITHUB_TOKEN` don't trigger new workflow runs. As the branch's bumped dependency isn't
+trusted, only the final push step sees the token: checkout runs with `persist-credentials: false`,
+and the job never syncs or installs anything (`requirements-check`/`requirements-fix` use
+`uv run --no-project`, as the script needs only the standard library). `test` waits on it and runs only if it
 was skipped or pushed nothing; if it pushed, that run's `test` is skipped and the run the push
 triggers tests the fixed commit.
 

@@ -79,11 +79,16 @@ jobs:
           files: coverage.xml
           fail_ci_if_error: true
 
+  # Runs on a Dependabot branch, whose bumped dependency we don't trust, so the
+  # write-capable DEPENDABOT_FIX_TOKEN is only exposed to the final push step:
+  # checkout doesn't persist credentials, and nothing installs the project or its
+  # dependencies (requirements-fix needs only the standard library). GITHUB_TOKEN
+  # is read-only on Dependabot runs whatever this job asks for, so ask for read.
   dependabot-fix:
     if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     outputs:
       pushed_changes: ${{ steps.commit-and-push.outputs.pushed }}
 
@@ -99,8 +104,8 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.DEPENDABOT_FIX_TOKEN }}
           ref: ${{ github.head_ref }}
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -115,17 +120,21 @@ jobs:
         with:
           just-version: "1.58.0"
 
-      - name: Install dependencies
-        run: just sync
-
       - name: Update dependency minimum versions
         run: just requirements-fix
 
       - name: Update lockfile
         run: uv lock
 
+      # Pushes with DEPENDABOT_FIX_TOKEN, not GITHUB_TOKEN, so the push triggers a
+      # new workflow run. If Dependabot updates the branch after checkout, the push
+      # fails; the run Dependabot's push triggers redoes the fix.
       - name: Commit and push if needed
         id: commit-and-push
+        env:
+          DEPENDABOT_FIX_TOKEN: ${{ secrets.DEPENDABOT_FIX_TOKEN }}
+          HEAD_REF: ${{ github.head_ref }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -135,7 +144,7 @@ jobs:
             echo "pushed=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "chore: sync dependency minimum versions"
-            git push
+            git push "https://x-access-token:${DEPENDABOT_FIX_TOKEN}@github.com/${REPOSITORY}.git" "HEAD:refs/heads/${HEAD_REF}"
             echo "pushed=true" >> "$GITHUB_OUTPUT"
           fi
 
