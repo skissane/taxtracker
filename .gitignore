@@ -37,3 +37,6 @@ junit.xml
 
 # Docker image saved by CI for the publish job
 lifetracker-image.tar
+
+# Admin screenshots written by `just screenshots`
+/screenshots/

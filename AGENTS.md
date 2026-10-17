@@ -56,6 +56,9 @@ uv run pytest tests/taxtracker/tests.py::ItemModelTests::test_str_root
 # Run tests under coverage, print a report, and write coverage.xml and junit.xml (no minimum enforced)
 just coverage
 
+# Screenshot the admin login and index pages into screenshots/ (gitignored)
+just screenshots
+
 # Lint (matches `just lint`/`just fmt-check`, which check the whole repo root)
 uv run ruff check .
 uv run ruff format .
@@ -88,6 +91,13 @@ measures `scripts` alongside `src/lifetracker`. Run via `pytest` (using `pytest-
 cores by `pytest-xdist` (`-n auto`, set as a default in `addopts`). `PYTHONPATH=scripts manage.py test
 tests.core tests.taxtracker tests.cli tests.scripts` still works as an unparallelised fallback,
 referencing these as `tests.*` labels rather than the `lifetracker.*` app labels.
+
+**Screenshots:** `screenshot_tests/` holds Playwright tests that drive a headless Chromium
+against pytest-django's `live_server` (empty test DB) and save full-page PNGs to the gitignored
+`screenshots/` directory, for eyeballing UI changes. They're local-only, run by `just screenshots`
+(which also runs `playwright install chromium`): they're outside `testpaths`, so `pytest`,
+`just coverage` and CI never collect or measure them, and Playwright is in its own `screenshots`
+dependency group, which CI doesn't install. They assert nothing beyond the pages loading.
 
 **File storage:** All uploaded attachments are stored in the SQLite database, not on disk. `DatabaseStorage` (in `core/models.py`) is a custom Django storage backend that writes file content to `DBStoredFile` rows. Storage paths have the form `db/<pk>/<filename>`. Files are served through `DBStoredFileAdmin.serve_file_view` at `/admin/core/dbstoredfile/file/<pk>/`.
 
