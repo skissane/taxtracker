@@ -54,6 +54,17 @@ jobs:
       - name: Run tests with coverage
         run: just coverage
 
+      # Codecov Test Analytics. Runs even if the tests failed, as that's when the
+      # results matter most; placed straight after them so a later step's failure
+      # can't skip it.
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: junit.xml
+          report_type: test_results
+
       - name: Build Docker image
         run: just docker-build
 

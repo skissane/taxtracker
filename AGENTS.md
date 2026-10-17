@@ -13,8 +13,10 @@ everything CI runs, or `just --list` to see individual recipes (`lint`, `fmt-che
 `ci.yml` if the workflow changes without a matching justfile edit; `run_workflow_local.py`
 avoids that by parsing the workflow YAML directly and running its `run:` steps as written
 (see its docstring for what it does and doesn't support). After `just coverage` runs, CI uploads
-`coverage.xml` to Codecov (`codecov/codecov-action`); this step needs a `CODECOV_TOKEN` repo
-secret from codecov.io and is skipped by `run_workflow_local.py` since it's a `uses:` step. `ci.yml` has five jobs, `test`, `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment);
+`coverage.xml` to Codecov (`codecov/codecov-action`), and also uploads the `junit.xml` test results
+it writes for Codecov Test Analytics (`report_type: test_results`, even if the tests failed; not
+`codecov/test-results-action`, which is deprecated); these steps need a `CODECOV_TOKEN` repo
+secret from codecov.io and are skipped by `run_workflow_local.py` since they're `uses:` steps. `ci.yml` has five jobs, `test`, `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment);
 `run_workflow_local.py` runs the first job in the file unless given `--job`, so keep `test` first.
 Don't run `--job dependabot-fix`, `--job publish` or `--job deploy` locally: it doesn't evaluate
 `if:`, so it would push commits to the current branch, push to GHCR or deploy to production.
@@ -51,7 +53,7 @@ uv run pytest
 uv run pytest tests/taxtracker/tests.py::ItemModelTests
 uv run pytest tests/taxtracker/tests.py::ItemModelTests::test_str_root
 
-# Run tests under coverage, print a report, and write coverage.xml (no minimum enforced)
+# Run tests under coverage, print a report, and write coverage.xml and junit.xml (no minimum enforced)
 just coverage
 
 # Lint (matches `just lint`/`just fmt-check`, which check the whole repo root)
