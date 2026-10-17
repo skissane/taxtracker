@@ -38,7 +38,12 @@ def _screenshot(page, name):
     page.screenshot(path=SCREENSHOT_DIR / f"{name}.png", full_page=True)
 
 
-def test_login(page):
+def test_login(page, settings):
+    # Enough Google SSO config to show its "Sign in with Google" button; the
+    # credentials are fake, so the button itself wouldn't work.
+    settings.GOOGLE_SSO_ENABLED = True
+    settings.GOOGLE_SSO_CLIENT_ID = "screenshots-client-id"
+    settings.GOOGLE_SSO_CLIENT_SECRET = "screenshots-client-secret"
     page.goto("/admin/login/")
     _screenshot(page, "login")
 
