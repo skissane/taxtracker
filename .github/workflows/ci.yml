@@ -74,6 +74,34 @@ jobs:
           files: coverage.xml
           fail_ci_if_error: true
 
+  # Check, on PRs too, that the secrets deploy needs are set and FLY_APP names an
+  # app the token can see, so a missing or broken setup fails the build rather
+  # than only surfacing when master deploys. A separate job, not a step in test,
+  # so run_workflow_local.py (which runs test, with no secrets) still works.
+  # Skipped for Dependabot, whose runs get Dependabot secrets, not the repo's
+  # Actions secrets. Merging its PRs still runs it, as the merger is the actor.
+  check-fly:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions: {}
+
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@1.6
+
+      - name: Check Fly.io secrets and app
+        # FLY_API_TOKEN is a deploy token scoped to the app, which can't list
+        # apps (that's org-wide), so query the app itself.
+        run: |
+          : "${FLY_APP:?FLY_APP secret is not set}"
+          : "${FLY_API_TOKEN:?FLY_API_TOKEN secret is not set}"
+          if ! flyctl status -a "$FLY_APP" >/dev/null; then
+            echo "::error::FLY_APP names no app FLY_API_TOKEN can access"
+            exit 1
+          fi
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_APP: ${{ secrets.FLY_APP }}
+
   # Push the image the test job built to GHCR, tagged with the commit SHA and
   # latest. Its image output (<repo>@sha256:<digest>) is what deploy deploys.
   publish:
@@ -113,13 +141,14 @@ jobs:
           # RepoDigests holds <repo>@sha256:<digest> once pushed.
           echo "image=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
 
-  # Deploy master to Fly.io once the image is published. FLY_API_TOKEN is a
-  # deploy token scoped to the lifetracker-skissane app. Fly pulls the image
+  # Deploy master to Fly.io once the image is published. The FLY_APP secret
+  # holds the app's name (kept out of the public repo; see fly.toml) and
+  # FLY_API_TOKEN is a deploy token scoped to that app. Fly pulls the image
   # from GHCR by digest, so it's exactly the one the test job built; that
   # overrides fly.toml's [build] image (:latest), which could have moved on if
   # a later run has published since. The checkout is only for fly.toml.
   deploy:
-    needs: publish
+    needs: [publish, check-fly]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -136,8 +165,12 @@ jobs:
 
       - name: Deploy to Fly.io
         # Fail rather than fall back to fly.toml's :latest if publish produced
-        # no digest.
-        run: flyctl deploy --image "${IMAGE:?publish output no image}"
+        # no digest. --ha=false only matters if the app has no Machine yet
+        # (e.g. its first deploy): the volume attaches to one, so create one.
+        run: |
+          : "${FLY_APP:?FLY_APP secret is not set}"
+          flyctl deploy --ha=false --image "${IMAGE:?publish output no image}"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_APP: ${{ secrets.FLY_APP }}
           IMAGE: ${{ needs.publish.outputs.image }}

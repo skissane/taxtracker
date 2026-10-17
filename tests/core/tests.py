@@ -935,6 +935,22 @@ class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
             )[0]
         )
 
+    def test_hosts_default_from_fly_app_name(self):
+        self.assertEqual(
+            self._settings(LIFETRACKER_DEBUG="0", FLY_APP_NAME="example-app")[1],
+            ["example-app.fly.dev"],
+        )
+
+    def test_explicit_hosts_override_fly_app_name(self):
+        self.assertEqual(
+            self._settings(
+                LIFETRACKER_DEBUG="0",
+                LIFETRACKER_ALLOWED_HOSTS="tax.example.com",
+                FLY_APP_NAME="example-app",
+            )[1],
+            ["tax.example.com"],
+        )
+
     def test_proxy_settings(self):
         debug, _, origins, proxy_header, _, _ = self._settings(
             LIFETRACKER_DEBUG="true",
@@ -974,6 +990,19 @@ class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
                 LIFETRACKER_BACKUP_HOSTNAME="test-instance",
             ),
             ("https://example.invalid/commit/", "deadbeef", "test-instance"),
+        )
+
+    def test_backup_hostname_defaults_from_fly_app_name(self):
+        self.assertEqual(
+            self._settings(FLY_APP_NAME="example-app")[2], "example-app.fly.dev"
+        )
+
+    def test_explicit_backup_hostname_overrides_fly_app_name(self):
+        self.assertEqual(
+            self._settings(
+                LIFETRACKER_BACKUP_HOSTNAME="test-instance", FLY_APP_NAME="example-app"
+            )[2],
+            "test-instance",
         )
 
 
@@ -1024,6 +1053,12 @@ class EnsureSuperuserCommandTests(TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
+        # Likewise a real LIFETRACKER_INITIAL_ADMIN_PASSWORD (e.g. from .env);
+        # patch.dict restores the environment afterwards.
+        env_patcher = mock.patch.dict(os.environ)
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
+        os.environ.pop("LIFETRACKER_INITIAL_ADMIN_PASSWORD", None)
 
     def _call(self, **kwargs):
         """Call ensure_superuser and return captured stdout."""
@@ -1059,6 +1094,36 @@ class EnsureSuperuserCommandTests(TestCase):
         # The password itself must never be printed.
         self.assertNotIn("from-the-file", output)
         self.assertIn(str(self.password_file), output)
+
+    def test_creates_new_user_with_password_from_env(self):
+        os.environ["LIFETRACKER_INITIAL_ADMIN_PASSWORD"] = " from-the-env\n"
+        output = self._call(username="admin")
+        user = User.objects.get(username="admin")
+        self.assertTrue(user.check_password("from-the-env"))
+        self.assertNotIn("from-the-env", output)
+        self.assertIn("$LIFETRACKER_INITIAL_ADMIN_PASSWORD", output)
+
+    def test_env_password_takes_precedence_over_file(self):
+        self.password_file.write_text("from-the-file\n")
+        os.environ["LIFETRACKER_INITIAL_ADMIN_PASSWORD"] = "from-the-env"
+        self._call(username="admin")
+        user = User.objects.get(username="admin")
+        self.assertTrue(user.check_password("from-the-env"))
+
+    def test_blank_env_password_falls_back_to_file(self):
+        self.password_file.write_text("from-the-file\n")
+        os.environ["LIFETRACKER_INITIAL_ADMIN_PASSWORD"] = "  "
+        output = self._call(username="admin")
+        user = User.objects.get(username="admin")
+        self.assertTrue(user.check_password("from-the-file"))
+        self.assertIn(str(self.password_file), output)
+
+    def test_env_password_ignored_for_existing_user(self):
+        User.objects.create_superuser("admin", "", "existingpassword")
+        os.environ["LIFETRACKER_INITIAL_ADMIN_PASSWORD"] = "from-the-env"
+        self._call(username="admin")
+        user = User.objects.get(username="admin")
+        self.assertTrue(user.check_password("existingpassword"))
 
     def test_empty_password_file_falls_back_to_random_password(self):
         self.password_file.parent.mkdir(parents=True, exist_ok=True)
