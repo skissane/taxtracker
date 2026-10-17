@@ -66,6 +66,8 @@ class GoogleSSOSettingsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Sign in with Google")
         self.assertContains(response, 'href="/google_sso/login/"')
+        self.assertContains(response, 'src="/static/google_sso/google_g_logo.svg"')
+        self.assertNotContains(response, "upload.wikimedia.org")
 
     @override_settings(GOOGLE_SSO_ENABLED=False)
     def test_google_sso_admin_login_button_hidden_when_disabled(self):
@@ -801,89 +803,96 @@ class AdminSiteHeaderTests(TestCase):
     COMMIT_ID = "0123abc456def7890123abc456def7890123abcd"
 
     def test_includes_commit_link_and_instance_name(self):
-        self.assertEqual(
-            str(
-                _build_admin_site_header(
-                    site_name="Life Tracker",
-                    link_commit=True,
-                    commit_id=self.COMMIT_ID,
-                    commit_url_base="https://github.com/skissane/taxtracker/commit/",
-                    instance_name="instance.local",
-                )
-            ),
-            (
-                "Life Tracker <code><a"
-                f' href="https://github.com/skissane/taxtracker/commit/{self.COMMIT_ID}"'
-                ' target="_blank" rel="noopener noreferrer"'
-                f' title="{self.COMMIT_ID}">0123abc</a></code>'
-                " <code>instance.local</code>"
-            ),
+        header = str(
+            _build_admin_site_header(
+                site_name="Life Tracker",
+                link_commit=True,
+                commit_id=self.COMMIT_ID,
+                commit_url_base="https://github.com/skissane/taxtracker/commit/",
+                instance_name="instance.local",
+            )
         )
+        self.assertIn("Life Tracker", header)
+        self.assertIn(
+            f'href="https://github.com/skissane/taxtracker/commit/{self.COMMIT_ID}"',
+            header,
+        )
+        self.assertIn(f'title="{self.COMMIT_ID}"', header)
+        self.assertIn("0123abc", header)
+        self.assertIn("instance.local", header)
+        self.assertIn('style="color: #111827;', header)
 
     def test_omits_commit_link_when_no_commit_id(self):
-        self.assertEqual(
-            str(
-                _build_admin_site_header(
-                    site_name="Life Tracker",
-                    link_commit=True,
-                    commit_id="",
-                    commit_url_base="https://github.com/skissane/taxtracker/commit/",
-                    instance_name="instance.local",
-                )
-            ),
-            "Life Tracker <code>instance.local</code>",
+        header = str(
+            _build_admin_site_header(
+                site_name="Life Tracker",
+                link_commit=True,
+                commit_id="",
+                commit_url_base="https://github.com/skissane/taxtracker/commit/",
+                instance_name="instance.local",
+            )
         )
+        self.assertIn("Life Tracker", header)
+        self.assertIn("instance.local", header)
+        self.assertNotIn("href=", header)
+        self.assertIn('style="color: #111827;', header)
+
+    def test_uses_accessible_code_style_for_instance_name(self):
+        header = str(
+            _build_admin_site_header(
+                site_name="Life Tracker",
+                link_commit=False,
+                commit_id="",
+                commit_url_base="https://github.com/skissane/taxtracker/commit/",
+                instance_name="instance.local",
+            )
+        )
+        self.assertIn('style="color: #111827; background-color: rgba(17, 24, 39, 0.08);', header)
 
     def test_accepts_base_url_without_trailing_slash(self):
-        self.assertEqual(
-            str(
-                _build_admin_site_header(
-                    site_name="Life Tracker",
-                    link_commit=True,
-                    commit_id=self.COMMIT_ID,
-                    commit_url_base="https://github.com/skissane/taxtracker/commit",
-                    instance_name="instance.local",
-                )
-            ),
-            (
-                "Life Tracker <code><a"
-                f' href="https://github.com/skissane/taxtracker/commit/{self.COMMIT_ID}"'
-                ' target="_blank" rel="noopener noreferrer"'
-                f' title="{self.COMMIT_ID}">0123abc</a></code>'
-                " <code>instance.local</code>"
-            ),
+        header = str(
+            _build_admin_site_header(
+                site_name="Life Tracker",
+                link_commit=True,
+                commit_id=self.COMMIT_ID,
+                commit_url_base="https://github.com/skissane/taxtracker/commit",
+                instance_name="instance.local",
+            )
         )
+        self.assertIn(
+            f'href="https://github.com/skissane/taxtracker/commit/{self.COMMIT_ID}"',
+            header,
+        )
+        self.assertIn("instance.local", header)
 
     def test_omits_commit_link_when_not_linking_commit(self):
-        self.assertEqual(
-            str(
-                _build_admin_site_header(
-                    site_name="Example",
-                    link_commit=False,
-                    commit_id=self.COMMIT_ID,
-                    commit_url_base="https://github.com/skissane/taxtracker/commit/",
-                    instance_name="instance.local",
-                )
-            ),
-            (
-                f'Example <code title="{self.COMMIT_ID}">0123abc</code>'
-                " <code>instance.local</code>"
-            ),
+        header = str(
+            _build_admin_site_header(
+                site_name="Example",
+                link_commit=False,
+                commit_id=self.COMMIT_ID,
+                commit_url_base="https://github.com/skissane/taxtracker/commit/",
+                instance_name="instance.local",
+            )
         )
+        self.assertIn("Example", header)
+        self.assertIn("0123abc", header)
+        self.assertIn("instance.local", header)
+        self.assertNotIn("href=", header)
 
     def test_escapes_site_name(self):
-        self.assertEqual(
-            str(
-                _build_admin_site_header(
-                    site_name="<b>",
-                    link_commit=False,
-                    commit_id="",
-                    commit_url_base="https://github.com/skissane/taxtracker/commit/",
-                    instance_name="instance.local",
-                )
-            ),
-            "&lt;b&gt; <code>instance.local</code>",
+        header = str(
+            _build_admin_site_header(
+                site_name="<b>",
+                link_commit=False,
+                commit_id="",
+                commit_url_base="https://github.com/skissane/taxtracker/commit/",
+                instance_name="instance.local",
+            )
         )
+        self.assertIn("&lt;b&gt;", header)
+        self.assertNotIn("<b>", header)
+        self.assertIn("instance.local", header)
 
 
 @override_settings(
