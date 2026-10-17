@@ -8,6 +8,7 @@ dependencies = [
     "boto3>=1.34.46",
     "click>=8.4.2",
     "django>=6.1.1",
+    "django-google-sso>=10.0.0",
     "gunicorn>=26.2.0",
     "pdfkit>=1.0.0",
     "whitenoise>=6.12.0",

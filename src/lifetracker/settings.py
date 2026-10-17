@@ -165,6 +165,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django_google_sso",
     "lifetracker.core",
     "lifetracker.taxtracker",
     "lifetracker.tasktracker",
@@ -246,6 +247,44 @@ LIFETRACKER_BACKUP_HOSTNAME = (
     or socket.gethostname()
 )
 
+# Google SSO: disabled by default unless credentials are configured. When enabled,
+# a Google account may sign in only if its email is verified, is in
+# LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS, and matches an existing active Django
+# user's email (and no other user's). New users are never auto-created.
+GOOGLE_SSO_CLIENT_ID = os.environ.get("LIFETRACKER_GOOGLE_SSO_CLIENT_ID", "").strip()
+GOOGLE_SSO_CLIENT_SECRET = os.environ.get(
+    "LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET", ""
+).strip()
+GOOGLE_SSO_PROJECT_ID = os.environ.get("LIFETRACKER_GOOGLE_SSO_PROJECT_ID", "").strip()
+GOOGLE_SSO_ENABLED = bool(GOOGLE_SSO_CLIENT_ID and GOOGLE_SSO_CLIENT_SECRET)
+# The library also rejects any email whose domain isn't listed here, unless the
+# Google userinfo has a true "email_verified", which the userinfo endpoint it
+# calls never returns. So accept every domain here, and leave the gating (and
+# the verified-email check) to the email allowlist in pre_validate_user.
+GOOGLE_SSO_ALLOWABLE_DOMAINS = ["*"]
+# Read by lifetracker.google_sso.pre_validate_user, not by the library.
+LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS = _env_list(
+    "LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS"
+)
+# Never create users through Google SSO: only look up existing ones. The library
+# defaults this to True, so it must stay explicitly False. With it False, the
+# library's other user-creation settings (staff/superuser lists, first-superuser
+# promotion, pre-create hook) have no effect, so they're left unset. The
+# pre-create hook still runs, but its return value is ignored.
+GOOGLE_SSO_AUTO_CREATE_USERS = False
+GOOGLE_SSO_PRE_VALIDATE_CALLBACK = "lifetracker.google_sso.pre_validate_user"
+GOOGLE_SSO_LOGIN_FAILED_URL = "admin:index"
+GOOGLE_SSO_NEXT_URL = "admin:index"
+GOOGLE_SSO_SHOW_FAILED_LOGIN_MESSAGE = True
+# The library defaults Google sign-in sessions to 1 hour. None makes it call
+# session.set_expiry(None), so they follow Django's global session policy
+# (SESSION_COOKIE_AGE etc.), the same as password login.
+GOOGLE_SSO_SESSION_COOKIE_AGE = None
+GOOGLE_SSO_ADMIN_ENABLED = True
+GOOGLE_SSO_PAGES_ENABLED = False
+GOOGLE_SSO_CALLBACK_DOMAIN = (
+    os.environ.get("LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN", "").strip() or None
+)
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators

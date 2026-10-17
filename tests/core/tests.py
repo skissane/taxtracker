@@ -1,4 +1,5 @@
 import ast
+import importlib.util
 import io
 import os
 import subprocess
@@ -8,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 import coverage
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -15,9 +17,11 @@ from django.core.files.base import ContentFile
 from django.core.management import call_command
 from django.db import IntegrityError
 from django.forms import inlineformset_factory
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
+from django_google_sso.main import GoogleAuth
 
+from lifetracker import google_sso
 from lifetracker.asgi import application as asgi_application
 from lifetracker.core.admin import (
     DBStoredFileAdmin,
@@ -36,6 +40,204 @@ from lifetracker.core.models import (
 )
 from lifetracker.urls import _build_admin_site_header
 from lifetracker.wsgi import application as wsgi_application
+
+_GOOGLE_SSO_ENABLED_SETTINGS = {
+    "GOOGLE_SSO_ENABLED": True,
+    "GOOGLE_SSO_CLIENT_ID": "test-client-id",
+    "GOOGLE_SSO_CLIENT_SECRET": "test-client-secret",
+    "GOOGLE_SSO_PROJECT_ID": "test-project-id",
+    "GOOGLE_SSO_CALLBACK_DOMAIN": "testserver",
+}
+
+
+class GoogleSSOSettingsTests(TestCase):
+    """Tests for the locked-down Google SSO defaults."""
+
+    def test_google_sso_defaults_block_new_accounts(self):
+        self.assertIs(settings.GOOGLE_SSO_AUTO_CREATE_USERS, False)
+        self.assertEqual(
+            settings.GOOGLE_SSO_PRE_VALIDATE_CALLBACK,
+            "lifetracker.google_sso.pre_validate_user",
+        )
+
+    def test_google_sso_admin_login_button_renders_when_enabled(self):
+        with override_settings(**_GOOGLE_SSO_ENABLED_SETTINGS):
+            response = self.client.get(reverse("admin:login"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Sign in with Google")
+        self.assertContains(response, 'href="/google_sso/login/"')
+
+    @override_settings(GOOGLE_SSO_ENABLED=False)
+    def test_google_sso_admin_login_button_hidden_when_disabled(self):
+        response = self.client.get(reverse("admin:login"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Sign in with Google")
+        # The stock username/password form must still be there.
+        self.assertContains(response, 'id="login-form"')
+
+    def test_google_sso_start_login_redirects_to_google_when_enabled(self):
+        with override_settings(**_GOOGLE_SSO_ENABLED_SETTINGS):
+            response = self.client.get(reverse("django_google_sso:oauth_start_login"))
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response["Location"].startswith("https://accounts.google.com/"),
+            response["Location"],
+        )
+
+    @override_settings(GOOGLE_SSO_ENABLED=False)
+    def test_google_sso_routes_404_when_disabled(self):
+        for name in ("oauth_start_login", "oauth_callback"):
+            with self.subTest(name=name):
+                response = self.client.get(reverse(f"django_google_sso:{name}"))
+                self.assertEqual(response.status_code, 404)
+
+    def test_google_sso_urls_match_library(self):
+        """lifetracker.google_sso_urls must mirror django_google_sso.urls.
+
+        Parsed rather than imported: the library module's urlpatterns depend on
+        whether SSO was enabled when it was first imported. If this fails after
+        upgrading django-google-sso, update lifetracker/google_sso_urls.py.
+        """
+
+        def routes(module_name):
+            origin = importlib.util.find_spec(module_name).origin
+            tree = ast.parse(Path(origin).read_text())
+            found = set()
+            for node in ast.walk(tree):
+                if not (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "path"
+                ):
+                    continue
+                route, view = node.args
+                # Unwrap our _require_sso_enabled(views.x) to views.x.
+                if isinstance(view, ast.Call):
+                    (view,) = view.args
+                (name,) = (kw.value.value for kw in node.keywords if kw.arg == "name")
+                found.add((route.value, ast.unparse(view), name))
+            return found
+
+        library_routes = routes("django_google_sso.urls")
+        self.assertTrue(library_routes)
+        self.assertEqual(routes("lifetracker.google_sso_urls"), library_routes)
+
+
+@override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=[])
+class GoogleSSOCallbackTests(TestCase):
+    """Tests for the lifetracker.google_sso callbacks django_google_sso invokes."""
+
+    def _validate(self, email, verified_email=True):
+        return google_sso.pre_validate_user(
+            {"email": email, "verified_email": verified_email}, request=None
+        )
+
+    def test_rejects_unverified_email(self):
+        with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@x.com"]):
+            for verified_email in (False, None, "true"):
+                with self.subTest(verified_email=verified_email):
+                    self.assertFalse(self._validate("a@x.com", verified_email))
+
+    def test_rejects_missing_or_blank_email(self):
+        with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@x.com"]):
+            self.assertFalse(google_sso.pre_validate_user({}, request=None))
+            self.assertFalse(self._validate("   "))
+
+    def test_rejects_everyone_when_allowlist_empty(self):
+        self.assertFalse(self._validate("a@example.com"))
+
+    def test_rejects_email_not_in_allowlist(self):
+        with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@x.com"]):
+            self.assertFalse(self._validate("b@x.com"))
+
+    def test_allows_allowlisted_email_case_insensitively(self):
+        with override_settings(
+            LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["x@x.com", "A@Example.com"]
+        ):
+            self.assertTrue(self._validate(" a@EXAMPLE.com "))
+
+    def test_rejects_email_shared_by_several_users(self):
+        User.objects.create_user("alice", email="a@example.com")
+        with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@example.com"]):
+            self.assertTrue(self._validate("a@example.com"))
+            User.objects.create_user("alice2", email="A@Example.com")
+            self.assertFalse(self._validate("a@example.com"))
+
+
+@override_settings(
+    **_GOOGLE_SSO_ENABLED_SETTINGS,
+    LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@example.com"],
+)
+class GoogleSSOLoginFlowTests(TestCase):
+    """End-to-end tests of the library's callback view with our settings, with
+    only the calls out to Google mocked."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            "alice", email="A@example.com", is_staff=True
+        )
+
+    def _callback(self, **user_info):
+        user_info = {"email": "a@example.com", "verified_email": True} | user_info
+        session = self.client.session
+        session["sso_state"] = "test-state"
+        session.save()
+        with (
+            mock.patch.object(GoogleAuth, "flow", new_callable=mock.PropertyMock),
+            mock.patch.object(GoogleAuth, "get_user_info", return_value=user_info),
+        ):
+            return self.client.get(
+                reverse("django_google_sso:oauth_callback"),
+                {"code": "test-code", "state": "test-state"},
+            )
+
+    def _logged_in_user_id(self):
+        return self.client.session.get("_auth_user_id")
+
+    def test_allowlisted_verified_existing_user_logs_in(self):
+        response = self._callback()
+        self.assertRedirects(response, reverse("admin:index"))
+        self.assertEqual(self._logged_in_user_id(), str(self.user.pk))
+
+    @override_settings(SESSION_COOKIE_AGE=12345)
+    def test_session_expiry_matches_password_login(self):
+        self._callback()
+        session = self.client.session
+        self.assertEqual(self._logged_in_user_id(), str(self.user.pk))
+        # No per-session expiry override, so the global policy applies.
+        self.assertNotIn("_session_expiry", session)
+        self.assertEqual(session.get_expiry_age(), 12345)
+
+    def test_rejects_email_not_in_allowlist(self):
+        User.objects.create_user("bob", email="b@example.com", is_staff=True)
+        self._callback(email="b@example.com")
+        self.assertIsNone(self._logged_in_user_id())
+
+    def test_rejects_unverified_email(self):
+        for verified in (False, None):
+            with self.subTest(verified=verified):
+                self._callback(verified_email=verified)
+                self.assertIsNone(self._logged_in_user_id())
+
+    def test_does_not_create_missing_user(self):
+        self.user.delete()
+        self._callback()
+        self.assertIsNone(self._logged_in_user_id())
+        self.assertFalse(User.objects.filter(email__iexact="a@example.com").exists())
+
+    def test_rejects_inactive_user(self):
+        self.user.is_active = False
+        self.user.save()
+        self._callback()
+        self.assertIsNone(self._logged_in_user_id())
+
+    def test_rejects_email_shared_by_several_users(self):
+        User.objects.create_user("alice2", email="a@example.com", is_staff=True)
+        response = self._callback()
+        self.assertRedirects(
+            response, reverse("admin:index"), fetch_redirect_response=False
+        )
+        self.assertIsNone(self._logged_in_user_id())
 
 
 class FileTypeModelTests(TestCase):
@@ -1003,6 +1205,63 @@ class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
                 LIFETRACKER_BACKUP_HOSTNAME="test-instance", FLY_APP_NAME="example-app"
             )[2],
             "test-instance",
+        )
+
+
+class SettingsGoogleSSOEnvTests(_SettingsSubprocessMixin, TestCase):
+    """Google SSO is configured only from LIFETRACKER_GOOGLE_SSO_* variables."""
+
+    EXPR = (
+        "(s.GOOGLE_SSO_ENABLED, s.GOOGLE_SSO_CLIENT_ID, s.GOOGLE_SSO_CLIENT_SECRET,"
+        " s.GOOGLE_SSO_PROJECT_ID, s.GOOGLE_SSO_CALLBACK_DOMAIN,"
+        " s.LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS)"
+    )
+
+    def _settings(self, **env):
+        with tempfile.TemporaryDirectory() as home:
+            proc = self._run(home, extra_env=env, expr=self.EXPR)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return ast.literal_eval(proc.stdout.strip())
+
+    def test_defaults_disabled(self):
+        self.assertEqual(self._settings(), (False, "", "", "", None, []))
+
+    def test_reads_lifetracker_variables(self):
+        self.assertEqual(
+            self._settings(
+                LIFETRACKER_GOOGLE_SSO_CLIENT_ID=" id ",
+                LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET=" secret ",
+                LIFETRACKER_GOOGLE_SSO_PROJECT_ID=" project ",
+                LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN=" tax.example.com ",
+                LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=" a@x.com, ,b@x.com,",
+            ),
+            (
+                True,
+                "id",
+                "secret",
+                "project",
+                "tax.example.com",
+                ["a@x.com", "b@x.com"],
+            ),
+        )
+
+    def test_enabled_needs_both_id_and_secret(self):
+        for env in (
+            {"LIFETRACKER_GOOGLE_SSO_CLIENT_ID": "id"},
+            {"LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET": "secret"},
+        ):
+            with self.subTest(env=env):
+                self.assertFalse(self._settings(**env)[0])
+
+    def test_ignores_unprefixed_variables(self):
+        self.assertEqual(
+            self._settings(
+                GOOGLE_SSO_CLIENT_ID="id",
+                GOOGLE_SSO_CLIENT_SECRET="secret",
+                GOOGLE_SSO_PROJECT_ID="project",
+                GOOGLE_SSO_CALLBACK_DOMAIN="tax.example.com",
+            ),
+            (False, "", "", "", None, []),
         )
 
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One-time setup of the production Fly.io app (see README.md's Fly.io section).
-# Reads FLY_APP, LIFETRACKER_INITIAL_ADMIN_PASSWORD and the
-# LIFETRACKER_BACKUP_S3_* settings (ENDPOINT_URL and REGION_NAME optional)
+# Reads FLY_APP, LIFETRACKER_INITIAL_ADMIN_PASSWORD, the
+# LIFETRACKER_BACKUP_S3_* settings (ENDPOINT_URL and REGION_NAME optional) and,
+# optionally, the LIFETRACKER_GOOGLE_SSO_* settings (except CALLBACK_DOMAIN)
 # from ./.env, then creates whatever is missing: the Fly app, its volume, those
 # settings as Fly secrets, and the FLY_APP and FLY_API_TOKEN GitHub Actions
 # secrets (the latter a new deploy token scoped to the app). Safe to re-run: it
@@ -37,6 +38,11 @@ required_fly_secrets=(
 optional_fly_secrets=(
   LIFETRACKER_BACKUP_S3_ENDPOINT_URL
   LIFETRACKER_BACKUP_S3_REGION_NAME
+  # Production shares local dev's OAuth client, which has both redirect URIs.
+  LIFETRACKER_GOOGLE_SSO_CLIENT_ID
+  LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET
+  LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS
+  LIFETRACKER_GOOGLE_SSO_PROJECT_ID
 )
 fly_secrets=("${required_fly_secrets[@]}" "${optional_fly_secrets[@]}")
 
@@ -68,6 +74,19 @@ done
 if [ ${#missing[@]} -gt 0 ]; then
   echo "error: missing or empty in .env: ${missing[*]}" >&2
   exit 1
+fi
+# Google sign-in is enabled only when both are set, so one alone would silently
+# leave it off.
+has_sso_id=$([ -n "$LIFETRACKER_GOOGLE_SSO_CLIENT_ID" ] && echo y || echo n)
+has_sso_secret=$([ -n "$LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET" ] && echo y || echo n)
+if [ "$has_sso_id" != "$has_sso_secret" ]; then
+  echo "error: set both or neither of LIFETRACKER_GOOGLE_SSO_CLIENT_ID and" \
+    "LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET in .env" >&2
+  exit 1
+fi
+if [ -n "$LIFETRACKER_GOOGLE_SSO_CLIENT_ID" ] && [ -z "$LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS" ]; then
+  echo "warning: LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS is empty in .env, so" \
+    "Google sign-in will reject everyone" >&2
 fi
 
 # The volume's name and region come from fly.toml, so they can't drift from it.
