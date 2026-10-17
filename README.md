@@ -137,9 +137,10 @@ development and production: register each one's callback URL as a redirect URI
    attached). The `https` comes from Fly's proxy, which sets `X-Forwarded-Proto`;
    `LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN` isn't needed.
 2. Run `just fly-setup` (see [One-time setup](#one-time-setup)). It sets the
-   `LIFETRACKER_GOOGLE_SSO_*` values from `.env` as Fly secrets, not in `fly.toml`,
-   which is in this public repo; setting secrets restarts the Machine with them.
-   It refuses to set only one of the client ID and secret, and warns if
+   `LIFETRACKER_GOOGLE_SSO_*` values from `.env` (except `CALLBACK_DOMAIN`) as Fly
+   secrets, not in `fly.toml`, which is in this public repo; setting secrets
+   restarts the Machine with them. It refuses to set only one of the client ID and
+   secret, and warns if
    `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS` is empty.
 3. Log in to production with your password and set your user's **Email address**
    to your Google email, as in local development. The database is separate, so this

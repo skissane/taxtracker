@@ -2,8 +2,9 @@
 # One-time setup of the production Fly.io app (see README.md's Fly.io section).
 # Reads FLY_APP, LIFETRACKER_INITIAL_ADMIN_PASSWORD, the
 # LIFETRACKER_BACKUP_S3_* settings (ENDPOINT_URL and REGION_NAME optional) and,
-# optionally, the LIFETRACKER_GOOGLE_SSO_* settings from ./.env, then creates
-# whatever is missing: the Fly app, its volume, those settings as Fly secrets, and the FLY_APP and FLY_API_TOKEN GitHub Actions
+# optionally, the LIFETRACKER_GOOGLE_SSO_* settings (except CALLBACK_DOMAIN)
+# from ./.env, then creates whatever is missing: the Fly app, its volume, those
+# settings as Fly secrets, and the FLY_APP and FLY_API_TOKEN GitHub Actions
 # secrets (the latter a new deploy token scoped to the app). Safe to re-run: it
 # never changes anything that already exists, so to change a value, use
 # `fly secrets set` / `gh secret set`.
