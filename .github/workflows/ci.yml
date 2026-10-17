@@ -178,9 +178,12 @@ jobs:
 
   # Push the image the test job built to GHCR, tagged with the commit SHA and
   # latest. Its image output (<repo>@sha256:<digest>) is what deploy deploys.
+  # The if: checks needs.test.result itself, rather than relying on the implicit
+  # success(), because success() also checks transitive dependencies, and
+  # dependabot-fix (test's dependency) is always skipped on master pushes.
   publish:
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: ${{ !cancelled() && needs.test.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -221,8 +224,11 @@ jobs:
   # from GHCR by digest, so it's exactly the one the test job built; that
   # overrides fly.toml's [build] image (:latest), which could have moved on if
   # a later run has published since. The checkout is only for fly.toml.
+  # Like publish, its if: checks its needs explicitly, as the implicit success()
+  # would see dependabot-fix skipped and skip this job too.
   deploy:
     needs: [publish, check-fly]
+    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.check-fly.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
