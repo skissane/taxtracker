@@ -1,5 +1,4 @@
 import re
-import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -9,21 +8,20 @@ def _normalize_package_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def _parse_installed_versions() -> dict[str, str]:
-    freeze = subprocess.run(
-        ["uv", "pip", "freeze", "--exclude-editable"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    installed = {}
-    for raw_line in freeze.stdout.splitlines():
-        line = raw_line.strip()
-        if not line or "==" not in line:
+def _parse_locked_versions() -> dict[str, str]:
+    lock = tomllib.loads(Path("uv.lock").read_text(encoding="utf-8"))
+    locked = {}
+    for package in lock.get("package", []):
+        name = _normalize_package_name(package["name"])
+        version = package.get("version")
+        if version is None:
             continue
-        name, version = line.split("==", 1)
-        installed[_normalize_package_name(name)] = version
-    return installed
+        if locked.setdefault(name, version) != version:
+            raise SystemExit(
+                f"uv.lock has more than one version of {name!r}; "
+                "can't pick a single minimum"
+            )
+    return locked
 
 
 def _parse_dependency(dep: str) -> tuple[str, str] | None:
@@ -42,21 +40,24 @@ def main(mode: str) -> int:
     pyproject_path = Path("pyproject.toml")
     pyproject_text = pyproject_path.read_text(encoding="utf-8")
     pyproject = tomllib.loads(pyproject_text)
-    installed = _parse_installed_versions()
+    installed = _parse_locked_versions()
 
-    dependency_groups = [
-        ("project.dependencies", pyproject.get("project", {}).get("dependencies", [])),
-        (
-            "dependency-groups.dev",
-            pyproject.get("dependency-groups", {}).get("dev", []),
-        ),
-    ]
+    project = pyproject.get("project", {})
+    dependency_groups = [("project.dependencies", project.get("dependencies", []))]
+    for extra, deps in project.get("optional-dependencies", {}).items():
+        dependency_groups.append((f"project.optional-dependencies.{extra}", deps))
+    for group, deps in pyproject.get("dependency-groups", {}).items():
+        dependency_groups.append((f"dependency-groups.{group}", deps))
 
     mismatches = []
     replacements = []
 
     for group_name, deps in dependency_groups:
         for dep in deps:
+            # Skip `{include-group = "..."}` entries; the included group is
+            # checked in its own right.
+            if not isinstance(dep, str):
+                continue
             parsed = _parse_dependency(dep)
             if parsed is None:
                 continue
@@ -64,7 +65,7 @@ def main(mode: str) -> int:
             actual = installed.get(package_name)
             if actual is None:
                 print(
-                    f"{group_name}: {dep!r} not found in uv pip freeze output",
+                    f"{group_name}: {dep!r} not found in uv.lock",
                     file=sys.stderr,
                 )
                 return 1
@@ -79,14 +80,12 @@ def main(mode: str) -> int:
 
     if mode == "check":
         if mismatches:
-            print(
-                "Dependency minimum versions are out of sync with installed versions:"
-            )
+            print("Dependency minimum versions are out of sync with uv.lock:")
             for group_name, dep, minimum, actual in mismatches:
-                print(f"- {group_name}: {dep} (minimum {minimum}, installed {actual})")
+                print(f"- {group_name}: {dep} (minimum {minimum}, locked {actual})")
             print("Run `just requirements-fix` to update pyproject.toml.")
             return 1
-        print("Dependency minimum versions match installed versions.")
+        print("Dependency minimum versions match uv.lock.")
         return 0
 
     if not mismatches:

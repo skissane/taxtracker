@@ -21,7 +21,8 @@ Don't run `--job dependabot-fix`, `--job publish` or `--job deploy` locally: it 
 
 **Dependency minimums:** `pyproject.toml`'s dependency lower bounds (`>=`) are kept equal to the
 versions uv resolved, by `scripts/requirements_min_versions.py`: `just requirements-check` (part of
-`just ci` and the `test` job) fails if any differ from what's installed, and `just requirements-fix`
+`just ci` and the `test` job) fails if any in `[project].dependencies`, any optional extra or any
+dependency group differ from the versions in `uv.lock`, and `just requirements-fix`
 rewrites them; run `uv lock` afterwards. Dependabot only edits `pyproject.toml` when the new
 version falls outside the existing constraint, which a `>=` minimum never excludes, so its PRs
 usually bump only `uv.lock`, even with `versioning-strategy: "increase"`, and would fail that check

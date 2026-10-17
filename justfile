@@ -10,11 +10,11 @@ lock-check:
 sync:
     uv sync --group dev
 
-# Check that dependency minimums in pyproject.toml match installed versions
+# Check that dependency minimums in pyproject.toml match uv.lock
 requirements-check:
     uv run --group dev python scripts/requirements_min_versions.py check
 
-# Rewrite dependency minimums in pyproject.toml to installed versions
+# Rewrite dependency minimums in pyproject.toml to the versions in uv.lock
 requirements-fix:
     uv run --group dev python scripts/requirements_min_versions.py fix
 
