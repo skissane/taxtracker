@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One-time setup of the production Fly.io app (see README.md's Fly.io section).
 # Reads FLY_APP, LIFETRACKER_INITIAL_ADMIN_PASSWORD and the
-# LIFETRACKER_BACKUP_S3_* settings from ./.env, then creates whatever is
+# LIFETRACKER_BACKUP_S3_* settings (ENDPOINT_URL and REGION_NAME optional)
+# from ./.env, then creates whatever is
 # missing: the Fly app, its volume, those settings as Fly secrets, and the
 # FLY_APP and FLY_API_TOKEN GitHub Actions secrets (the latter a new deploy
 # token scoped to the app). Safe to re-run: it never changes anything that
@@ -24,14 +25,20 @@ done
 
 # Set on the app as Fly secrets. The admin password only takes effect when
 # ensure_superuser first creates `admin`, on the first boot.
-fly_secrets=(
+required_fly_secrets=(
   LIFETRACKER_INITIAL_ADMIN_PASSWORD
-  LIFETRACKER_BACKUP_S3_ENDPOINT_URL
   LIFETRACKER_BACKUP_S3_BUCKET_NAME
-  LIFETRACKER_BACKUP_S3_REGION_NAME
   LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID
   LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY
 )
+# Set only if non-blank in .env; left unset otherwise, which the app treats
+# the same as blank (no endpoint means AWS). Clearing one in .env doesn't
+# unset an existing Fly secret; use `fly secrets unset` for that.
+optional_fly_secrets=(
+  LIFETRACKER_BACKUP_S3_ENDPOINT_URL
+  LIFETRACKER_BACKUP_S3_REGION_NAME
+)
+fly_secrets=("${required_fly_secrets[@]}" "${optional_fly_secrets[@]}")
 
 for cmd in fly gh jq; do
   command -v "$cmd" >/dev/null || { echo "error: $cmd is not installed" >&2; exit 1; }
@@ -51,11 +58,12 @@ dotenv_get() {
     sed -E 's/^[^=]*=[[:space:]]*//; s/[[:space:]]+$//; s/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/'
 }
 
-missing=()
 for name in FLY_APP "${fly_secrets[@]}"; do
-  value=$(dotenv_get "$name")
-  [ -n "$value" ] || missing+=("$name")
-  printf -v "$name" '%s' "$value"
+  printf -v "$name" '%s' "$(dotenv_get "$name")"
+done
+missing=()
+for name in FLY_APP "${required_fly_secrets[@]}"; do
+  [ -n "${!name}" ] || missing+=("$name")
 done
 if [ ${#missing[@]} -gt 0 ]; then
   echo "error: missing or empty in .env: ${missing[*]}" >&2
@@ -92,6 +100,8 @@ to_import=""
 for name in "${fly_secrets[@]}"; do
   if grep -qx "$name" <<<"$existing_secrets"; then
     echo "Fly secret $name: already set"
+  elif [ -z "${!name}" ]; then
+    echo "Fly secret $name: blank or absent in .env, leaving unset"
   else
     echo "Fly secret $name: setting"
     to_import+="$name=${!name}"$'\n'

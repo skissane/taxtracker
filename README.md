@@ -192,8 +192,10 @@ configuration.
 
 1. Pick a name that can't be guessed, e.g. `lifetracker-<random>`, and add it to
    `.env` as `FLY_APP`, along with `LIFETRACKER_INITIAL_ADMIN_PASSWORD` (the
-   password `admin` gets on first boot) and all five `LIFETRACKER_BACKUP_S3_*`
-   settings (see [Cloud backup](#cloud-backup)).
+   password `admin` gets on first boot) and the `LIFETRACKER_BACKUP_S3_*` settings
+   (see [Cloud backup](#cloud-backup)). `ENDPOINT_URL` and `REGION_NAME` are
+   optional; `just fly-setup` leaves them unset on Fly if they're blank or
+   absent.
 2. Run `just fly-setup` (you need `fly`, `gh` and `jq` installed and logged in). It
    creates whatever's missing of: the Fly app, its volume (name and region from
    `fly.toml`), the admin password and S3 settings as Fly secrets, and the
