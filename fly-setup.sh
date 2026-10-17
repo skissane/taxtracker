@@ -2,11 +2,11 @@
 # One-time setup of the production Fly.io app (see README.md's Fly.io section).
 # Reads FLY_APP, LIFETRACKER_INITIAL_ADMIN_PASSWORD and the
 # LIFETRACKER_BACKUP_S3_* settings (ENDPOINT_URL and REGION_NAME optional)
-# from ./.env, then creates whatever is
-# missing: the Fly app, its volume, those settings as Fly secrets, and the
-# FLY_APP and FLY_API_TOKEN GitHub Actions secrets (the latter a new deploy
-# token scoped to the app). Safe to re-run: it never changes anything that
-# already exists, so to change a value, use `fly secrets set` / `gh secret set`.
+# from ./.env, then creates whatever is missing: the Fly app, its volume, those
+# settings as Fly secrets, and the FLY_APP and FLY_API_TOKEN GitHub Actions
+# secrets (the latter a new deploy token scoped to the app). Safe to re-run: it
+# never changes anything that already exists, so to change a value, use
+# `fly secrets set` / `gh secret set`.
 #
 # The exception is --replace-token, which always creates a new deploy token
 # and overwrites FLY_API_TOKEN with it, e.g. after moving to a new app (an
@@ -52,7 +52,7 @@ fi
 # Value of $1 in .env (last assignment wins), or empty. .env is dotenv, not
 # shell (uv parses it without executing it), so read it rather than source it.
 # Handles NAME=value, an optional `export `, and one pair of surrounding quotes;
-# not multi-line values or ${VAR} interpolation.
+# not multi-line values, ${VAR} interpolation or inline `# comments`.
 dotenv_get() {
   { grep -E "^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=" .env || true; } | tail -n 1 |
     sed -E 's/^[^=]*=[[:space:]]*//; s/[[:space:]]+$//; s/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/'
@@ -103,6 +103,17 @@ for name in "${fly_secrets[@]}"; do
   elif [ -z "${!name}" ]; then
     echo "Fly secret $name: blank or absent in .env, leaving unset"
   else
+    # fly secrets import parses these lines with its own dotenv rules, so a
+    # value with these characters could be stored differently from what .env
+    # says (e.g. a silently different admin password). Rather than guess at its
+    # quoting, refuse them; set such a value by hand with `fly secrets set`.
+    case "${!name}" in
+      *[\#\"\'\\\$]*)
+        echo "error: $name in .env contains #, a quote, \\ or \$;" \
+          "set it with \`fly secrets set\` instead" >&2
+        exit 1
+        ;;
+    esac
     echo "Fly secret $name: setting"
     to_import+="$name=${!name}"$'\n'
   fi
