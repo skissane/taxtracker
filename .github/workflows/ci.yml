@@ -8,6 +8,8 @@ on:
 
 jobs:
   test:
+    needs: dependabot-fix
+    if: ${{ always() && (needs.dependabot-fix.result == 'skipped' || needs.dependabot-fix.outputs.pushed_changes == 'false') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -33,6 +35,9 @@ jobs:
 
       - name: Install dependencies
         run: just sync
+
+      - name: Check dependency minimum versions
+        run: just requirements-check
 
       - name: Lint with ruff
         run: just lint
@@ -73,6 +78,75 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
           fail_ci_if_error: true
+
+  # Runs on a Dependabot branch, whose bumped dependency we don't trust, so the
+  # write-capable DEPENDABOT_FIX_TOKEN is only exposed to the final push step:
+  # checkout doesn't persist credentials, and nothing installs the project or its
+  # dependencies (requirements-fix needs only the standard library). GITHUB_TOKEN
+  # is read-only on Dependabot runs whatever this job asks for, so ask for read.
+  dependabot-fix:
+    if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      pushed_changes: ${{ steps.commit-and-push.outputs.pushed }}
+
+    steps:
+      - name: Check token configuration
+        env:
+          DEPENDABOT_FIX_TOKEN: ${{ secrets.DEPENDABOT_FIX_TOKEN }}
+        run: |
+          if [ -z "$DEPENDABOT_FIX_TOKEN" ]; then
+            echo "DEPENDABOT_FIX_TOKEN secret is not set" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.10"
+
+      - name: Set up Python
+        run: uv python install 3.14.3
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+        with:
+          just-version: "1.58.0"
+
+      - name: Update dependency minimum versions
+        run: just requirements-fix
+
+      - name: Update lockfile
+        run: uv lock
+
+      # Pushes with DEPENDABOT_FIX_TOKEN, not GITHUB_TOKEN, so the push triggers a
+      # new workflow run. If Dependabot updates the branch after checkout, the push
+      # fails; the run Dependabot's push triggers redoes the fix.
+      - name: Commit and push if needed
+        id: commit-and-push
+        env:
+          DEPENDABOT_FIX_TOKEN: ${{ secrets.DEPENDABOT_FIX_TOKEN }}
+          HEAD_REF: ${{ github.head_ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml uv.lock
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "chore: sync dependency minimum versions"
+            git push "https://x-access-token:${DEPENDABOT_FIX_TOKEN}@github.com/${REPOSITORY}.git" "HEAD:refs/heads/${HEAD_REF}"
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          fi
 
   # Check, on PRs too, that the secrets deploy needs are set and FLY_APP names an
   # app the token can see, so a missing or broken setup fails the build rather

@@ -8,15 +8,36 @@ This file provides guidance to AI coding assistants working with code in this re
 
 CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run
 everything CI runs, or `just --list` to see individual recipes (`lint`, `fmt-check`,
-`lint-templates`, `fmt-check-templates`, `coverage`, `sync`, `lock-check`). `just ci` drifts from
+`lint-templates`, `fmt-check-templates`, `coverage`, `sync`, `lock-check`, `requirements-check`,
+`requirements-fix`). `just ci` drifts from
 `ci.yml` if the workflow changes without a matching justfile edit; `run_workflow_local.py`
 avoids that by parsing the workflow YAML directly and running its `run:` steps as written
 (see its docstring for what it does and doesn't support). After `just coverage` runs, CI uploads
 `coverage.xml` to Codecov (`codecov/codecov-action`); this step needs a `CODECOV_TOKEN` repo
-secret from codecov.io and is skipped by `run_workflow_local.py` since it's a `uses:` step. `ci.yml` has four jobs, `test`, `check-fly`, `publish` and `deploy` (see Deployment);
+secret from codecov.io and is skipped by `run_workflow_local.py` since it's a `uses:` step. `ci.yml` has five jobs, `test`, `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment);
 `run_workflow_local.py` runs the first job in the file unless given `--job`, so keep `test` first.
-Don't run `--job publish` or `--job deploy` locally: it doesn't evaluate `if:`, so it would push
-to GHCR or deploy to production.
+Don't run `--job dependabot-fix`, `--job publish` or `--job deploy` locally: it doesn't evaluate
+`if:`, so it would push commits to the current branch, push to GHCR or deploy to production.
+
+**Dependency minimums:** `pyproject.toml`'s dependency lower bounds (`>=`) are kept equal to the
+versions uv resolved, by `scripts/requirements_min_versions.py`: `just requirements-check` (part of
+`just ci` and the `test` job) fails if any in `[project].dependencies`, any optional extra or any
+dependency group differ from the versions in `uv.lock`, and `just requirements-fix`
+rewrites them; run `uv lock` afterwards. Dependabot only edits `pyproject.toml` when the new
+version falls outside the existing constraint, which a `>=` minimum never excludes, so its PRs
+usually bump only `uv.lock`, even with `versioning-strategy: "increase"`, and would fail that check
+(see <https://github.com/dependabot/dependabot-core/issues/12788#issuecomment-3606306953>). The
+`dependabot-fix` job, which runs only on PRs whose `github.actor` is
+`dependabot[bot]`, runs `requirements-fix` and `uv lock` on the PR branch and pushes any change as a
+`chore: sync dependency minimum versions` commit. It pushes with the `DEPENDABOT_FIX_TOKEN` secret
+(a token with `contents: write` on the repo; it must be a Dependabot secret, as Dependabot runs
+don't get Actions secrets, and the job fails if it's unset), not `GITHUB_TOKEN`, because pushes
+made with `GITHUB_TOKEN` don't trigger new workflow runs. As the branch's bumped dependency isn't
+trusted, only the final push step sees the token: checkout runs with `persist-credentials: false`,
+and the job never syncs or installs anything (`requirements-check`/`requirements-fix` use
+`uv run --no-project`, as the script needs only the standard library). `test` waits on it and runs only if it
+was skipped or pushed nothing; if it pushed, that run's `test` is skipped and the run the push
+triggers tests the fixed commit.
 
 ```bash
 # Start the app (sync deps, upgrade legacy DB schema if needed, migrate,
@@ -57,11 +78,14 @@ uv run lifetracker-cli --help
 
 Tests live outside `src/`, in a top-level `tests/` tree mirroring the package layout (`tests/core/tests.py`,
 `tests/taxtracker/tests.py`, `tests/cli/tests.py`), each importing the code under test via absolute
-`lifetracker.*` imports. Run via `pytest` (using `pytest-django`, configured in `pyproject.toml`'s
-`[tool.pytest.ini_options]` with `testpaths = ["tests"]`), parallelised across CPU cores by
-`pytest-xdist` (`-n auto`, set as a default in `addopts`). `manage.py test tests.core tests.taxtracker
-tests.cli` still works as an unparallelised fallback, referencing these as `tests.core`,
-`tests.taxtracker`, `tests.cli` labels rather than the `lifetracker.*` app labels.
+`lifetracker.*` imports. The exception is `tests/scripts/tests.py`, which tests the standalone
+scripts in `scripts/` (not a package) by top-level module name, e.g. `import
+requirements_min_versions`; `pytest`'s `pythonpath` includes `scripts` for this, and coverage
+measures `scripts` alongside `src/lifetracker`. Run via `pytest` (using `pytest-django`, configured in
+`pyproject.toml`'s `[tool.pytest.ini_options]` with `testpaths = ["tests"]`), parallelised across CPU
+cores by `pytest-xdist` (`-n auto`, set as a default in `addopts`). `PYTHONPATH=scripts manage.py test
+tests.core tests.taxtracker tests.cli tests.scripts` still works as an unparallelised fallback,
+referencing these as `tests.*` labels rather than the `lifetracker.*` app labels.
 
 **File storage:** All uploaded attachments are stored in the SQLite database, not on disk. `DatabaseStorage` (in `core/models.py`) is a custom Django storage backend that writes file content to `DBStoredFile` rows. Storage paths have the form `db/<pk>/<filename>`. Files are served through `DBStoredFileAdmin.serve_file_view` at `/admin/core/dbstoredfile/file/<pk>/`.
 
