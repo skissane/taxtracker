@@ -88,10 +88,11 @@ URI.
 
 1. In the [Google Cloud console](https://console.cloud.google.com/), create a
    project (or pick an existing one).
-2. Open **Google Auth Platform** (**APIs & Services → OAuth consent screen**) and
-   click **Get started** if the project doesn't have one yet. Give it an app name
-   and your email as the support and developer contact, and choose **External** as
-   the audience (the only option for a personal Google account).
+2. Open [Google Auth Platform](https://console.cloud.google.com/auth/overview),
+   check the project picker at the top shows the project you want to use, then
+   click **Get started** and fill in the form: give it an app name and your email
+   as the support and developer contact, and choose **External** as the audience
+   (the only option for a personal Google account).
 3. Under **Audience**, leave the publishing status as **Testing** and add each
    Google account that will sign in under **Test users**. In testing mode, Google
    itself refuses sign-in by anyone else, which is an extra lock on top of
