@@ -3,34 +3,33 @@
 Personal life admin tracker app. Tax return tracking (`taxtracker`) is currently its
 only module.
 
-## Cloud backup
+## Running locally
 
-As well as downloading a backup of the database (**💾 Download DB Backup** on the
-Financial Years list), you can upload one to an S3-compatible bucket: AWS S3,
-Cloudflare R2, Backblaze B2 and others. Open **☁️ Cloud Backup Status** on the
-Financial Years list (superusers only) to see when the last backup ran and to click
-**Run Backup Now**. Each backup is uploaded as a new object named
-`<hostname>/db-backup.<YYYY-MM-DD.HH.MM.SS>.sqlite3` (the timestamp is in UTC),
-e.g. `my-laptop.local/db-backup.2026-10-11.01.13.53.sqlite3`, so backups from each
-machine or environment sit in their own folder. Backups only run when you click the
-button; nothing schedules them.
+You need [uv](https://docs.astral.sh/uv/), which installs the right Python version
+itself. Start the app with:
 
-The bucket and credentials come from these environment variables:
+```bash
+./run.sh
+```
 
-| Variable | Purpose |
-|---|---|
-| `LIFETRACKER_BACKUP_S3_BUCKET_NAME` | Required. Bucket to upload to. |
-| `LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID` | Required. Access key ID. |
-| `LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY` | Required. Secret access key. |
-| `LIFETRACKER_BACKUP_S3_ENDPOINT_URL` | The provider's S3 endpoint, e.g. `https://<account-id>.r2.cloudflarestorage.com`. Leave unset for AWS S3. |
-| `LIFETRACKER_BACKUP_S3_REGION_NAME` | Region, e.g. `ap-southeast-2` (use `auto` for R2). |
-| `LIFETRACKER_BACKUP_HOSTNAME` | Overrides the `<hostname>` object key prefix (default: the machine's hostname, as `hostname` prints it). `just docker-run` sets it to `docker.<host's hostname>`, since the Docker container has its own separate database and a meaningless hostname. |
+and open <http://localhost:8000/admin/>. `run.sh` installs dependencies, upgrades a
+database created before the app was split into `core` and `taxtracker` (a no-op
+otherwise), applies migrations, creates an `admin` superuser if there isn't one,
+and starts Django's development server with `DEBUG` on. When it creates `admin`, it
+prints a random password, unless you've set one in the
+`LIFETRACKER_INITIAL_ADMIN_PASSWORD` environment variable or in
+`~/.config/lifetracker/initial_admin_password`.
 
-Until the required ones are set, the button is disabled and the page lists the
-missing variables.
+The database is `db.sqlite3` in the repo root (gitignored), and the generated secret
+key is `~/.config/lifetracker/secret_key`. Set `LIFETRACKER_DB_PATH` or
+`LIFETRACKER_CONFIG_DIR` to put them elsewhere.
 
-When running with `./run.sh`, the easiest place for them is a `.env` file in the
-repo root, which `run.sh` loads automatically:
+### The `.env` file
+
+Settings such as the [Cloud backup](#cloud-backup) and
+[Google sign-in](#google-sign-in) credentials are environment variables. The
+easiest place for them is a `.env` file in the repo root, which `run.sh` loads
+automatically:
 
 ```dotenv
 LIFETRACKER_BACKUP_S3_BUCKET_NAME=my-lifetracker-backups
@@ -48,118 +47,6 @@ only by you (`chmod 600 .env`). To use the same file for a one-off command, run
 plain `docker run`, pass the variables with `-e`, or the file with `--env-file .env`.
 Docker reads the file more literally than uv does: it doesn't strip quotes, so leave
 values unquoted.
-
-## Google sign-in
-
-As well as the usual username and password, the admin login page can offer **Sign
-in with Google**. It's off until it's configured, and even then it's locked down:
-a Google account can sign in only if all of these hold:
-
-- Google reports its email address as verified;
-- the email is in `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS`;
-- exactly one Django user has that email address (compared case-insensitively),
-  and that user is active.
-
-Google sign-in never creates users, and never changes an existing user's
-permissions. The user also needs **Staff status** to get into the admin, as with
-password login. Password login keeps working alongside it.
-
-It's configured with these environment variables (lists are comma-separated):
-
-| Variable | Purpose |
-|---|---|
-| `LIFETRACKER_GOOGLE_SSO_CLIENT_ID` | Required. The OAuth client ID from Google Cloud, ending in `.apps.googleusercontent.com`. |
-| `LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET` | Required. The OAuth client's secret. Google sign-in is enabled only when both this and the client ID are set; otherwise the login page shows no Google button and `/google_sso/` returns 404. |
-| `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS` | Google email addresses allowed to sign in, e.g. `me@gmail.com`. Empty (the default) means no one can, even with the client configured. |
-| `LIFETRACKER_GOOGLE_SSO_PROJECT_ID` | Optional. The Google Cloud project ID; not needed to sign in. |
-| `LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN` | Optional. Host (and port, if any) used to build the callback URL that Google redirects back to, e.g. `tax.example.com`. Defaults to the host of the request, which is normally right; set it if the app is reached through a proxy that rewrites the `Host` header. |
-
-The callback URL is `<scheme>://<host>/google_sso/callback/`, and it must exactly
-match one of the client's authorized redirect URIs in Google Cloud, or Google
-rejects the sign-in with `redirect_uri_mismatch`. The scheme is the request's, or
-the `X-Forwarded-Proto` header's when a proxy sets one.
-
-### Creating the Google OAuth client
-
-You need a Google Cloud project with an OAuth client. One client serves both local
-development and production: register each one's callback URL as a redirect URI
-(see below for the values), and `just fly-setup` copies the same settings from
-`.env` to Fly.
-
-1. In the [Google Cloud console](https://console.cloud.google.com/), create a
-   project (or pick an existing one).
-2. Open [Google Auth Platform](https://console.cloud.google.com/auth/overview),
-   check the project picker at the top shows the project you want to use, then
-   click **Get started** and fill in the form: give it an app name and your email
-   as the support and developer contact, and choose **External** as the audience
-   (the only option for a personal Google account).
-3. Under **Audience**, leave the publishing status as **Testing** and add each
-   Google account that will sign in under **Test users**. In testing mode, Google
-   itself refuses sign-in by anyone else, which is an extra lock on top of
-   `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS`. The app only asks for the basic
-   `openid`, `email` and `profile` scopes, so it doesn't need Google's verification.
-4. Under **Clients**, click **Create client**, choose **Web application**, and add
-   the callback URLs under **Authorized redirect URIs** (see below for the values).
-   Leave **Authorized JavaScript origins** empty.
-5. Click **Create**, then copy the client ID and client secret. Google may only
-   show the secret once, so store it safely (e.g. in a password manager).
-
-### Local development
-
-1. Create an OAuth client as above, with the redirect URI
-   `http://localhost:8000/google_sso/callback/`. Google allows plain `http` only for
-   `localhost` and loopback addresses. The host must match how you open the app:
-   if you browse to `http://127.0.0.1:8000/` instead, register
-   `http://127.0.0.1:8000/google_sso/callback/` (or both). With
-   `LIFETRACKER_DOCKER_PORT` or a different `runserver` port, use that port.
-2. Add the client and your email to `.env` in the repo root (see
-   [Cloud backup](#cloud-backup) for how `.env` is loaded; leave values unquoted):
-
-   ```dotenv
-   LIFETRACKER_GOOGLE_SSO_CLIENT_ID=1234567890-abc.apps.googleusercontent.com
-   LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET=...
-   LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=me@gmail.com
-   ```
-
-3. Start the app with `./run.sh` (or `just docker-run`; `.env` reaches the
-   container too).
-4. Give your Django user the same email: log in with your password, open
-   **Users**, edit your user, set **Email address** to your Google email, and save.
-5. Log out, open <http://localhost:8000/admin/>, and click **Sign in with Google**.
-   If sign-in fails, the login page shows why (e.g. "Email address not allowed" or
-   "User not found").
-
-### Production (Fly.io)
-
-1. In Google Cloud, open the OAuth client from local development and add a second
-   redirect URI, `https://<app>.fly.dev/google_sso/callback/` (plus
-   `https://<your domain>/google_sso/callback/` for each custom domain you've
-   attached). The `https` comes from Fly's proxy, which sets `X-Forwarded-Proto`;
-   `LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN` isn't needed.
-2. Run `just fly-setup` (see [One-time setup](#one-time-setup)). It sets the
-   `LIFETRACKER_GOOGLE_SSO_*` values from `.env` (except `CALLBACK_DOMAIN`) as Fly
-   secrets, not in `fly.toml`, which is in this public repo; setting secrets
-   restarts the Machine with them. It refuses to set only one of the client ID and
-   secret, and warns if
-   `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS` is empty.
-3. Log in to production with your password and set your user's **Email address**
-   to your Google email, as in local development. The database is separate, so this
-   has to be done on each instance.
-4. Log out and test **Sign in with Google** at
-   `https://<app>.fly.dev/admin/`.
-
-`just fly-setup` never overwrites a secret that's already set, so to add or remove
-an allowed account later, export `FLY_APP` and run `fly secrets set
-LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=...` with the full new list (and update
-`.env` and the test users in Google Cloud). To turn Google sign-in off, run `fly
-secrets unset LIFETRACKER_GOOGLE_SSO_CLIENT_ID
-LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET`.
-
-For another host, pass the same variables to the container with `-e` or
-`--env-file`, as in [Production deployment](#production-deployment). Serve it over
-HTTPS through a proxy that sets `X-Forwarded-Proto: https`, so the callback URL is
-`https`; the callback URL takes the scheme from that header regardless of
-`LIFETRACKER_TRUST_X_FORWARDED_PROTO`.
 
 ## Docker
 
@@ -336,3 +223,138 @@ image. To deploy local changes, merge them to `master` rather than building on F
 Every boot runs migrations against the only copy of the data, so run a cloud backup
 before merging a risky migration. Fly's daily volume snapshots are the only
 automatic fallback.
+
+## Cloud backup
+
+As well as downloading a backup of the database (**💾 Download DB Backup** on the
+Financial Years list), you can upload one to an S3-compatible bucket: AWS S3,
+Cloudflare R2, Backblaze B2 and others. Open **☁️ Cloud Backup Status** on the
+Financial Years list (superusers only) to see when the last backup ran and to click
+**Run Backup Now**. Each backup is uploaded as a new object named
+`<hostname>/db-backup.<YYYY-MM-DD.HH.MM.SS>.sqlite3` (the timestamp is in UTC),
+e.g. `my-laptop.local/db-backup.2026-10-11.01.13.53.sqlite3`, so backups from each
+machine or environment sit in their own folder. Backups only run when you click the
+button; nothing schedules them.
+
+The bucket and credentials come from these environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `LIFETRACKER_BACKUP_S3_BUCKET_NAME` | Required. Bucket to upload to. |
+| `LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID` | Required. Access key ID. |
+| `LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY` | Required. Secret access key. |
+| `LIFETRACKER_BACKUP_S3_ENDPOINT_URL` | The provider's S3 endpoint, e.g. `https://<account-id>.r2.cloudflarestorage.com`. Leave unset for AWS S3. |
+| `LIFETRACKER_BACKUP_S3_REGION_NAME` | Region, e.g. `ap-southeast-2` (use `auto` for R2). |
+| `LIFETRACKER_BACKUP_HOSTNAME` | Overrides the `<hostname>` object key prefix (default: the machine's hostname, as `hostname` prints it). `just docker-run` sets it to `docker.<host's hostname>`, since the Docker container has its own separate database and a meaningless hostname. |
+
+Until the required ones are set, the button is disabled and the page lists the
+missing variables.
+
+Locally, put them in [`.env`](#the-env-file).
+
+## Google sign-in
+
+As well as the usual username and password, the admin login page can offer **Sign
+in with Google**. It's off until it's configured, and even then it's locked down:
+a Google account can sign in only if all of these hold:
+
+- Google reports its email address as verified;
+- the email is in `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS`;
+- exactly one Django user has that email address (compared case-insensitively),
+  and that user is active.
+
+Google sign-in never creates users, and never changes an existing user's
+permissions. The user also needs **Staff status** to get into the admin, as with
+password login. Password login keeps working alongside it.
+
+It's configured with these environment variables (lists are comma-separated):
+
+| Variable | Purpose |
+|---|---|
+| `LIFETRACKER_GOOGLE_SSO_CLIENT_ID` | Required. The OAuth client ID from Google Cloud, ending in `.apps.googleusercontent.com`. |
+| `LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET` | Required. The OAuth client's secret. Google sign-in is enabled only when both this and the client ID are set; otherwise the login page shows no Google button and `/google_sso/` returns 404. |
+| `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS` | Google email addresses allowed to sign in, e.g. `me@gmail.com`. Empty (the default) means no one can, even with the client configured. |
+| `LIFETRACKER_GOOGLE_SSO_PROJECT_ID` | Optional. The Google Cloud project ID; not needed to sign in. |
+| `LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN` | Optional. Host (and port, if any) used to build the callback URL that Google redirects back to, e.g. `tax.example.com`. Defaults to the host of the request, which is normally right; set it if the app is reached through a proxy that rewrites the `Host` header. |
+
+The callback URL is `<scheme>://<host>/google_sso/callback/`, and it must exactly
+match one of the client's authorized redirect URIs in Google Cloud, or Google
+rejects the sign-in with `redirect_uri_mismatch`. The scheme is the request's, or
+the `X-Forwarded-Proto` header's when a proxy sets one.
+
+### Creating the Google OAuth client
+
+You need a Google Cloud project with an OAuth client. One client serves both local
+development and production: register each one's callback URL as a redirect URI
+(see below for the values), and `just fly-setup` copies the same settings from
+`.env` to Fly.
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a
+   project (or pick an existing one).
+2. Open [Google Auth Platform](https://console.cloud.google.com/auth/overview),
+   check the project picker at the top shows the project you want to use, then
+   click **Get started** and fill in the form: give it an app name and your email
+   as the support and developer contact, and choose **External** as the audience
+   (the only option for a personal Google account).
+3. Under **Audience**, leave the publishing status as **Testing** and add each
+   Google account that will sign in under **Test users**. In testing mode, Google
+   itself refuses sign-in by anyone else, which is an extra lock on top of
+   `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS`. The app only asks for the basic
+   `openid`, `email` and `profile` scopes, so it doesn't need Google's verification.
+4. Under **Clients**, click **Create client**, choose **Web application**, and add
+   the callback URLs under **Authorized redirect URIs** (see below for the values).
+   Leave **Authorized JavaScript origins** empty.
+5. Click **Create**, then copy the client ID and client secret. Google may only
+   show the secret once, so store it safely (e.g. in a password manager).
+
+### Local development
+
+1. Create an OAuth client as above, with the redirect URI
+   `http://localhost:8000/google_sso/callback/`. Google allows plain `http` only for
+   `localhost` and loopback addresses. The host must match how you open the app:
+   if you browse to `http://127.0.0.1:8000/` instead, register
+   `http://127.0.0.1:8000/google_sso/callback/` (or both). With
+   `LIFETRACKER_DOCKER_PORT` or a different `runserver` port, use that port.
+2. Add the client and your email to `.env` in the repo root (see
+   [The `.env` file](#the-env-file); leave values unquoted):
+
+   ```dotenv
+   LIFETRACKER_GOOGLE_SSO_CLIENT_ID=1234567890-abc.apps.googleusercontent.com
+   LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET=...
+   LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=me@gmail.com
+   ```
+
+3. Start the app with `./run.sh` (or `just docker-run`; `.env` reaches the
+   container too).
+4. Give your Django user the same email: log in with your password, open
+   **Users**, edit your user, set **Email address** to your Google email, and save.
+5. Log out, open <http://localhost:8000/admin/>, and click **Sign in with Google**.
+   If sign-in fails, the login page shows why (e.g. "Email address not allowed" or
+   "User not found").
+
+### Production (Fly.io)
+
+1. In Google Cloud, add a second redirect URI to the OAuth client,
+   `https://<app>.fly.dev/google_sso/callback/` (plus
+   `https://<your domain>/google_sso/callback/` for each custom domain). Fly's
+   proxy sets `X-Forwarded-Proto`, so the scheme is `https` without
+   `LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN`.
+2. Run `just fly-setup` (see [One-time setup](#one-time-setup)), which copies the
+   other `LIFETRACKER_GOOGLE_SSO_*` settings from `.env` to Fly secrets. It refuses
+   to set only one of the client ID and secret, and warns if
+   `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS` is empty.
+3. Set your user's **Email address** and test sign-in at
+   `https://<app>.fly.dev/admin/`, as in steps 4 and 5 of local development.
+   Production's database is separate, so the email has to be set there too.
+
+To change the allowed accounts later, run `fly secrets set
+LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=...` with the full new list (`just fly-setup`
+won't overwrite it), and update `.env` and the test users in Google Cloud to match.
+To turn Google sign-in off, run `fly secrets unset LIFETRACKER_GOOGLE_SSO_CLIENT_ID
+LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET`.
+
+For another host, pass the same variables to the container with `-e` or
+`--env-file`, as in [Production deployment](#production-deployment). Serve it over
+HTTPS through a proxy that sets `X-Forwarded-Proto: https`, so the callback URL is
+`https`; the callback URL takes the scheme from that header regardless of
+`LIFETRACKER_TRUST_X_FORWARDED_PROTO`.
