@@ -196,8 +196,8 @@ configuration.
    (see [Cloud backup](#cloud-backup)). `ENDPOINT_URL` and `REGION_NAME` are
    optional; `just fly-setup` leaves them unset on Fly if they're blank or
    absent.
-2. Run `just fly-setup` (you need `fly`, `gh` and `jq` installed and logged in). It
-   creates whatever's missing of: the Fly app, its volume (name and region from
+2. Run `just fly-setup` (you need `fly`, `gh` and `jq` installed, and `fly` and
+   `gh` logged in). It creates whatever's missing of: the Fly app, its volume (name and region from
    `fly.toml`), the admin password and S3 settings as Fly secrets, and the
    `FLY_APP` and `FLY_API_TOKEN` GitHub Actions secrets, the latter a new deploy
    token scoped to the app. It's safe to re-run, and never changes anything that already exists; to
