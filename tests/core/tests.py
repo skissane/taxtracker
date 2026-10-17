@@ -216,6 +216,12 @@ class GoogleSSOLoginFlowTests(TestCase):
         self.assertIsNone(self._logged_in_user_id())
         self.assertFalse(User.objects.filter(email__iexact="a@example.com").exists())
 
+    def test_rejects_inactive_user(self):
+        self.user.is_active = False
+        self.user.save()
+        self._callback()
+        self.assertIsNone(self._logged_in_user_id())
+
     def test_rejects_email_shared_by_several_users(self):
         User.objects.create_user("alice2", email="a@example.com", is_staff=True)
         response = self._callback()
