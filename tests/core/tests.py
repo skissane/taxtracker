@@ -199,6 +199,15 @@ class GoogleSSOLoginFlowTests(TestCase):
         self.assertRedirects(response, reverse("admin:index"))
         self.assertEqual(self._logged_in_user_id(), str(self.user.pk))
 
+    @override_settings(SESSION_COOKIE_AGE=12345)
+    def test_session_expiry_matches_password_login(self):
+        self._callback()
+        session = self.client.session
+        self.assertEqual(self._logged_in_user_id(), str(self.user.pk))
+        # No per-session expiry override, so the global policy applies.
+        self.assertNotIn("_session_expiry", session)
+        self.assertEqual(session.get_expiry_age(), 12345)
+
     def test_rejects_email_not_in_allowlist(self):
         User.objects.create_user("bob", email="b@example.com", is_staff=True)
         self._callback(email="b@example.com")

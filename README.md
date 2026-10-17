@@ -265,7 +265,8 @@ a Google account can sign in only if all of these hold:
 
 Google sign-in never creates users, and never changes an existing user's
 permissions. The user also needs **Staff status** to get into the admin, as with
-password login. Password login keeps working alongside it.
+password login. Password login keeps working alongside it, and a Google sign-in
+session lasts as long as a password one (Django's default, two weeks).
 
 It's configured with these environment variables (lists are comma-separated):
 

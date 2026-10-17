@@ -276,6 +276,10 @@ GOOGLE_SSO_PRE_VALIDATE_CALLBACK = "lifetracker.google_sso.pre_validate_user"
 GOOGLE_SSO_LOGIN_FAILED_URL = "admin:index"
 GOOGLE_SSO_NEXT_URL = "admin:index"
 GOOGLE_SSO_SHOW_FAILED_LOGIN_MESSAGE = True
+# The library defaults Google sign-in sessions to 1 hour. None makes it call
+# session.set_expiry(None), so they follow Django's global session policy
+# (SESSION_COOKIE_AGE etc.), the same as password login.
+GOOGLE_SSO_SESSION_COOKIE_AGE = None
 GOOGLE_SSO_ADMIN_ENABLED = True
 GOOGLE_SSO_PAGES_ENABLED = False
 GOOGLE_SSO_CALLBACK_DOMAIN = (
