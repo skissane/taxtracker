@@ -19,7 +19,10 @@ SCREENSHOT_DIR = Path(__file__).resolve().parent.parent / "screenshots"
 # the test database exists, so it can't share the in-memory SQLite connection,
 # and its request threads open connections that Django never closes.
 @pytest.fixture
-def page(transactional_db, live_server):
+def page(transactional_db, live_server, settings):
+    # The admin header shows this, which otherwise defaults to the machine's
+    # hostname; fix it so screenshots don't vary between machines.
+    settings.LIFETRACKER_BACKUP_HOSTNAME = "screenshots.example"
     SCREENSHOT_DIR.mkdir(exist_ok=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
