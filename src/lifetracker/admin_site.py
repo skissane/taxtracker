@@ -17,8 +17,8 @@ _LINK_COLOR = "#111827"
 # Keep the background tint aligned with the text color so the header stays legible
 # in both the light and dark admin themes.
 _CODE_STYLE = (
-    f'color: {_LINK_COLOR}; background-color: rgba(17, 24, 39, 0.08); '
-    'border-radius: 0.25rem; padding: 0 0.25em;'
+    f"color: {_LINK_COLOR}; background-color: rgba(17, 24, 39, 0.08); "
+    "border-radius: 0.25rem; padding: 0 0.25em;"
 )
 
 
@@ -40,8 +40,7 @@ def _build_admin_site_header(
         )
     if commit_id:
         return format_html(
-            '{} <code style="{}" title="{}">{}</code> '
-            '<code style="{}">{}</code>',
+            '{} <code style="{}" title="{}">{}</code> <code style="{}">{}</code>',
             site_name,
             _CODE_STYLE,
             commit_id,

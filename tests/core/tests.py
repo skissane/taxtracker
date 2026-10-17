@@ -22,7 +22,11 @@ from django.urls import reverse
 from django_google_sso.main import GoogleAuth
 
 from lifetracker import google_sso
-from lifetracker.admin_site import LifetrackerAdminSite, _build_admin_site_header
+from lifetracker.admin_site import (
+    _CODE_STYLE,
+    LifetrackerAdminSite,
+    _build_admin_site_header,
+)
 from lifetracker.asgi import application as asgi_application
 from lifetracker.core.admin import (
     DBStoredFileAdmin,
@@ -847,7 +851,10 @@ class AdminSiteHeaderTests(TestCase):
                 instance_name="instance.local",
             )
         )
-        self.assertIn('style="color: #111827; background-color: rgba(17, 24, 39, 0.08);', header)
+        self.assertIn(
+            'style="color: #111827; background-color: rgba(17, 24, 39, 0.08);',
+            header,
+        )
 
     def test_accepts_base_url_without_trailing_slash(self):
         header = str(
@@ -912,8 +919,9 @@ class AdminSitePerRequestHeaderTests(TestCase):
         self.assertContains(response, "<title>Log in | Example Site</title>", html=True)
         self.assertContains(
             response,
-            f'Example Site <code title="{AdminSiteHeaderTests.COMMIT_ID}">0123abc'
-            "</code> <code>instance.local</code>",
+            f'Example Site <code style="{_CODE_STYLE}" '
+            f'title="{AdminSiteHeaderTests.COMMIT_ID}">0123abc'
+            f'</code> <code style="{_CODE_STYLE}">instance.local</code>',
         )
         self.assertNotContains(response, self.COMMIT_URL)
         self.assertNotContains(response, "Life Tracker")
@@ -925,7 +933,10 @@ class AdminSitePerRequestHeaderTests(TestCase):
         self.assertContains(
             response, "<title>Administration | Life Tracker</title>", html=True
         )
-        self.assertContains(response, f'Life Tracker <code><a href="{self.COMMIT_URL}"')
+        self.assertContains(
+            response,
+            f'Life Tracker <code style="{_CODE_STYLE}"><a href="{self.COMMIT_URL}"',
+        )
         self.assertNotContains(response, "Example Site")
 
 
