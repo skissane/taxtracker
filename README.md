@@ -131,7 +131,7 @@ URI.
 ### Production (Fly.io)
 
 1. Create a separate OAuth client as above, with the redirect URI
-   `https://lifetracker-skissane.fly.dev/google_sso/callback/` (or
+   `https://<app>.fly.dev/google_sso/callback/` (or
    `https://<your domain>/google_sso/callback/` if you've attached a custom
    domain; register each hostname you use). The `https` comes from Fly's proxy,
    which sets `X-Forwarded-Proto`; `LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN` isn't
@@ -152,7 +152,7 @@ URI.
    to your Google email, as in local development. The database is separate, so this
    has to be done on each instance.
 4. Log out and test **Sign in with Google** at
-   <https://lifetracker-skissane.fly.dev/admin/>.
+   `https://<app>.fly.dev/admin/`.
 
 To add or remove an allowed account later, run `fly secrets set
 LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=...` with the full new list (and update the
