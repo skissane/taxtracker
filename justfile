@@ -52,7 +52,7 @@ test:
 
 # Run the test suite in parallel, print a coverage report, and write coverage.xml
 coverage:
-    uv run --group dev pytest --cov=src/lifetracker --cov-report=term --cov-report=xml
+    uv run --group dev pytest --cov=src/lifetracker --cov=scripts --cov-report=term --cov-report=xml
 
 # Build the container image
 docker-build:
