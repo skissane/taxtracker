@@ -81,10 +81,10 @@ the `X-Forwarded-Proto` header's when a proxy sets one.
 
 ### Creating the Google OAuth client
 
-You need a Google Cloud project with an OAuth client. Do this once for local
-development and once for production (a separate client for each keeps the
-production secret off your laptop); the steps are the same except for the redirect
-URI.
+You need a Google Cloud project with an OAuth client. One client serves both local
+development and production: register each one's callback URL as a redirect URI
+(see below for the values), and `just fly-setup` copies the same settings from
+`.env` to Fly.
 
 1. In the [Google Cloud console](https://console.cloud.google.com/), create a
    project (or pick an existing one).
@@ -99,7 +99,7 @@ URI.
    `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS`. The app only asks for the basic
    `openid`, `email` and `profile` scopes, so it doesn't need Google's verification.
 4. Under **Clients**, click **Create client**, choose **Web application**, and add
-   the callback URL under **Authorized redirect URIs** (see below for the value).
+   the callback URLs under **Authorized redirect URIs** (see below for the values).
    Leave **Authorized JavaScript origins** empty.
 5. Click **Create**, then copy the client ID and client secret. Google may only
    show the secret once, so store it safely (e.g. in a password manager).
@@ -131,34 +131,28 @@ URI.
 
 ### Production (Fly.io)
 
-1. Create a separate OAuth client as above, with the redirect URI
-   `https://<app>.fly.dev/google_sso/callback/` (or
-   `https://<your domain>/google_sso/callback/` if you've attached a custom
-   domain; register each hostname you use). The `https` comes from Fly's proxy,
-   which sets `X-Forwarded-Proto`; `LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN` isn't
-   needed.
-2. Set the variables as Fly secrets, not in `fly.toml`, which is in this public
-   repo. Setting secrets restarts the Machine with them:
-
-   ```bash
-   fly secrets set \
-     LIFETRACKER_GOOGLE_SSO_CLIENT_ID=1234567890-abc.apps.googleusercontent.com \
-     LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET=... \
-     LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=me@gmail.com
-   ```
-
-   To keep the secret out of your shell history, put the `NAME=value` lines in a
-   file and run `fly secrets import < that-file` instead, then delete the file.
+1. In Google Cloud, open the OAuth client from local development and add a second
+   redirect URI, `https://<app>.fly.dev/google_sso/callback/` (plus
+   `https://<your domain>/google_sso/callback/` for each custom domain you've
+   attached). The `https` comes from Fly's proxy, which sets `X-Forwarded-Proto`;
+   `LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN` isn't needed.
+2. Run `just fly-setup` (see [One-time setup](#one-time-setup)). It sets the
+   `LIFETRACKER_GOOGLE_SSO_*` values from `.env` as Fly secrets, not in `fly.toml`,
+   which is in this public repo; setting secrets restarts the Machine with them.
+   It refuses to set only one of the client ID and secret, and warns if
+   `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS` is empty.
 3. Log in to production with your password and set your user's **Email address**
    to your Google email, as in local development. The database is separate, so this
    has to be done on each instance.
 4. Log out and test **Sign in with Google** at
    `https://<app>.fly.dev/admin/`.
 
-To add or remove an allowed account later, run `fly secrets set
-LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=...` with the full new list (and update the
-test users in Google Cloud). To turn Google sign-in off, run `fly secrets unset
-LIFETRACKER_GOOGLE_SSO_CLIENT_ID LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET`.
+`just fly-setup` never overwrites a secret that's already set, so to add or remove
+an allowed account later, export `FLY_APP` and run `fly secrets set
+LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=...` with the full new list (and update
+`.env` and the test users in Google Cloud). To turn Google sign-in off, run `fly
+secrets unset LIFETRACKER_GOOGLE_SSO_CLIENT_ID
+LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET`.
 
 For another host, pass the same variables to the container with `-e` or
 `--env-file`, as in [Production deployment](#production-deployment). Serve it over
@@ -312,11 +306,12 @@ configuration.
    `.env` as `FLY_APP`, along with `LIFETRACKER_INITIAL_ADMIN_PASSWORD` (the
    password `admin` gets on first boot) and the `LIFETRACKER_BACKUP_S3_*` settings
    (see [Cloud backup](#cloud-backup)). `ENDPOINT_URL` and `REGION_NAME` are
-   optional; `just fly-setup` leaves them unset on Fly if they're blank or
-   absent.
+   optional, as are the `LIFETRACKER_GOOGLE_SSO_*` settings (see
+   [Google sign-in](#google-sign-in)); `just fly-setup` leaves them unset on Fly
+   if they're blank or absent.
 2. Run `just fly-setup` (you need `fly`, `gh` and `jq` installed, and `fly` and
    `gh` logged in). It creates whatever's missing of: the Fly app, its volume (name and region from
-   `fly.toml`), the admin password and S3 settings as Fly secrets, and the
+   `fly.toml`), the admin password, S3 and Google sign-in settings as Fly secrets, and the
    `FLY_APP` and `FLY_API_TOKEN` GitHub Actions secrets, the latter a new deploy
    token scoped to the app. It's safe to re-run, and never changes anything that already exists; to
    change a value, use `fly secrets set` or `gh secret set` directly.
