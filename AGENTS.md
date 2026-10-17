@@ -16,7 +16,7 @@ avoids that by parsing the workflow YAML directly and running its `run:` steps a
 `coverage.xml` to Codecov (`codecov/codecov-action`), and also uploads the `junit.xml` test results
 it writes for Codecov Test Analytics (`report_type: test_results`, even if the tests failed; not
 `codecov/test-results-action`, which is deprecated); these steps need a `CODECOV_TOKEN` repo
-secret from codecov.io and are skipped by `run_workflow_local.py` since they're `uses:` steps. `ci.yml` has five jobs, `test`, `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment);
+secret from codecov.io and are skipped by `run_workflow_local.py` since they're `uses:` steps. `ci.yml` has six jobs, `test`, `screenshots` (see Screenshots), `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment);
 `run_workflow_local.py` runs the first job in the file unless given `--job`, so keep `test` first.
 Don't run `--job dependabot-fix`, `--job publish` or `--job deploy` locally: it doesn't evaluate
 `if:`, so it would push commits to the current branch, push to GHCR or deploy to production.
@@ -95,10 +95,14 @@ referencing these as `tests.*` labels rather than the `lifetracker.*` app labels
 
 **Screenshots:** `screenshot_tests/` holds Playwright tests that drive a headless Chromium
 against pytest-django's `live_server` (empty test DB) and save full-page PNGs to the gitignored
-`screenshots/` directory, for eyeballing UI changes. They're local-only, run by `just screenshots`
+`screenshots/` directory, for eyeballing UI changes. They're run by `just screenshots`
 (which also runs `playwright install chromium`): they're outside `testpaths`, so `pytest`,
-`just coverage` and CI never collect or measure them, and Playwright is in its own `screenshots`
-dependency group, which CI doesn't install. They assert nothing beyond the pages loading.
+`just coverage` and the `test` job never collect or measure them, and Playwright is in its own
+`screenshots` dependency group, which only the `screenshots` CI job installs. That job (which
+first runs `playwright install --with-deps chromium` for Chromium's system libraries) runs
+`just screenshots` and uploads `screenshots/*.png` as a `screenshots` workflow artifact (kept 14 days),
+downloadable from the run's summary page; nothing posts it to the PR. Like `test`, it waits on
+`dependabot-fix`. They assert nothing beyond the pages loading.
 
 **File storage:** All uploaded attachments are stored in the SQLite database, not on disk. `DatabaseStorage` (in `core/models.py`) is a custom Django storage backend that writes file content to `DBStoredFile` rows. Storage paths have the form `db/<pk>/<filename>`. Files are served through `DBStoredFileAdmin.serve_file_view` at `/admin/core/dbstoredfile/file/<pk>/`.
 
