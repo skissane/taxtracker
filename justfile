@@ -18,6 +18,10 @@ requirements-check:
 requirements-fix:
     uv run --no-project python scripts/requirements_min_versions.py fix
 
+# Check that uv.lock only has wheels for supported OS/CPU combinations
+lock-os-arch-check:
+    uv run --no-project python scripts/validate_uv_lock_os_arch.py
+
 # Lint Python code with ruff
 lint:
     uv run --group dev ruff check .
@@ -111,4 +115,4 @@ check: lint fmt-check lint-templates fmt-check-templates
 fix: lint-fix fmt fmt-templates
 
 # Run everything the CI workflow runs
-ci: lock-check sync requirements-check check coverage docker-build
+ci: lock-check lock-os-arch-check sync requirements-check check coverage docker-build
