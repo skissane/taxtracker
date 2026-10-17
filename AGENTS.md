@@ -8,8 +8,8 @@ This file provides guidance to AI coding assistants working with code in this re
 
 CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run
 everything CI runs, or `just --list` to see individual recipes (`lint`, `fmt-check`,
-`lint-templates`, `fmt-check-templates`, `coverage`, `sync`, `lock-check`, `requirements-check`,
-`requirements-fix`). `just ci` drifts from
+`lint-templates`, `fmt-check-templates`, `coverage`, `sync`, `lock-check`, `lock-os-arch-check`,
+`requirements-check`, `requirements-fix`). `just ci` drifts from
 `ci.yml` if the workflow changes without a matching justfile edit; `run_workflow_local.py`
 avoids that by parsing the workflow YAML directly and running its `run:` steps as written
 (see its docstring for what it does and doesn't support). After `just coverage` runs, CI uploads
@@ -81,12 +81,13 @@ uv run lifetracker-cli --help
 Tests live outside `src/`, in a top-level `tests/` tree mirroring the package layout (`tests/core/tests.py`,
 `tests/taxtracker/tests.py`, `tests/cli/tests.py`), each importing the code under test via absolute
 `lifetracker.*` imports. The exception is `tests/scripts/tests.py`, which tests the standalone
-scripts in `scripts/` (not a package) by top-level module name, e.g. `import
-requirements_min_versions`; `pytest`'s `pythonpath` includes `scripts` for this, and coverage
-measures `scripts` alongside `src/lifetracker`. Run via `pytest` (using `pytest-django`, configured in
+scripts in `scripts/` via `scripts.*` imports, e.g. `from scripts.requirements_min_versions
+import main`. `scripts/` has no `__init__.py`; it resolves as an implicit namespace package from
+the repo root, which both pytest and `manage.py test` put on `sys.path`. (Importing by bare module
+name with `scripts` on `pytest`'s `pythonpath` also works at runtime, but Pylance can't resolve
+it.) Coverage measures `scripts` alongside `src/lifetracker`. Run via `pytest` (using `pytest-django`, configured in
 `pyproject.toml`'s `[tool.pytest.ini_options]` with `testpaths = ["tests"]`), parallelised across CPU
-cores by `pytest-xdist` (`-n auto`, set as a default in `addopts`). `PYTHONPATH=scripts manage.py test
-tests.core tests.taxtracker tests.cli tests.scripts` still works as an unparallelised fallback,
+cores by `pytest-xdist` (`-n auto`, set as a default in `addopts`). `manage.py test tests.core tests.taxtracker tests.cli tests.scripts` still works as an unparallelised fallback,
 referencing these as `tests.*` labels rather than the `lifetracker.*` app labels.
 
 **File storage:** All uploaded attachments are stored in the SQLite database, not on disk. `DatabaseStorage` (in `core/models.py`) is a custom Django storage backend that writes file content to `DBStoredFile` rows. Storage paths have the form `db/<pk>/<filename>`. Files are served through `DBStoredFileAdmin.serve_file_view` at `/admin/core/dbstoredfile/file/<pk>/`.
@@ -154,7 +155,7 @@ Ruff: rules E, F, W, I, UP; line length 88; migrations excluded. djlint: profile
 
 ## Pitfalls
 
-**Only Linux (x86_64 and aarch64) and macOS are supported; Windows deliberately isn't.** `pyproject.toml`'s `[tool.uv] environments` restricts resolution to `darwin`, and to `linux` on `x86_64`/`aarch64` only, which keeps wheels for other Linux architectures (ppc64le, s390x, armv7l, riscv64) out of `uv.lock`. Don't flag or "fix" Windows portability issues (e.g. relying on `HOME`, POSIX shell syntax in the `justfile` or scripts, `/` path separators, file permission bits), and don't add Windows-specific workarounds.
+**Only Linux (x86_64 and aarch64) and macOS are supported; Windows deliberately isn't.** `pyproject.toml`'s `[tool.uv] environments` restricts resolution to `darwin`, and to `linux` on `x86_64`/`aarch64` only, which keeps wheels for other Linux architectures (ppc64le, s390x, armv7l, riscv64) out of `uv.lock`. `just lock-os-arch-check` (part of `just ci` and the `test` job; `scripts/validate_uv_lock_os_arch.py`, stdlib-only) fails if `uv.lock` has a wheel whose platform tag splits into an (OS, arch) pair that its `_classify_platform` doesn't classify as `SUPPORTED` (the platforms `environments` is meant to allow) or `TOLERATED` (iOS and Emscripten, which aren't supported but whose wheels uv keeps despite `environments`). Don't flag or "fix" Windows portability issues (e.g. relying on `HOME`, POSIX shell syntax in the `justfile` or scripts, `/` path separators, file permission bits), and don't add Windows-specific workarounds.
 
 **`except A, B, C:` is valid Python 3 syntax.** Do not flag comma-separated exception types (without parentheses) as "Python 2-style syntax" or a SyntaxError. This is valid in Python 3, and ruff format will restore it if you remove it.
 
