@@ -269,8 +269,8 @@ LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS = _env_list(
 # Never create users through Google SSO: only look up existing ones. The library
 # defaults this to True, so it must stay explicitly False. With it False, the
 # library's other user-creation settings (staff/superuser lists, first-superuser
-# promotion, pre-create hook) have no effect (the pre-create hook still runs, but
-# its return value is ignored), so they're left unset.
+# promotion, pre-create hook) have no effect, so they're left unset. The
+# pre-create hook still runs, but its return value is ignored.
 GOOGLE_SSO_AUTO_CREATE_USERS = False
 GOOGLE_SSO_PRE_VALIDATE_CALLBACK = "lifetracker.google_sso.pre_validate_user"
 GOOGLE_SSO_LOGIN_FAILED_URL = "admin:index"
