@@ -33,6 +33,9 @@ jobs:
       - name: Check lockfile is up to date
         run: just lock-check
 
+      - name: Check lockfile only targets supported platforms
+        run: just lock-os-arch-check
+
       - name: Install dependencies
         run: just sync
 
