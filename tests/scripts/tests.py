@@ -5,13 +5,14 @@ import textwrap
 from pathlib import Path
 
 from django.test import SimpleTestCase
-from requirements_min_versions import main
-from validate_uv_lock_os_arch import (
+
+from scripts.requirements_min_versions import main
+from scripts.validate_uv_lock_os_arch import (
     PlatformClassification,
     _classify_platform,
     _split_platform,
 )
-from validate_uv_lock_os_arch import main as os_arch_main
+from scripts.validate_uv_lock_os_arch import main as os_arch_main
 
 
 def _lock(*packages: tuple[str, str]) -> str:

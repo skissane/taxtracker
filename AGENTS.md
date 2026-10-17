@@ -81,12 +81,13 @@ uv run lifetracker-cli --help
 Tests live outside `src/`, in a top-level `tests/` tree mirroring the package layout (`tests/core/tests.py`,
 `tests/taxtracker/tests.py`, `tests/cli/tests.py`), each importing the code under test via absolute
 `lifetracker.*` imports. The exception is `tests/scripts/tests.py`, which tests the standalone
-scripts in `scripts/` (not a package) by top-level module name, e.g. `import
-requirements_min_versions`; `pytest`'s `pythonpath` includes `scripts` for this, and coverage
-measures `scripts` alongside `src/lifetracker`. Run via `pytest` (using `pytest-django`, configured in
+scripts in `scripts/` via `scripts.*` imports, e.g. `from scripts.requirements_min_versions
+import main`. `scripts/` has no `__init__.py`; it resolves as an implicit namespace package from
+the repo root, which both pytest and `manage.py test` put on `sys.path`. (Importing by bare module
+name with `scripts` on `pytest`'s `pythonpath` also works at runtime, but Pylance can't resolve
+it.) Coverage measures `scripts` alongside `src/lifetracker`. Run via `pytest` (using `pytest-django`, configured in
 `pyproject.toml`'s `[tool.pytest.ini_options]` with `testpaths = ["tests"]`), parallelised across CPU
-cores by `pytest-xdist` (`-n auto`, set as a default in `addopts`). `PYTHONPATH=scripts manage.py test
-tests.core tests.taxtracker tests.cli tests.scripts` still works as an unparallelised fallback,
+cores by `pytest-xdist` (`-n auto`, set as a default in `addopts`). `manage.py test tests.core tests.taxtracker tests.cli tests.scripts` still works as an unparallelised fallback,
 referencing these as `tests.*` labels rather than the `lifetracker.*` app labels.
 
 **File storage:** All uploaded attachments are stored in the SQLite database, not on disk. `DatabaseStorage` (in `core/models.py`) is a custom Django storage backend that writes file content to `DBStoredFile` rows. Storage paths have the form `db/<pk>/<filename>`. Files are served through `DBStoredFileAdmin.serve_file_view` at `/admin/core/dbstoredfile/file/<pk>/`.
