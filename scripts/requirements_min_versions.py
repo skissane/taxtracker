@@ -8,7 +8,7 @@ def _normalize_package_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def _parse_locked_versions() -> dict[str, str]:
+def _parse_locked_versions() -> dict[str, set[str]]:
     lock = tomllib.loads(Path("uv.lock").read_text(encoding="utf-8"))
     locked = {}
     for package in lock.get("package", []):
@@ -16,11 +16,7 @@ def _parse_locked_versions() -> dict[str, str]:
         version = package.get("version")
         if version is None:
             continue
-        if locked.setdefault(name, version) != version:
-            raise SystemExit(
-                f"uv.lock has more than one version of {name!r}; "
-                "can't pick a single minimum"
-            )
+        locked.setdefault(name, set()).add(version)
     return locked
 
 
@@ -62,13 +58,24 @@ def main(mode: str) -> int:
             if parsed is None:
                 continue
             package_name, minimum = parsed
-            actual = installed.get(package_name)
-            if actual is None:
+            versions = installed.get(package_name)
+            if versions is None:
                 print(
                     f"{group_name}: {dep!r} not found in uv.lock",
                     file=sys.stderr,
                 )
                 return 1
+            # Only packages we check need a single locked version; a
+            # transitive dependency locked at several versions is fine.
+            if len(versions) > 1:
+                print(
+                    f"{group_name}: uv.lock has more than one version of "
+                    f"{package_name!r} ({', '.join(sorted(versions))}); "
+                    "can't pick a single minimum",
+                    file=sys.stderr,
+                )
+                return 1
+            (actual,) = versions
             if minimum != actual:
                 mismatches.append((group_name, dep, minimum, actual))
                 replacements.append(
