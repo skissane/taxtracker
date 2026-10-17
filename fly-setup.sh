@@ -2,12 +2,13 @@
 # One-time setup of the production Fly.io app (see README.md's Fly.io section).
 # Reads FLY_APP, LIFETRACKER_INITIAL_ADMIN_PASSWORD, the
 # LIFETRACKER_BACKUP_S3_* settings (ENDPOINT_URL and REGION_NAME optional) and,
-# optionally, the LIFETRACKER_GOOGLE_SSO_* settings (except CALLBACK_DOMAIN)
-# from ./.env, then creates whatever is missing: the Fly app, its volume, those
-# settings as Fly secrets, and the FLY_APP and FLY_API_TOKEN GitHub Actions
-# secrets (the latter a new deploy token scoped to the app). Safe to re-run: it
-# never changes anything that already exists, so to change a value, use
-# `fly secrets set` / `gh secret set`.
+# optionally, LIFETRACKER_UNAUTHENTICATED_SITE_NAME and the
+# LIFETRACKER_GOOGLE_SSO_* settings (except CALLBACK_DOMAIN) from ./.env, then
+# creates whatever is missing: the Fly app, its volume, those settings as Fly
+# secrets, and the FLY_APP and FLY_API_TOKEN GitHub Actions secrets (the latter
+# a new deploy token scoped to the app). Safe to re-run: it never changes
+# anything that already exists, so to change a value, use `fly secrets set` /
+# `gh secret set`.
 #
 # The exception is --replace-token, which always creates a new deploy token
 # and overwrites FLY_API_TOKEN with it, e.g. after moving to a new app (an
@@ -38,6 +39,7 @@ required_fly_secrets=(
 optional_fly_secrets=(
   LIFETRACKER_BACKUP_S3_ENDPOINT_URL
   LIFETRACKER_BACKUP_S3_REGION_NAME
+  LIFETRACKER_UNAUTHENTICATED_SITE_NAME
   # Production shares local dev's OAuth client, which has both redirect URIs.
   LIFETRACKER_GOOGLE_SSO_CLIENT_ID
   LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET

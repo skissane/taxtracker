@@ -159,7 +159,8 @@ CSRF_COOKIE_SECURE = not DEBUG
 # Application definition
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    # django.contrib.admin, with a custom admin.site (see admin_site.py).
+    "lifetracker.apps.LifetrackerAdminConfig",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -237,6 +238,12 @@ LIFETRACKER_COMMIT_URL_BASE = os.environ.get(
     "LIFETRACKER_COMMIT_URL_BASE", "https://github.com/skissane/taxtracker/commit/"
 ).strip()
 LIFETRACKER_COMMIT_ID = os.environ.get("LIFETRACKER_COMMIT_ID", "").strip()
+# Shown instead of "Life Tracker" in the admin header and page titles to visitors
+# who aren't logged in, e.g. on the login page.
+LIFETRACKER_UNAUTHENTICATED_SITE_NAME = (
+    os.environ.get("LIFETRACKER_UNAUTHENTICATED_SITE_NAME", "").strip()
+    or "Life Tracker"
+)
 # Prefixed to backup object keys so backups from different environments (e.g.
 # local dev vs. Docker, which use separate databases) are distinguishable. On
 # Fly, defaults to <app>.fly.dev, as the Machine's own hostname is a random ID

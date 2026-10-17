@@ -148,8 +148,9 @@ The image defaults to `LIFETRACKER_DEBUG=0`, and then refuses to start unless
 | `LIFETRACKER_BACKUP_S3_*` | Optional. Cloud backup bucket and credentials; see [Cloud backup](#cloud-backup). |
 | `LIFETRACKER_GOOGLE_SSO_*` | Optional. Google sign-in client and allowed emails; see [Google sign-in](#google-sign-in). |
 | `LIFETRACKER_BACKUP_HOSTNAME` | Recommended with cloud backup. Prefix for backup object keys, also shown as the instance name in the admin header; without it the container's hostname is used, a random ID by default. On Fly.io it defaults to `<app>.fly.dev`. |
+| `LIFETRACKER_UNAUTHENTICATED_SITE_NAME` | Optional. Site name shown in the admin header and page titles to visitors who aren't logged in, e.g. on the login page, instead of `Life Tracker` (the default). `just fly-setup` copies it from `.env` to a Fly secret. |
 | `LIFETRACKER_COMMIT_ID` | Optional. Commit shown in the admin header. `just docker-build` and `./run.sh` set it automatically from `git rev-parse HEAD`. |
-| `LIFETRACKER_COMMIT_URL_BASE` | Optional. Base URL used for the commit link in the admin header. Defaults to `https://github.com/skissane/taxtracker/commit/`. |
+| `LIFETRACKER_COMMIT_URL_BASE` | Optional. Base URL used for the commit link in the admin header, shown only to logged-in users. Defaults to `https://github.com/skissane/taxtracker/commit/`. |
 
 For example:
 
@@ -194,8 +195,9 @@ configuration.
    `.env` as `FLY_APP`, along with `LIFETRACKER_INITIAL_ADMIN_PASSWORD` (the
    password `admin` gets on first boot) and the `LIFETRACKER_BACKUP_S3_*` settings
    (see [Cloud backup](#cloud-backup)). `ENDPOINT_URL` and `REGION_NAME` are
-   optional, as are the `LIFETRACKER_GOOGLE_SSO_*` settings (see
-   [Google sign-in](#google-sign-in)); `just fly-setup` leaves them unset on Fly
+   optional, as are `LIFETRACKER_UNAUTHENTICATED_SITE_NAME` (see
+   [Production deployment](#production-deployment)) and the
+   `LIFETRACKER_GOOGLE_SSO_*` settings (see [Google sign-in](#google-sign-in)); `just fly-setup` leaves them unset on Fly
    if they're blank or absent.
 2. Run `just fly-setup` (you need `fly`, `gh` and `jq` installed, and `fly` and
    `gh` logged in). It creates whatever's missing of: the Fly app, its volume (name and region from

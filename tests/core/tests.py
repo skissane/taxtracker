@@ -22,6 +22,7 @@ from django.urls import reverse
 from django_google_sso.main import GoogleAuth
 
 from lifetracker import google_sso
+from lifetracker.admin_site import LifetrackerAdminSite, _build_admin_site_header
 from lifetracker.asgi import application as asgi_application
 from lifetracker.core.admin import (
     DBStoredFileAdmin,
@@ -38,7 +39,6 @@ from lifetracker.core.models import (
     FileType,
     MimeType,
 )
-from lifetracker.urls import _build_admin_site_header
 from lifetracker.wsgi import application as wsgi_application
 
 _GOOGLE_SSO_ENABLED_SETTINGS = {
@@ -804,6 +804,8 @@ class AdminSiteHeaderTests(TestCase):
         self.assertEqual(
             str(
                 _build_admin_site_header(
+                    site_name="Life Tracker",
+                    link_commit=True,
                     commit_id=self.COMMIT_ID,
                     commit_url_base="https://github.com/skissane/taxtracker/commit/",
                     instance_name="instance.local",
@@ -822,6 +824,8 @@ class AdminSiteHeaderTests(TestCase):
         self.assertEqual(
             str(
                 _build_admin_site_header(
+                    site_name="Life Tracker",
+                    link_commit=True,
                     commit_id="",
                     commit_url_base="https://github.com/skissane/taxtracker/commit/",
                     instance_name="instance.local",
@@ -834,6 +838,8 @@ class AdminSiteHeaderTests(TestCase):
         self.assertEqual(
             str(
                 _build_admin_site_header(
+                    site_name="Life Tracker",
+                    link_commit=True,
                     commit_id=self.COMMIT_ID,
                     commit_url_base="https://github.com/skissane/taxtracker/commit",
                     instance_name="instance.local",
@@ -847,6 +853,71 @@ class AdminSiteHeaderTests(TestCase):
                 " <code>instance.local</code>"
             ),
         )
+
+    def test_omits_commit_link_when_not_linking_commit(self):
+        self.assertEqual(
+            str(
+                _build_admin_site_header(
+                    site_name="Example",
+                    link_commit=False,
+                    commit_id=self.COMMIT_ID,
+                    commit_url_base="https://github.com/skissane/taxtracker/commit/",
+                    instance_name="instance.local",
+                )
+            ),
+            (
+                f'Example <code title="{self.COMMIT_ID}">0123abc</code>'
+                " <code>instance.local</code>"
+            ),
+        )
+
+    def test_escapes_site_name(self):
+        self.assertEqual(
+            str(
+                _build_admin_site_header(
+                    site_name="<b>",
+                    link_commit=False,
+                    commit_id="",
+                    commit_url_base="https://github.com/skissane/taxtracker/commit/",
+                    instance_name="instance.local",
+                )
+            ),
+            "&lt;b&gt; <code>instance.local</code>",
+        )
+
+
+@override_settings(
+    LIFETRACKER_COMMIT_ID=AdminSiteHeaderTests.COMMIT_ID,
+    LIFETRACKER_COMMIT_URL_BASE="https://example.invalid/commit/",
+    LIFETRACKER_BACKUP_HOSTNAME="instance.local",
+    LIFETRACKER_UNAUTHENTICATED_SITE_NAME="Example Site",
+)
+class AdminSitePerRequestHeaderTests(TestCase):
+    COMMIT_URL = f"https://example.invalid/commit/{AdminSiteHeaderTests.COMMIT_ID}"
+
+    def test_admin_site_is_lifetracker_admin_site(self):
+        self.assertIsInstance(admin.site, LifetrackerAdminSite)
+
+    def test_logged_out_uses_unauthenticated_name_without_commit_link(self):
+        response = Client().get(reverse("admin:login"))
+        self.assertContains(response, "<title>Log in | Example Site</title>", html=True)
+        self.assertContains(
+            response,
+            f'Example Site <code title="{AdminSiteHeaderTests.COMMIT_ID}">0123abc'
+            "</code> <code>instance.local</code>",
+        )
+        self.assertNotContains(response, self.COMMIT_URL)
+        self.assertNotContains(response, "Life Tracker")
+
+    def test_logged_in_uses_site_name_with_commit_link(self):
+        client = Client()
+        client.force_login(User.objects.create_superuser("admin", "", "pw"))
+        response = client.get(reverse("admin:index"))
+        self.assertContains(
+            response, "<title>Administration | Life Tracker</title>", html=True
+        )
+        self.assertContains(response, f'Life Tracker <code><a href="{self.COMMIT_URL}"')
+        self.assertNotContains(response, "Example Site")
 
 
 class _SettingsSubprocessMixin:
@@ -1167,7 +1238,7 @@ class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
 class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
     EXPR = (
         "(s.LIFETRACKER_COMMIT_URL_BASE, s.LIFETRACKER_COMMIT_ID,"
-        " s.LIFETRACKER_BACKUP_HOSTNAME)"
+        " s.LIFETRACKER_BACKUP_HOSTNAME, s.LIFETRACKER_UNAUTHENTICATED_SITE_NAME)"
     )
 
     def _settings(self, **env):
@@ -1177,12 +1248,15 @@ class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
         return ast.literal_eval(proc.stdout.strip())
 
     def test_defaults(self):
-        commit_url_base, commit_id, backup_hostname = self._settings()
+        commit_url_base, commit_id, backup_hostname, unauthenticated_name = (
+            self._settings()
+        )
         self.assertEqual(
             commit_url_base, "https://github.com/skissane/taxtracker/commit/"
         )
         self.assertEqual(commit_id, "")
         self.assertTrue(backup_hostname)
+        self.assertEqual(unauthenticated_name, "Life Tracker")
 
     def test_reads_commit_values_from_environment(self):
         self.assertEqual(
@@ -1190,8 +1264,20 @@ class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
                 LIFETRACKER_COMMIT_URL_BASE="https://example.invalid/commit/",
                 LIFETRACKER_COMMIT_ID="deadbeef",
                 LIFETRACKER_BACKUP_HOSTNAME="test-instance",
+                LIFETRACKER_UNAUTHENTICATED_SITE_NAME=" Example Site ",
             ),
-            ("https://example.invalid/commit/", "deadbeef", "test-instance"),
+            (
+                "https://example.invalid/commit/",
+                "deadbeef",
+                "test-instance",
+                "Example Site",
+            ),
+        )
+
+    def test_blank_unauthenticated_site_name_uses_default(self):
+        self.assertEqual(
+            self._settings(LIFETRACKER_UNAUTHENTICATED_SITE_NAME="  ")[3],
+            "Life Tracker",
         )
 
     def test_backup_hostname_defaults_from_fly_app_name(self):
