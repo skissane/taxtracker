@@ -139,13 +139,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Post the screenshots artifact to the PR as a comment, replacing the previous
-  # one. gh's --attach refuses GITHUB_TOKEN (an installation token), so this
-  # posts with SCREENSHOTS_TOKEN, a fine-grained PAT, and fails if it's unset.
+  # Post the screenshots artifact to the PR as a github-actions[bot] comment, or
+  # edit the one posted before. Attachment uploads need a user token, so the
+  # images are uploaded with SCREENSHOTS_TOKEN, a fine-grained PAT (the job
+  # fails if it's unset); the comment itself is written with GITHUB_TOKEN.
   # Skipped for forks and Dependabot, whose runs don't get the repo's Actions
-  # secrets (and whose code shouldn't see the token). It runs the PR branch's
+  # secrets (and whose code shouldn't see the tokens). It runs the PR branch's
   # own script, but installs nothing: the script is stdlib-only and runs with
-  # `uv run --no-project`, so no dependency bump runs with the token. Queued
+  # `uv run --no-project`, so no dependency bump runs with the tokens. Queued
   # per PR, so two runs can't both see no previous comment and both post.
   post-screenshots:
     needs: screenshots
@@ -153,6 +154,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: write
     concurrency:
       group: post-screenshots-${{ github.event.pull_request.number }}
       cancel-in-progress: false
@@ -184,19 +186,6 @@ jobs:
         with:
           just-version: "1.58.0"
 
-      # The runner's preinstalled gh may predate --attach, so install a pinned
-      # release, checked against its published SHA-256.
-      - name: Install GitHub CLI
-        env:
-          GH_VERSION: "2.102.0"
-          GH_SHA256: bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386
-        run: |
-          cd "$RUNNER_TEMP"
-          curl -fsSLo gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
-          echo "${GH_SHA256}  gh.tar.gz" | sha256sum -c -
-          tar xzf gh.tar.gz
-          echo "$RUNNER_TEMP/gh_${GH_VERSION}_linux_amd64/bin" >> "$GITHUB_PATH"
-
       - name: Download screenshots
         uses: actions/download-artifact@v4
         with:
@@ -205,12 +194,13 @@ jobs:
 
       - name: Post screenshots to the PR
         env:
-          GH_TOKEN: ${{ secrets.SCREENSHOTS_TOKEN }}
-          GH_REPO: ${{ github.repository }}
+          SCREENSHOTS_TOKEN: ${{ secrets.SCREENSHOTS_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: just screenshots-post "$PR_NUMBER" --commit "$HEAD_SHA" --run-url "$RUN_URL"
+        # GITHUB_TOKEN can't look up its own login, so name it.
+        run: just screenshots-post "$PR_NUMBER" --commit "$HEAD_SHA" --run-url "$RUN_URL" --author 'github-actions[bot]'
 
   # Runs on a Dependabot branch, whose bumped dependency we don't trust, so the
   # write-capable DEPENDABOT_FIX_TOKEN is only exposed to the final push step:
