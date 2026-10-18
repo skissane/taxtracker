@@ -7,7 +7,7 @@ This file provides guidance to AI coding assistants working with code in this re
 ## Commands
 
 CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run
-everything CI runs, or `just --list` to see individual recipes (`lint`, `fmt-check`,
+everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `lint`, `fmt-check`,
 `lint-templates`, `fmt-check-templates`, `coverage`, `screenshots`, `screenshots-post`, `sync`, `lock-check`, `lock-os-arch-check`,
 `requirements-check`, `requirements-fix`). `just ci` drifts from
 `ci.yml` if the workflow changes without a matching justfile edit; `run_workflow_local.py`
@@ -20,6 +20,13 @@ secret from codecov.io and are skipped by `run_workflow_local.py` since they're 
 `run_workflow_local.py` runs the first job in the file unless given `--job`, so keep `test` first.
 Don't run `--job dependabot-fix`, `--job publish` or `--job deploy` locally: it doesn't evaluate
 `if:`, so it would push commits to the current branch, push to GHCR or deploy to production.
+
+**Whitespace:** `just whitespace-check` (part of `just check`, `just ci` and the `test` job;
+`scripts/check_whitespace.py`, stdlib-only) checks every file `git ls-files` lists, except ones
+Git's own detection calls binary (`git ls-files --eol` shows `w/-text`) and symlinks: no trailing
+whitespace on any line, no leading blank line, and exactly one newline at the end of a non-empty
+file (none in an empty one). It checks the working tree copy, so it also catches unstaged edits. For a
+Markdown hard line break, end the line with a backslash rather than two trailing spaces.
 
 **Dependency minimums:** `pyproject.toml`'s dependency lower bounds (`>=`) are kept equal to the
 versions uv resolved, by `scripts/requirements_min_versions.py`: `just requirements-check` (part of

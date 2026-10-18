@@ -42,6 +42,9 @@ jobs:
       - name: Check dependency minimum versions
         run: just requirements-check
 
+      - name: Check whitespace in text files
+        run: just whitespace-check
+
       - name: Lint with ruff
         run: just lint
 
