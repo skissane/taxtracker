@@ -1,23 +1,16 @@
 import io
-import logging
 import re
 import zipfile
 from pathlib import Path
 
-import boto3
-from botocore.config import Config
-from botocore.exceptions import BotoCoreError, ClientError
-from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
-from django.db import connections, transaction
+from django.db import transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
-from django.utils import timezone
 from django.utils.html import format_html
-from django.utils.timesince import timesince
 
 from lifetracker.core.models import DBStoredFile
 from lifetracker.taxtracker.archives import (
@@ -30,9 +23,7 @@ from lifetracker.taxtracker.forms import (
     ReceivedDocumentImportArchiveForm,
 )
 from lifetracker.taxtracker.models import (
-    CLOUD_BACKUP_STATUS_PK,
     Attachment,
-    CloudBackupStatus,
     FinancialYear,
     FinancialYearStatusHistory,
     Item,
@@ -43,25 +34,6 @@ from lifetracker.taxtracker.models import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-logger = logging.getLogger(__name__)
-
-# The upload runs inside the request, so bound how long a hung endpoint can stall
-# it: botocore's defaults (60s timeouts, several retries) can outlast gunicorn's
-# 120s worker timeout. These are per socket operation, not for the whole upload.
-CLOUD_BACKUP_S3_CONFIG = Config(
-    connect_timeout=10,
-    read_timeout=30,
-    retries={"mode": "standard", "max_attempts": 2},
-)
-
-
-class CloudBackupStatusUpdateError(RuntimeError):
-    """Raised when upload succeeds but persisting backup status fails."""
-
-    def __init__(self, object_key):
-        super().__init__("Cloud backup uploaded, but failed to record backup status.")
-        self.object_key = object_key
 
 
 def _attachment_date_warning(obj):
@@ -918,24 +890,9 @@ class FinancialYearAdmin(admin.ModelAdmin):
                 name="taxtracker_financialyear_copy_to_new_year",
             ),
             path(
-                "download-db-backup/",
-                self.admin_site.admin_view(self.download_db_backup_view),
-                name="taxtracker_financialyear_download_db_backup",
-            ),
-            path(
                 "download-multi-zip/",
                 self.admin_site.admin_view(self.download_multi_zip_view),
                 name="taxtracker_financialyear_download_multi_zip",
-            ),
-            path(
-                "cloud-backup/",
-                self.admin_site.admin_view(self.cloud_backup_status_view),
-                name="taxtracker_financialyear_cloud_backup_status",
-            ),
-            path(
-                "cloud-backup/list/",
-                self.admin_site.admin_view(self.cloud_backup_list_view),
-                name="taxtracker_financialyear_cloud_backup_list",
             ),
         ]
         return custom + super().get_urls()
@@ -997,19 +954,13 @@ class FinancialYearAdmin(admin.ModelAdmin):
         return super().get_queryset(request).prefetch_related("status_history")
 
     # ------------------------------------------------------------------
-    # Changelist view override (inject backup URL)
+    # Changelist view override (inject multi-year ZIP URL)
     # ------------------------------------------------------------------
 
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
-        extra_context["download_db_backup_url"] = reverse(
-            "admin:taxtracker_financialyear_download_db_backup"
-        )
         extra_context["download_multi_zip_url"] = reverse(
             "admin:taxtracker_financialyear_download_multi_zip"
-        )
-        extra_context["cloud_backup_status_url"] = reverse(
-            "admin:taxtracker_financialyear_cloud_backup_status"
         )
         return super().changelist_view(request, extra_context)
 
@@ -1123,233 +1074,6 @@ class FinancialYearAdmin(admin.ModelAdmin):
             "admin/taxtracker/financialyear/download_multi_zip.html",
             context,
         )
-
-    # ------------------------------------------------------------------
-    # Cloud backup status / run backup now view
-    # ------------------------------------------------------------------
-
-    def _missing_cloud_backup_settings(self):
-        return [
-            key
-            for key, value in {
-                "LIFETRACKER_BACKUP_S3_BUCKET_NAME": (
-                    settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME
-                ),
-                "LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID": (
-                    settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID
-                ),
-                "LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY": (
-                    settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY
-                ),
-            }.items()
-            if not value
-        ]
-
-    def _cloud_backup_s3_client(self):
-        """Return a boto3 S3 client for the configured backup bucket."""
-        endpoint_url = settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL or None
-        region_name = settings.LIFETRACKER_BACKUP_S3_REGION_NAME or None
-        try:
-            return boto3.client(
-                "s3",
-                endpoint_url=endpoint_url,
-                region_name=region_name,
-                aws_access_key_id=settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY,
-                config=CLOUD_BACKUP_S3_CONFIG,
-            )
-        except ValueError as exc:
-            # e.g. a malformed endpoint URL ("Invalid endpoint: ...").
-            raise RuntimeError(f"Invalid S3 configuration: {exc}") from exc
-
-    def _run_cloud_backup_now(self):
-        """Run a cloud backup upload.
-
-        Callers must enforce authorization before invoking this method.
-        """
-        # Checked first: unlike missing settings, configuration can't fix this.
-        engine = settings.DATABASES["default"]["ENGINE"]
-        if engine != "django.db.backends.sqlite3":
-            raise RuntimeError("Cloud backup is only available for SQLite databases.")
-
-        missing_required = self._missing_cloud_backup_settings()
-        if missing_required:
-            raise RuntimeError(
-                "Cloud backup settings are incomplete. Missing: "
-                f"{', '.join(missing_required)}."
-            )
-
-        with connections["default"].cursor() as cursor:
-            backup_bytes = cursor.connection.serialize()
-
-        backup_time = timezone.now()
-        timestamp = backup_time.strftime("%Y-%m-%d.%H.%M.%S")
-        object_key = (
-            f"{settings.LIFETRACKER_BACKUP_HOSTNAME}/db-backup.{timestamp}.sqlite3"
-        )
-        s3_client = self._cloud_backup_s3_client()
-        s3_client.put_object(
-            Bucket=settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
-            Key=object_key,
-            Body=backup_bytes,
-            ContentType="application/x-sqlite3",
-        )
-        try:
-            CloudBackupStatus.objects.update_or_create(
-                pk=CLOUD_BACKUP_STATUS_PK,
-                defaults={
-                    "last_backup_at": backup_time,
-                    "last_backup_object_key": object_key,
-                    "last_backup_size": len(backup_bytes),
-                },
-            )
-        except Exception as exc:
-            raise CloudBackupStatusUpdateError(object_key) from exc
-        return object_key
-
-    def cloud_backup_status_view(self, request):
-        if not request.user.is_superuser:
-            raise PermissionDenied
-
-        status = CloudBackupStatus.objects.filter(pk=CLOUD_BACKUP_STATUS_PK).first()
-        if status is None:
-            status = CloudBackupStatus()
-        config = {
-            "endpoint_url": settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL,
-            "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
-            "region_name": settings.LIFETRACKER_BACKUP_S3_REGION_NAME,
-            "hostname": settings.LIFETRACKER_BACKUP_HOSTNAME,
-        }
-        missing_required = self._missing_cloud_backup_settings()
-
-        if request.method == "POST":
-            try:
-                object_key = self._run_cloud_backup_now()
-                messages.success(
-                    request,
-                    f"Cloud backup uploaded successfully as {object_key}.",
-                )
-                return redirect(
-                    reverse("admin:taxtracker_financialyear_cloud_backup_status")
-                )
-            except CloudBackupStatusUpdateError as exc:
-                # The message doesn't include the cause, so log it.
-                logger.exception("Failed to record cloud backup status")
-                messages.warning(
-                    request,
-                    "Cloud backup uploaded successfully as "
-                    f"{exc.object_key}, but failed to record backup status.",
-                )
-            except (BotoCoreError, ClientError, RuntimeError) as exc:
-                messages.error(request, f"Cloud backup failed: {exc}")
-
-        context = {
-            **self.admin_site.each_context(request),
-            "title": "Cloud Backup Status",
-            "config": config,
-            "status": status,
-            # One unit only ("4 days", not "4 days, 3 hours"), for a quick glance.
-            "last_backup_ago": (
-                timesince(status.last_backup_at, depth=1)
-                if status.last_backup_at
-                else None
-            ),
-            "missing_required": missing_required,
-            "opts": self.model._meta,
-        }
-        return render(
-            request,
-            "admin/taxtracker/financialyear/cloud_backup_status.html",
-            context,
-        )
-
-    def _list_cloud_backups(self, prefix):
-        """List the bucket's top-level folders and the objects under *prefix*.
-
-        Returns ``(folders, objects)``: the top-level folder prefixes (one per
-        backup hostname), sorted, and the objects whose keys start with
-        *prefix*, newest first.
-        """
-        s3_client = self._cloud_backup_s3_client()
-        bucket = settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME
-        paginator = s3_client.get_paginator("list_objects_v2")
-        folders = sorted(
-            common_prefix["Prefix"]
-            for page in paginator.paginate(Bucket=bucket, Delimiter="/")
-            for common_prefix in page.get("CommonPrefixes", [])
-        )
-        objects = [
-            {
-                "key": obj["Key"],
-                "size": obj["Size"],
-                "last_modified": obj["LastModified"],
-            }
-            for page in paginator.paginate(Bucket=bucket, Prefix=prefix)
-            for obj in page.get("Contents", [])
-        ]
-        objects.sort(key=lambda obj: (obj["last_modified"], obj["key"]), reverse=True)
-        return folders, objects
-
-    def cloud_backup_list_view(self, request):
-        if not request.user.is_superuser:
-            raise PermissionDenied
-
-        # No "prefix" parameter means this instance's own backups; an empty one
-        # means everything in the bucket.
-        own_prefix = f"{settings.LIFETRACKER_BACKUP_HOSTNAME}/"
-        prefix = request.GET.get("prefix", own_prefix)
-        missing_required = self._missing_cloud_backup_settings()
-        folders = []
-        objects = None
-        if not missing_required:
-            try:
-                folders, objects = self._list_cloud_backups(prefix)
-                # Offer this instance's folder even before its first backup.
-                folders = sorted({*folders, own_prefix})
-            except (BotoCoreError, ClientError, RuntimeError) as exc:
-                messages.error(request, f"Failed to list cloud backups: {exc}")
-
-        context = {
-            **self.admin_site.each_context(request),
-            "title": "Cloud Backups",
-            "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
-            "prefix": prefix,
-            "own_prefix": own_prefix,
-            "folders": folders,
-            "objects": objects,
-            "total_size": sum(obj["size"] for obj in objects or []),
-            "missing_required": missing_required,
-            "opts": self.model._meta,
-        }
-        return render(
-            request,
-            "admin/taxtracker/financialyear/cloud_backup_list.html",
-            context,
-        )
-
-    # ------------------------------------------------------------------
-    # DB backup download view
-    # ------------------------------------------------------------------
-
-    def download_db_backup_view(self, request):
-        if not request.user.is_superuser:
-            raise PermissionDenied
-
-        engine = settings.DATABASES["default"]["ENGINE"]
-        if engine != "django.db.backends.sqlite3":
-            messages.error(request, "DB backup is only available for SQLite databases.")
-            return redirect(reverse("admin:taxtracker_financialyear_changelist"))
-
-        with connections["default"].cursor() as cursor:
-            backup_bytes = cursor.connection.serialize()
-
-        # Generate timestamp in the format: YYYY-MM-DD.HH.MM.SS
-        timestamp = timezone.now().strftime("%Y-%m-%d.%H.%M.%S")
-        filename = f"db-backup.{timestamp}.sqlite3"
-
-        response = HttpResponse(backup_bytes, content_type="application/x-sqlite3")
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
-        return response
 
     # ------------------------------------------------------------------
     # Copy to new year view

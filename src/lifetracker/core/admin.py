@@ -1,14 +1,37 @@
+import logging
 import mimetypes
 from urllib.parse import quote
 
-from django.contrib import admin
-from django.core.exceptions import ValidationError
+from botocore.exceptions import BotoCoreError, ClientError
+from django.conf import settings
+from django.contrib import admin, messages
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.forms import BaseInlineFormSet
 from django.http import HttpResponse
-from django.shortcuts import get_object_or_404
-from django.urls import path
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import path, reverse
+from django.utils import timezone
+from django.utils.timesince import timesince
 
-from lifetracker.core.models import DBStoredFile, FileExtension, FileType, MimeType
+from lifetracker.core.backup import (
+    CloudBackupStatusUpdateError,
+    backup_timestamp,
+    check_sqlite,
+    list_cloud_backups,
+    missing_cloud_backup_settings,
+    run_cloud_backup,
+    serialize_database,
+)
+from lifetracker.core.models import (
+    CLOUD_BACKUP_STATUS_PK,
+    CloudBackupStatus,
+    DBStoredFile,
+    FileExtension,
+    FileType,
+    MimeType,
+)
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Formsets — "at least one primary" validation
@@ -194,4 +217,155 @@ class DBStoredFileAdmin(admin.ModelAdmin):
             f" filename*=UTF-8''{filename_encoded}"
         )
         response["Content-Disposition"] = cd
+        return response
+
+
+# ---------------------------------------------------------------------------
+# Backups — DB download, cloud backup status and bucket listing
+# ---------------------------------------------------------------------------
+
+
+@admin.register(CloudBackupStatus)
+class CloudBackupStatusAdmin(admin.ModelAdmin):
+    """Hosts the superuser-only backup pages, in place of the usual model views.
+
+    Its changelist URL is the backups page, so the admin index's "Backups"
+    entry (under Core) leads there.
+    """
+
+    def has_module_permission(self, request):
+        return request.user.is_active and request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_active and request.user.is_superuser
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_urls(self):
+        # Only these: the single status row has no add/change/delete pages.
+        return [
+            path(
+                "",
+                self.admin_site.admin_view(self.backups_view),
+                name="core_cloudbackupstatus_changelist",
+            ),
+            path(
+                "list/",
+                self.admin_site.admin_view(self.cloud_backup_list_view),
+                name="core_cloudbackupstatus_list",
+            ),
+            path(
+                "download-db-backup/",
+                self.admin_site.admin_view(self.download_db_backup_view),
+                name="core_cloudbackupstatus_download_db_backup",
+            ),
+        ]
+
+    def backups_view(self, request):
+        """Cloud backup status, with "Run Backup Now" (on POST)."""
+        if not request.user.is_superuser:
+            raise PermissionDenied
+
+        status = CloudBackupStatus.objects.filter(pk=CLOUD_BACKUP_STATUS_PK).first()
+        if status is None:
+            status = CloudBackupStatus()
+        config = {
+            "endpoint_url": settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL,
+            "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
+            "region_name": settings.LIFETRACKER_BACKUP_S3_REGION_NAME,
+            "hostname": settings.LIFETRACKER_BACKUP_HOSTNAME,
+        }
+        missing_required = missing_cloud_backup_settings()
+
+        if request.method == "POST":
+            try:
+                object_key = run_cloud_backup()
+                messages.success(
+                    request,
+                    f"Cloud backup uploaded successfully as {object_key}.",
+                )
+                return redirect(reverse("admin:core_cloudbackupstatus_changelist"))
+            except CloudBackupStatusUpdateError as exc:
+                # The message doesn't include the cause, so log it.
+                logger.exception("Failed to record cloud backup status")
+                messages.warning(
+                    request,
+                    "Cloud backup uploaded successfully as "
+                    f"{exc.object_key}, but failed to record backup status.",
+                )
+            except (BotoCoreError, ClientError, RuntimeError) as exc:
+                messages.error(request, f"Cloud backup failed: {exc}")
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Backups",
+            "config": config,
+            "status": status,
+            # One unit only ("4 days", not "4 days, 3 hours"), for a quick glance.
+            "last_backup_ago": (
+                timesince(status.last_backup_at, depth=1)
+                if status.last_backup_at
+                else None
+            ),
+            "missing_required": missing_required,
+            "opts": self.model._meta,
+        }
+        return render(request, "admin/core/cloudbackupstatus/backups.html", context)
+
+    def cloud_backup_list_view(self, request):
+        if not request.user.is_superuser:
+            raise PermissionDenied
+
+        # No "prefix" parameter means this instance's own backups; an empty one
+        # means everything in the bucket.
+        own_prefix = f"{settings.LIFETRACKER_BACKUP_HOSTNAME}/"
+        prefix = request.GET.get("prefix", own_prefix)
+        missing_required = missing_cloud_backup_settings()
+        folders = []
+        objects = None
+        if not missing_required:
+            try:
+                folders, objects = list_cloud_backups(prefix)
+                # Offer this instance's folder even before its first backup.
+                folders = sorted({*folders, own_prefix})
+            except (BotoCoreError, ClientError, RuntimeError) as exc:
+                messages.error(request, f"Failed to list cloud backups: {exc}")
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Cloud Backups",
+            "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
+            "prefix": prefix,
+            "own_prefix": own_prefix,
+            "folders": folders,
+            "objects": objects,
+            "total_size": sum(obj["size"] for obj in objects or []),
+            "missing_required": missing_required,
+            "opts": self.model._meta,
+        }
+        return render(
+            request, "admin/core/cloudbackupstatus/cloud_backup_list.html", context
+        )
+
+    def download_db_backup_view(self, request):
+        if not request.user.is_superuser:
+            raise PermissionDenied
+
+        try:
+            check_sqlite("DB backup")
+        except RuntimeError as exc:
+            messages.error(request, str(exc))
+            return redirect(reverse("admin:core_cloudbackupstatus_changelist"))
+
+        backup_bytes = serialize_database()
+        filename = f"db-backup.{backup_timestamp(timezone.now())}.sqlite3"
+        response = HttpResponse(backup_bytes, content_type="application/x-sqlite3")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response

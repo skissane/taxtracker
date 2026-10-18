@@ -4,27 +4,27 @@
 
 {% block extrastyle %}
   {{ block.super }}
-  <link rel="stylesheet" href="{% static 'taxtracker/buttons.css' %}">
+  <link rel="stylesheet" href="{% static 'core/admin_pages.css' %}">
   <style>
-  .tt-folders {
+  .lt-folders {
     margin-bottom: 1em;
   }
 
-  .tt-folders a,
-  .tt-folders strong {
+  .lt-folders a,
+  .lt-folders strong {
     margin-right: 1em;
   }
 
-  .tt-backups {
+  .lt-backups {
     width: 100%;
   }
 
-  .tt-backups .tt-num {
+  .lt-backups .lt-num {
     text-align: right;
     white-space: nowrap;
   }
 
-  .tt-footer {
+  .lt-footer {
     margin-top: 1.5em;
   }
   </style>
@@ -32,9 +32,8 @@
 {% block breadcrumbs %}
   <ol class="breadcrumbs">
     <li><a href="{% url 'admin:index' %}">{% trans "Home" %}</a></li>
-    <li><a href="{% url 'admin:app_list' app_label='taxtracker' %}">Tax Tracker</a></li>
-    <li><a href="{% url 'admin:taxtracker_financialyear_changelist' %}">Financial Years</a></li>
-    <li><a href="{% url 'admin:taxtracker_financialyear_cloud_backup_status' %}">Cloud Backup Status</a></li>
+    <li><a href="{% url 'admin:app_list' app_label='core' %}">Core</a></li>
+    <li><a href="{% url 'admin:core_cloudbackupstatus_changelist' %}">Backups</a></li>
     <li aria-current="page">Cloud Backups</li>
   </ol>
 {% endblock breadcrumbs %}
@@ -48,7 +47,7 @@
     </p>
   {% endif %}
   {% if folders %}
-    <p class="tt-folders">
+    <p class="lt-folders">
       Show:
       {% for folder in folders %}
         {% if folder == prefix %}
@@ -75,12 +74,12 @@
       {{ objects|length }} object{{ objects|length|pluralize }}, {{ total_size|filesizeformat }} in total.
     </p>
     {% if objects %}
-      <table class="tt-backups">
+      <table class="lt-backups">
         <thead>
           <tr>
             <th scope="col">Key</th>
-            <th scope="col" class="tt-num">Size</th>
-            <th scope="col" class="tt-num">Last Modified</th>
+            <th scope="col" class="lt-num">Size</th>
+            <th scope="col" class="lt-num">Last Modified</th>
           </tr>
         </thead>
         <tbody>
@@ -89,10 +88,10 @@
               <td>
                 <code>{{ obj.key }}</code>
               </td>
-              <td class="tt-num">{{ obj.size|filesizeformat }}</td>
+              <td class="lt-num">{{ obj.size|filesizeformat }}</td>
               {# UTC, like the timestamp in the backup's key. #}
               {% timezone "UTC" %}
-                <td class="tt-num">{{ obj.last_modified|date:"Y-m-d H:i:s T" }}</td>
+                <td class="lt-num">{{ obj.last_modified|date:"Y-m-d H:i:s T" }}</td>
               {% endtimezone %}
             </tr>
           {% endfor %}
@@ -100,8 +99,8 @@
       </table>
     {% endif %}
   {% endif %}
-  <div class="tt-footer">
+  <div class="lt-footer">
     <a class="button cancel"
-       href="{% url 'admin:taxtracker_financialyear_cloud_backup_status' %}">Back</a>
+       href="{% url 'admin:core_cloudbackupstatus_changelist' %}">Back</a>
   </div>
 {% endblock content %}

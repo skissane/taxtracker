@@ -1,4 +1,6 @@
-/* Shared button sizing for taxtracker's custom admin pages.
+/* Shared styles for every module's custom admin pages.
+
+   Button sizing:
 
    Django's admin CSS sizes buttons inconsistently on these pages: `form .button`
    (2px 3px) squashes <button class="button"> inside a form, `a.button` (4px 5px)
@@ -24,4 +26,23 @@
 #content .button + .button,
 #content input[type="submit"] + .button {
   margin-left: 8px;
+}
+
+/* A shaded box holding a two-column table of labelled values. */
+.lt-info-box {
+  background: var(--darkened-bg);
+  border: 1px solid var(--border-color);
+  padding: 1em 1.5em;
+  border-radius: 4px;
+  margin-bottom: 1.5em;
+}
+
+.lt-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.lt-label {
+  text-align: left;
+  padding: 4px 12px 4px 0;
 }

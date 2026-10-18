@@ -289,11 +289,11 @@ automatic fallback.
 
 ## Cloud backup
 
-As well as downloading a backup of the database (**💾 Download DB Backup** on the
-Financial Years list), you can upload one to an S3-compatible bucket: AWS S3,
-Cloudflare R2, Backblaze B2 and others. Open **☁️ Cloud Backup Status** on the
-Financial Years list (superusers only) to see when the last backup ran and to click
-**Run Backup Now**. Each backup is uploaded as a new object named
+Backups cover the whole database, so they live on their own page: **Backups**
+under **Core** on the admin home page (superusers only). As well as downloading a
+backup of the database (**Download DB Backup**), you can upload one to an
+S3-compatible bucket: AWS S3, Cloudflare R2, Backblaze B2 and others. The page
+shows when the last cloud backup ran and has a **Run Backup Now** button. Each backup is uploaded as a new object named
 `<hostname>/db-backup.<YYYY-MM-DD.HH.MM.SS>.sqlite3` (the timestamp is in UTC),
 e.g. `my-laptop.local/db-backup.2026-10-11.01.13.53.sqlite3`, so backups from each
 machine or environment sit in their own folder. Backups only run when you click the

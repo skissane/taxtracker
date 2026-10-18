@@ -1,4 +1,5 @@
 import ast
+import datetime
 import importlib.util
 import io
 import os
@@ -9,6 +10,8 @@ from pathlib import Path
 from unittest import mock
 
 import coverage
+import pytest
+from botocore.exceptions import ClientError
 from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.models import User
@@ -16,10 +19,18 @@ from django.contrib.staticfiles import finders
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.management import call_command
-from django.db import IntegrityError
+from django.db import IntegrityError, connection, transaction
+from django.db.migrations.executor import MigrationExecutor
 from django.forms import inlineformset_factory
-from django.test import Client, RequestFactory, TestCase, override_settings
+from django.test import (
+    Client,
+    RequestFactory,
+    TestCase,
+    TransactionTestCase,
+    override_settings,
+)
 from django.urls import reverse
+from django.utils import timezone
 from django_google_sso.main import GoogleAuth
 
 from lifetracker import google_sso
@@ -34,10 +45,13 @@ from lifetracker.core.admin import (
     MimeTypeFormSet,
     _AtLeastOnePrimaryFormSet,
 )
+from lifetracker.core.backup import CLOUD_BACKUP_S3_CONFIG, run_cloud_backup
 from lifetracker.core.management.commands.ensure_superuser import (
     _initial_admin_password_file,
 )
 from lifetracker.core.models import (
+    CLOUD_BACKUP_STATUS_PK,
+    CloudBackupStatus,
     DatabaseStorage,
     DBStoredFile,
     FileExtension,
@@ -1631,4 +1645,557 @@ class DockerEntrypointTests(TestCase):
             log_lines[-1],
             "gunicorn --access-logfile - --error-logfile - --timeout 600"
             " --bind 127.0.0.1:9000 lifetracker.wsgi",
+        )
+
+
+class CloudBackupStatusModelTests(TestCase):
+    def test_str_never_backed_up(self):
+        self.assertEqual(
+            str(CloudBackupStatus()), "Cloud backup status: never backed up"
+        )
+
+    def test_str_with_last_backup(self):
+        backup_time = datetime.datetime(2026, 1, 2, 3, 4, 5, tzinfo=datetime.UTC)
+        status = CloudBackupStatus(last_backup_at=backup_time)
+        self.assertEqual(
+            str(status), f"Cloud backup status: last backup at {backup_time}"
+        )
+
+    def test_only_singleton_pk_allowed(self):
+        CloudBackupStatus.objects.create(pk=CLOUD_BACKUP_STATUS_PK)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            CloudBackupStatus.objects.create(pk=CLOUD_BACKUP_STATUS_PK + 1)
+
+
+class BackupAdminViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            "admin", "admin@example.com", "password"
+        )
+        self.client = Client()
+        self.client.login(username="admin", password="password")
+
+    def test_admin_index_links_to_backups_for_superusers(self):
+        response = self.client.get(reverse("admin:index"))
+        self.assertContains(
+            response, reverse("admin:core_cloudbackupstatus_changelist")
+        )
+
+    def test_admin_index_hides_backups_from_non_superusers(self):
+        non_super = User.objects.create_user("regular0", "r0@example.com", "pass")
+        non_super.is_staff = True
+        non_super.save()
+        client = Client()
+        client.login(username="regular0", **{"password": "pass"})
+        response = client.get(reverse("admin:index"))
+        self.assertNotContains(
+            response, reverse("admin:core_cloudbackupstatus_changelist")
+        )
+
+    def test_backups_page_links_to_db_download(self):
+        response = self.client.get(reverse("admin:core_cloudbackupstatus_changelist"))
+        self.assertContains(
+            response, reverse("admin:core_cloudbackupstatus_download_db_backup")
+        )
+
+    def test_download_db_backup_view(self):
+        url = reverse("admin:core_cloudbackupstatus_download_db_backup")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/x-sqlite3")
+        self.assertRegex(
+            response["Content-Disposition"],
+            r"db-backup\.\d{4}-\d{2}-\d{2}\.\d{2}\.\d{2}\.\d{2}\.sqlite3",
+        )
+        # Content should be a valid SQLite database (starts with the magic header)
+        self.assertTrue(response.content[:16].startswith(b"SQLite format 3\x00"))
+
+    def test_download_db_backup_requires_superuser(self):
+        non_super = User.objects.create_user("regular", "r@example.com", "pass")
+        non_super.is_staff = True
+        non_super.save()
+        client = Client()
+        client.login(username="regular", password="pass")
+        url = reverse("admin:core_cloudbackupstatus_download_db_backup")
+        response = client.get(url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_download_db_backup_rejects_non_sqlite_engine(self):
+        url = reverse("admin:core_cloudbackupstatus_download_db_backup")
+        with pytest.warns(UserWarning, match="Overriding setting DATABASES"):
+            with override_settings(
+                DATABASES={
+                    "default": {
+                        "ENGINE": "django.db.backends.postgresql",
+                        "NAME": "irrelevant",
+                    }
+                }
+            ):
+                response = self.client.get(url, follow=True)
+        self.assertRedirects(
+            response, reverse("admin:core_cloudbackupstatus_changelist")
+        )
+        self.assertContains(
+            response, "DB backup is only available for SQLite databases."
+        )
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_ENDPOINT_URL="https://example.invalid",
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_REGION_NAME="auto",
+        LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
+    )
+    def test_cloud_backup_status_view(self):
+        url = reverse("admin:core_cloudbackupstatus_changelist")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "https://example.invalid")
+        self.assertContains(response, "test-bucket")
+        self.assertContains(response, "auto")
+        self.assertContains(response, "<code>test-host.local</code>", html=True)
+        self.assertContains(response, "Never")
+
+    def test_cloud_backup_status_view_shows_time_since_last_backup(self):
+        CloudBackupStatus.objects.create(
+            pk=CLOUD_BACKUP_STATUS_PK,
+            last_backup_at=timezone.now() - datetime.timedelta(days=4, hours=3),
+            last_backup_object_key="host/db-backup.2026-01-01.00.00.00.sqlite3",
+            last_backup_size=3 * 1024 * 1024,
+        )
+        url = reverse("admin:core_cloudbackupstatus_changelist")
+        response = self.client.get(url)
+        self.assertContains(response, "(4\xa0days ago)")
+        self.assertNotContains(response, "hours")
+        self.assertContains(response, "<td>3.0\xa0MB</td>", html=True)
+
+    def test_cloud_backup_status_requires_superuser(self):
+        non_super = User.objects.create_user("regular2", "r2@example.com", "pass")
+        non_super.is_staff = True
+        non_super.save()
+        client = Client()
+        client.login(username="regular2", **{"password": "pass"})
+        url = reverse("admin:core_cloudbackupstatus_changelist")
+        response = client.get(url)
+        self.assertEqual(response.status_code, 403)
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_ENDPOINT_URL="https://example.invalid",
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_REGION_NAME="auto",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+        LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
+    )
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_cloud_backup_status_view_run_backup_updates_status(self, mock_client):
+        url = reverse("admin:core_cloudbackupstatus_changelist")
+        response = self.client.post(url, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Cloud backup uploaded successfully")
+        mock_client.assert_called_once_with(
+            "s3",
+            endpoint_url="https://example.invalid",
+            region_name="auto",
+            aws_access_key_id="access-key",
+            aws_secret_access_key="secret-key",
+            config=CLOUD_BACKUP_S3_CONFIG,
+        )
+        put_object = mock_client.return_value.put_object
+        put_object.assert_called_once()
+        self.assertEqual(put_object.call_args.kwargs["Bucket"], "test-bucket")
+        self.assertEqual(
+            put_object.call_args.kwargs["ContentType"], "application/x-sqlite3"
+        )
+        self.assertRegex(
+            put_object.call_args.kwargs["Key"],
+            r"^test-host\.local/db-backup\."
+            r"\d{4}-\d{2}-\d{2}\.\d{2}\.\d{2}\.\d{2}\.sqlite3$",
+        )
+        self.assertTrue(
+            put_object.call_args.kwargs["Body"].startswith(b"SQLite format 3\x00")
+        )
+
+        status = CloudBackupStatus.objects.get(pk=CLOUD_BACKUP_STATUS_PK)
+        self.assertIsNotNone(status.last_backup_at)
+        self.assertEqual(
+            status.last_backup_object_key, put_object.call_args.kwargs["Key"]
+        )
+        self.assertEqual(
+            status.last_backup_size, len(put_object.call_args.kwargs["Body"])
+        )
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="",
+    )
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_cloud_backup_post_with_missing_settings_shows_error(self, mock_client):
+        url = reverse("admin:core_cloudbackupstatus_changelist")
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Cloud backup settings are incomplete. Missing: "
+            "LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID, "
+            "LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY.",
+        )
+        mock_client.assert_not_called()
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    )
+    def test_run_cloud_backup_rejects_missing_settings(self):
+        with self.assertRaisesMessage(
+            RuntimeError, "Missing: LIFETRACKER_BACKUP_S3_BUCKET_NAME."
+        ):
+            run_cloud_backup()
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="",
+    )
+    def test_run_cloud_backup_checks_engine_before_settings(self):
+        with pytest.warns(UserWarning, match="Overriding setting DATABASES"):
+            with override_settings(
+                DATABASES={
+                    "default": {
+                        "ENGINE": "django.db.backends.postgresql",
+                        "NAME": "irrelevant",
+                    }
+                }
+            ):
+                with self.assertRaisesMessage(
+                    RuntimeError, "only available for SQLite databases"
+                ):
+                    run_cloud_backup()
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    )
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_cloud_backup_rejects_non_sqlite_engine(self, mock_client):
+        url = reverse("admin:core_cloudbackupstatus_changelist")
+        with pytest.warns(UserWarning, match="Overriding setting DATABASES"):
+            with override_settings(
+                DATABASES={
+                    "default": {
+                        "ENGINE": "django.db.backends.postgresql",
+                        "NAME": "irrelevant",
+                    }
+                }
+            ):
+                response = self.client.post(url)
+        self.assertContains(
+            response,
+            "Cloud backup failed: Cloud backup is only available for SQLite databases.",
+        )
+        mock_client.assert_not_called()
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_ENDPOINT_URL="not a url",
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    )
+    def test_cloud_backup_invalid_endpoint_shows_error(self):
+        # Uses the real boto3.client, which raises ValueError for this endpoint.
+        url = reverse("admin:core_cloudbackupstatus_changelist")
+        response = self.client.post(url)
+        self.assertContains(
+            response,
+            "Cloud backup failed: Invalid S3 configuration: "
+            "Invalid endpoint: not a url",
+        )
+        self.assertFalse(
+            CloudBackupStatus.objects.filter(pk=CLOUD_BACKUP_STATUS_PK).exists()
+        )
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    )
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_cloud_backup_upload_error_shows_error(self, mock_client):
+        mock_client.return_value.put_object.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
+            "PutObject",
+        )
+        url = reverse("admin:core_cloudbackupstatus_changelist")
+        response = self.client.post(url)
+        self.assertContains(response, "Cloud backup failed:")
+        self.assertContains(response, "AccessDenied")
+        self.assertFalse(
+            CloudBackupStatus.objects.filter(pk=CLOUD_BACKUP_STATUS_PK).exists()
+        )
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    )
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_cloud_backup_status_write_failure_shows_warning(self, mock_client):
+        url = reverse("admin:core_cloudbackupstatus_changelist")
+        with mock.patch.object(
+            CloudBackupStatus.objects,
+            "update_or_create",
+            side_effect=IntegrityError("boom"),
+        ):
+            with self.assertLogs("lifetracker.core.admin", "ERROR") as logs:
+                response = self.client.post(url)
+        self.assertIn("IntegrityError: boom", logs.output[0])
+        mock_client.return_value.put_object.assert_called_once()
+        key = mock_client.return_value.put_object.call_args.kwargs["Key"]
+        self.assertContains(
+            response,
+            f"Cloud backup uploaded successfully as {key}, but failed to record "
+            "backup status.",
+        )
+
+    def test_cloud_backup_status_links_to_list(self):
+        url = reverse("admin:core_cloudbackupstatus_changelist")
+        response = self.client.get(url)
+        self.assertContains(response, reverse("admin:core_cloudbackupstatus_list"))
+
+    def _mock_bucket_listing(self, mock_client, folders, objects):
+        """Make the mocked S3 client's paginator return *folders* for the
+        delimited top-level listing and *objects* (split across two pages)
+        for the prefixed one."""
+
+        def paginate(**kwargs):
+            if kwargs.get("Delimiter") == "/":
+                return [{"CommonPrefixes": [{"Prefix": f} for f in folders]}, {}]
+            matching = [o for o in objects if o["Key"].startswith(kwargs["Prefix"])]
+            return [{"Contents": matching[:1]}, {"Contents": matching[1:]}]
+
+        paginator = mock_client.return_value.get_paginator.return_value
+        paginator.paginate.side_effect = paginate
+        return paginator
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_ENDPOINT_URL="https://example.invalid",
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_REGION_NAME="auto",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+        LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
+    )
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_cloud_backup_list_defaults_to_own_hostname(self, mock_client):
+        utc = datetime.UTC
+        paginator = self._mock_bucket_listing(
+            mock_client,
+            folders=["other-host/", "test-host.local/"],
+            objects=[
+                {
+                    "Key": "test-host.local/db-backup.2026-01-01.00.00.00.sqlite3",
+                    "Size": 1024,
+                    "LastModified": datetime.datetime(2026, 1, 1, tzinfo=utc),
+                },
+                {
+                    "Key": "test-host.local/db-backup.2026-03-01.00.00.00.sqlite3",
+                    "Size": 2048,
+                    "LastModified": datetime.datetime(2026, 3, 1, tzinfo=utc),
+                },
+                {
+                    "Key": "other-host/db-backup.2026-02-01.00.00.00.sqlite3",
+                    "Size": 4096,
+                    "LastModified": datetime.datetime(2026, 2, 1, tzinfo=utc),
+                },
+            ],
+        )
+        url = reverse("admin:core_cloudbackupstatus_list")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        mock_client.assert_called_once_with(
+            "s3",
+            endpoint_url="https://example.invalid",
+            region_name="auto",
+            aws_access_key_id="access-key",
+            aws_secret_access_key="secret-key",
+            config=CLOUD_BACKUP_S3_CONFIG,
+        )
+        mock_client.return_value.get_paginator.assert_called_with("list_objects_v2")
+        paginator.paginate.assert_any_call(Bucket="test-bucket", Delimiter="/")
+        paginator.paginate.assert_any_call(
+            Bucket="test-bucket", Prefix="test-host.local/"
+        )
+        keys = [obj["key"] for obj in response.context["objects"]]
+        self.assertEqual(
+            keys,
+            [
+                "test-host.local/db-backup.2026-03-01.00.00.00.sqlite3",
+                "test-host.local/db-backup.2026-01-01.00.00.00.sqlite3",
+            ],
+        )
+        self.assertNotContains(response, "other-host/db-backup")
+        self.assertContains(response, "2 objects, 3.0\xa0KB in total.")
+        self.assertContains(response, '<td class="lt-num">2.0\xa0KB</td>', html=True)
+        # The other hostname's folder and "All" are offered as links.
+        self.assertContains(
+            response,
+            '<a href="?prefix=other-host/"><code>other-host/</code></a>',
+            html=True,
+        )
+        self.assertContains(response, '<a href="?prefix=">All</a>', html=True)
+        # Last-modified times are shown in UTC, like the keys' timestamps.
+        self.assertContains(
+            response,
+            '<td class="lt-num">2026-03-01 00:00:00 UTC</td>',
+            html=True,
+        )
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+        LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
+    )
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_cloud_backup_list_all_prefixes(self, mock_client):
+        utc = datetime.UTC
+        paginator = self._mock_bucket_listing(
+            mock_client,
+            folders=["other-host/"],
+            objects=[
+                {
+                    "Key": "other-host/db-backup.2026-02-01.00.00.00.sqlite3",
+                    "Size": 4096,
+                    "LastModified": datetime.datetime(2026, 2, 1, tzinfo=utc),
+                },
+            ],
+        )
+        url = reverse("admin:core_cloudbackupstatus_list")
+        response = self.client.get(url, {"prefix": ""})
+        paginator.paginate.assert_any_call(Bucket="test-bucket", Prefix="")
+        self.assertContains(response, "other-host/db-backup.2026-02-01.00.00.00")
+        self.assertContains(response, "all objects:")
+        self.assertContains(response, "<strong>All</strong>", html=True)
+        # This instance's folder is offered even though it has no backups yet.
+        self.assertEqual(
+            response.context["folders"], ["other-host/", "test-host.local/"]
+        )
+        self.assertContains(response, "(this instance)")
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="",
+    )
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_cloud_backup_list_with_missing_settings(self, mock_client):
+        url = reverse("admin:core_cloudbackupstatus_list")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Backups can't be listed until")
+        self.assertContains(
+            response, "<code>LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID</code>", html=True
+        )
+        self.assertIsNone(response.context["objects"])
+        mock_client.assert_not_called()
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    )
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_cloud_backup_list_s3_error_shows_message(self, mock_client):
+        paginator = mock_client.return_value.get_paginator.return_value
+        paginator.paginate.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
+            "ListObjectsV2",
+        )
+        url = reverse("admin:core_cloudbackupstatus_list")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Failed to list cloud backups:")
+        self.assertContains(response, "AccessDenied")
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_ENDPOINT_URL="not a url",
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    )
+    def test_cloud_backup_list_invalid_endpoint_shows_message(self):
+        # Uses the real boto3.client, which raises ValueError for this endpoint.
+        url = reverse("admin:core_cloudbackupstatus_list")
+        response = self.client.get(url)
+        self.assertContains(
+            response,
+            "Failed to list cloud backups: Invalid S3 configuration: "
+            "Invalid endpoint: not a url",
+        )
+
+    def test_cloud_backup_list_requires_superuser(self):
+        non_super = User.objects.create_user("regular3", "r3@example.com", "pass")
+        non_super.is_staff = True
+        non_super.save()
+        client = Client()
+        client.login(username="regular3", **{"password": "pass"})
+        url = reverse("admin:core_cloudbackupstatus_list")
+        response = client.get(url)
+        self.assertEqual(response.status_code, 403)
+
+
+class CloudBackupStatusMoveMigrationTests(TransactionTestCase):
+    """taxtracker's 0004 copies the status row into core's table, and back."""
+
+    before = [("core", "0001_initial"), ("taxtracker", "0003_cloudbackupstatus")]
+    after = [
+        ("core", "0002_cloudbackupstatus"),
+        ("taxtracker", "0004_move_cloudbackupstatus_to_core"),
+    ]
+
+    def _migrate(self, targets):
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate(targets)
+        return executor.loader.project_state(targets).apps
+
+    def tearDown(self):
+        # Leave the schema fully migrated for the tests that follow.
+        call_command("migrate", verbosity=0)
+
+    def test_forwards_and_backwards(self):
+        backup_time = datetime.datetime(2026, 1, 2, 3, 4, 5, tzinfo=datetime.UTC)
+        row = {
+            "pk": CLOUD_BACKUP_STATUS_PK,
+            "last_backup_at": backup_time,
+            "last_backup_object_key": "host/db-backup.2026-01-02.03.04.05.sqlite3",
+            "last_backup_size": 1234,
+        }
+        fields = list(row)
+
+        apps = self._migrate(self.before)
+        apps.get_model("taxtracker", "CloudBackupStatus").objects.create(**row)
+
+        apps = self._migrate(self.after)
+        self.assertEqual(
+            list(apps.get_model("core", "CloudBackupStatus").objects.values(*fields)),
+            [row],
+        )
+        self.assertNotIn(
+            "taxtracker_cloudbackupstatus", connection.introspection.table_names()
+        )
+
+        apps = self._migrate(self.before)
+        self.assertEqual(
+            list(
+                apps.get_model("taxtracker", "CloudBackupStatus").objects.values(
+                    *fields
+                )
+            ),
+            [row],
+        )
+        self.assertNotIn(
+            "core_cloudbackupstatus", connection.introspection.table_names()
         )
