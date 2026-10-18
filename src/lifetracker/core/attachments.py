@@ -6,15 +6,17 @@ fields, the file stored via ``database_storage``. Mixing in
 ``AttachmentAutofillMixin`` fills the blank ones in from the uploaded file's
 name on save; ``delete_stored_files`` (connected in ``CoreConfig.ready``)
 removes the stored file whenever such a row is deleted.
+``orphaned_stored_file_pks`` finds stored files that no row refers to any more.
 """
 
 import datetime
 import re
 from pathlib import Path
 
+from django.apps import apps
 from django.db import models
 
-from lifetracker.core.models import DatabaseStorage, FileExtension
+from lifetracker.core.models import DatabaseStorage, DBStoredFile, FileExtension
 
 # Matches YYYY[-]MM[-]DD where YYYY is not preceded by a digit.
 # The separator between year/month and month/day is independently optional.
@@ -79,3 +81,31 @@ def delete_stored_files(sender, instance, **kwargs):
         file = getattr(instance, field.attname)
         if file:
             file.storage.delete(file.name)
+
+
+def orphaned_stored_file_pks():
+    """Return the sorted primary keys of the ``DBStoredFile``s that no
+    ``DatabaseStorage`` ``FileField`` on any installed model refers to.
+
+    Rows deleted before ``delete_stored_files`` was connected (by a cascade or
+    a ``QuerySet.delete()``) left their files behind; this finds them.
+    """
+    referenced = set()
+    for model in apps.get_models():
+        for field in database_storage_file_fields(model):
+            names = (
+                model._base_manager.exclude(**{field.attname: ""})
+                .exclude(**{f"{field.attname}__isnull": True})
+                .values_list(field.attname, flat=True)
+                .iterator()
+            )
+            for name in names:
+                try:
+                    referenced.add(field.storage._name_to_pk(name))
+                except ValueError:
+                    pass
+    return [
+        pk
+        for pk in DBStoredFile.objects.order_by("pk").values_list("pk", flat=True)
+        if pk not in referenced
+    ]
