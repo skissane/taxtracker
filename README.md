@@ -217,10 +217,14 @@ export FLY_APP=<app-name>
 fly status
 ```
 
-To get a shell on the Machine as the `lifetracker` user, use `./flyssh.sh`. With
-no arguments it opens an interactive login shell; with arguments it runs them as
-one command (each argument quoted, so spaces and quotes survive). It goes through
-`./flyctl.sh`, and passes `--pty` only when run from a terminal:
+To run a command on the Machine as the `lifetracker` user, use `./flyssh.sh`.
+With no arguments it opens an interactive `bash`; with arguments it runs them as
+a command, directly rather than through a shell (each argument quoted, so spaces
+and quotes survive; use `./flyssh.sh bash -c '...'` for shell syntax). It starts
+in the app directory and keeps the Machine's environment (the database location,
+the venv on `PATH` and the Fly secrets), as it switches user with `setpriv` like
+the container's entrypoint does, not `su -`. It goes through `./flyctl.sh`, and
+passes `--pty` only when run from a terminal:
 
 ```bash
 ./flyssh.sh
