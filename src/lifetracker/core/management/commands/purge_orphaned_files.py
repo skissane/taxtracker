@@ -4,7 +4,8 @@ Finds the stored files (``DBStoredFile`` rows) that no attachment refers to any
 more, via ``orphaned_stored_file_pks``, and prints how many there are and their
 total size. Rows deleted before ``delete_stored_files`` was connected (by a
 cascade or a ``QuerySet.delete()``) left these behind. A dry run unless given
-``--delete``, which deletes them; run a cloud backup first.
+``--delete``, which deletes them; run a cloud backup first, and run it while
+nothing else is using the database.
 """
 
 from django.core.management.base import BaseCommand
@@ -35,8 +36,10 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, delete=False, **options):
-        # One transaction, so a file can't gain a reference between being
-        # found orphaned and being deleted.
+        # One transaction, so the count reported matches what's deleted. It
+        # doesn't lock out writers until its first delete, so an upload saved
+        # while it runs (file first, then the row referring to it) could lose
+        # its file: run it while nothing else is using the database.
         with transaction.atomic():
             pks = orphaned_stored_file_pks()
             size = sum(
