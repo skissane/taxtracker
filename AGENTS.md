@@ -8,7 +8,7 @@ This file provides guidance to AI coding assistants working with code in this re
 
 CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run
 everything CI runs, or `just --list` to see individual recipes (`lint`, `fmt-check`,
-`lint-templates`, `fmt-check-templates`, `coverage`, `sync`, `lock-check`, `lock-os-arch-check`,
+`lint-templates`, `fmt-check-templates`, `coverage`, `screenshots`, `screenshots-post`, `sync`, `lock-check`, `lock-os-arch-check`,
 `requirements-check`, `requirements-fix`). `just ci` drifts from
 `ci.yml` if the workflow changes without a matching justfile edit; `run_workflow_local.py`
 avoids that by parsing the workflow YAML directly and running its `run:` steps as written
@@ -16,7 +16,7 @@ avoids that by parsing the workflow YAML directly and running its `run:` steps a
 `coverage.xml` to Codecov (`codecov/codecov-action`), and also uploads the `junit.xml` test results
 it writes for Codecov Test Analytics (`report_type: test_results`, even if the tests failed; not
 `codecov/test-results-action`, which is deprecated); these steps need a `CODECOV_TOKEN` repo
-secret from codecov.io and are skipped by `run_workflow_local.py` since they're `uses:` steps. `ci.yml` has six jobs, `test`, `screenshots` (see Screenshots), `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment);
+secret from codecov.io and are skipped by `run_workflow_local.py` since they're `uses:` steps. `ci.yml` has seven jobs, `test`, `screenshots` and `post-screenshots` (see Screenshots), `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment);
 `run_workflow_local.py` runs the first job in the file unless given `--job`, so keep `test` first.
 Don't run `--job dependabot-fix`, `--job publish` or `--job deploy` locally: it doesn't evaluate
 `if:`, so it would push commits to the current branch, push to GHCR or deploy to production.
@@ -58,6 +58,9 @@ just coverage
 
 # Screenshot the admin login and index pages into screenshots/ (gitignored)
 just screenshots
+
+# Post screenshots/ to PR 123 as a comment, or update it (as gh's logged-in user)
+just screenshots-post 123
 
 # Lint (matches `just lint`/`just fmt-check`, which check the whole repo root)
 uv run ruff check .
@@ -101,8 +104,21 @@ against pytest-django's `live_server` (empty test DB) and save full-page PNGs to
 `screenshots` dependency group, which only the `screenshots` CI job installs. That job (which
 first runs `playwright install --with-deps chromium` for Chromium's system libraries) runs
 `just screenshots` and uploads `screenshots/*.png` as a `screenshots` workflow artifact (kept 14 days),
-downloadable from the run's summary page; nothing posts it to the PR. Like `test`, it waits on
-`dependabot-fix`. They assert nothing beyond the pages loading.
+downloadable from the run's summary page. Like `test`, it waits on
+`dependabot-fix`. They assert nothing beyond the pages loading. On a PR, once it succeeds,
+`post-screenshots` downloads that artifact and runs `just screenshots-post`
+(`scripts/post_screenshots.py`, stdlib-only, run with `uv run --no-project`). It uploads each
+PNG as a user attachment, then writes one `github-actions[bot]` PR comment embedding them,
+editing the previous one in place if there is one (found by a hidden
+`<!-- lifetracker-screenshots -->` marker and the `--author` login). The upload uses the
+undocumented `POST https://uploads.github.com/user-attachments/assets` endpoint, sending the
+same request `gh ... --attach` does (cli/cli `internal/attachments/client.go`), which only
+accepts user tokens, not installation tokens such as `GITHUB_TOKEN`. So uploads use the
+`SCREENSHOTS_TOKEN` Actions secret, a fine-grained PAT for this repo with only Pull requests:
+read and write (the job fails if it's unset), and the comment uses `GITHUB_TOKEN` with
+`pull-requests: write`. Locally both tokens default to `gh auth token`. It's skipped for fork
+PRs and Dependabot, which don't get the secret; it runs the PR branch's script but never syncs
+or installs the project, so a bumped dependency never runs with the tokens.
 
 **File storage:** All uploaded attachments are stored in the SQLite database, not on disk. `DatabaseStorage` (in `core/models.py`) is a custom Django storage backend that writes file content to `DBStoredFile` rows. Storage paths have the form `db/<pk>/<filename>`. Files are served through `DBStoredFileAdmin.serve_file_view` at `/admin/core/dbstoredfile/file/<pk>/`.
 
