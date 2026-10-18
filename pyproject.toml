@@ -35,6 +35,9 @@ dev = [
     "pyyaml>=6.0.3",
     "ruff>=0.16.10",
 ]
+screenshots = [
+    "playwright>=1.64.0",
+]
 
 [tool.ruff]
 line-length = 88
@@ -59,7 +62,7 @@ ignore = "H030,H031"
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "lifetracker.settings"
-pythonpath = ["src", "scripts"]
+pythonpath = ["src"]
 testpaths = ["tests"]
 python_files = ["tests.py", "test_*.py", "*_tests.py"]
 addopts = "-n auto"
@@ -78,5 +81,5 @@ skip_covered = false
 [tool.uv]
 environments = [
     "sys_platform == 'darwin'",
-    "sys_platform == 'linux'",
+    "sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')",
 ]

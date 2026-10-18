@@ -33,6 +33,9 @@ jobs:
       - name: Check lockfile is up to date
         run: just lock-check
 
+      - name: Check lockfile only targets supported platforms
+        run: just lock-os-arch-check
+
       - name: Install dependencies
         run: just sync
 
@@ -89,6 +92,115 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
           fail_ci_if_error: true
+
+  # Run `just screenshots` and keep the PNGs as a workflow artifact, for eyeballing
+  # UI changes from the run's summary page; post-screenshots then posts them to the
+  # PR. A job of its own, so it runs alongside test and installs the screenshots
+  # group only here.
+  # Same needs/if as test, so it skips a commit dependabot-fix is replacing.
+  screenshots:
+    needs: dependabot-fix
+    if: ${{ always() && (needs.dependabot-fix.result == 'skipped' || needs.dependabot-fix.outputs.pushed_changes == 'false') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.10"
+
+      - name: Set up Python
+        run: uv python install 3.14.3
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+        with:
+          just-version: "1.58.0"
+
+      # --with-deps also installs Chromium's system libraries, which the runner
+      # may lack; just screenshots' own `playwright install` is then a no-op.
+      - name: Install Playwright Chromium
+        run: uv run --group screenshots playwright install --with-deps chromium
+
+      - name: Take screenshots
+        run: just screenshots
+
+      # Even if a screenshot test failed, the ones taken may show why.
+      - name: Upload screenshots
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/*.png
+          if-no-files-found: error
+          retention-days: 14
+
+  # Post the screenshots artifact to the PR as a github-actions[bot] comment, or
+  # edit the one posted before. Attachment uploads need a user token, so the
+  # images are uploaded with SCREENSHOTS_TOKEN, a fine-grained PAT (the job
+  # fails if it's unset); the comment itself is written with GITHUB_TOKEN.
+  # Skipped for forks and Dependabot, whose runs don't get the repo's Actions
+  # secrets (and whose code shouldn't see the tokens). It runs the PR branch's
+  # own script, but installs nothing: the script is stdlib-only and runs with
+  # `uv run --no-project`, so no dependency bump runs with the tokens. Queued
+  # per PR, so two runs can't both see no previous comment and both post.
+  post-screenshots:
+    needs: screenshots
+    if: ${{ !cancelled() && needs.screenshots.result == 'success' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: post-screenshots-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Check token configuration
+        env:
+          SCREENSHOTS_TOKEN: ${{ secrets.SCREENSHOTS_TOKEN }}
+        run: |
+          if [ -z "$SCREENSHOTS_TOKEN" ]; then
+            echo "SCREENSHOTS_TOKEN secret is not set" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.10"
+
+      - name: Set up Python
+        run: uv python install 3.14.3
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+        with:
+          just-version: "1.58.0"
+
+      - name: Download screenshots
+        uses: actions/download-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots
+
+      - name: Post screenshots to the PR
+        env:
+          SCREENSHOTS_TOKEN: ${{ secrets.SCREENSHOTS_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        # GITHUB_TOKEN can't look up its own login, so name it.
+        run: just screenshots-post "$PR_NUMBER" --commit "$HEAD_SHA" --run-url "$RUN_URL" --author 'github-actions[bot]'
 
   # Runs on a Dependabot branch, whose bumped dependency we don't trust, so the
   # write-capable DEPENDABOT_FIX_TOKEN is only exposed to the final push step:

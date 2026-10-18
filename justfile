@@ -18,6 +18,10 @@ requirements-check:
 requirements-fix:
     uv run --no-project python scripts/requirements_min_versions.py fix
 
+# Check that uv.lock only has wheels for supported OS/CPU combinations
+lock-os-arch-check:
+    uv run --no-project python scripts/validate_uv_lock_os_arch.py
+
 # Lint Python code with ruff
 lint:
     uv run --group dev ruff check .
@@ -53,6 +57,28 @@ test:
 # Run the test suite in parallel, print a coverage report, and write coverage.xml and junit.xml
 coverage:
     uv run --group dev pytest --cov=src/lifetracker --cov=scripts --cov-report=term --cov-report=xml --junitxml=junit.xml -o junit_family=legacy
+
+# The screenshot tests live outside `testpaths`, so plain `pytest` (and
+# `just test`/`just coverage`) never collects them; `-n 0` because two tests
+# don't justify a worker per core. `playwright install` is a quick no-op once
+# its Chromium is downloaded.
+
+# Screenshot admin screens into screenshots/ (needs a Playwright Chromium)
+screenshots:
+    uv run --group screenshots playwright install chromium
+    uv run --group dev --group screenshots pytest screenshot_tests -n 0
+
+# screenshots-post's arguments are a PR number and, optionally, --commit and
+# --run-url for the comment's "Taken for" line (see --help for the rest). It
+# uploads the images with $SCREENSHOTS_TOKEN (a user token) and comments with
+# $GITHUB_TOKEN, each defaulting to `gh auth token`, so locally it posts as
+# you. It edits the previous screenshot comment by the same author, found by a
+# hidden marker, rather than posting another.
+
+# Post screenshots/ to a PR as a comment, or update the existing one
+[positional-arguments]
+screenshots-post *args:
+    uv run --no-project python scripts/post_screenshots.py "$@"
 
 # Build the container image
 docker-build:
@@ -111,4 +137,4 @@ check: lint fmt-check lint-templates fmt-check-templates
 fix: lint-fix fmt fmt-templates
 
 # Run everything the CI workflow runs
-ci: lock-check sync requirements-check check coverage docker-build
+ci: lock-check lock-os-arch-check sync requirements-check check coverage docker-build
