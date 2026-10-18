@@ -473,7 +473,9 @@ class PostScreenshotsTests(SimpleTestCase):
     def test_unsafe_names_rejected(self):
         for name in ["--help.png", "a b.png", "x](y).png", "Index.png"]:
             with self.subTest(name):
-                code, stderr, requests = self._run(["index.png", name])
+                # Not index.png, which is the same file as Index.png on
+                # case-insensitive filesystems (macOS's default).
+                code, stderr, requests = self._run(["login.png", name])
                 self.assertEqual(code, 1)
                 self.assertIn("doesn't match", stderr)
                 self.assertEqual(requests, [])
