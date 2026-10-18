@@ -329,6 +329,23 @@ missing variables.
 
 Locally, put them in [`.env`](#the-env-file).
 
+## Purging orphaned files
+
+Deleting an attachment deletes its file from the database too. Before that also
+covered attachments deleted along with their item, task, received document or
+financial year, or by **Delete selected**, those deletes left the files behind.
+The `purge_orphaned_files` management command finds stored files no attachment
+refers to and prints how many there are and their total size; with `--delete` it
+deletes them, which only restoring a backup can undo. Run a
+[cloud backup](#cloud-backup) first, and run it while nobody is uploading
+attachments, as a file uploaded while it runs could be deleted too.
+
+```bash
+uv run python manage.py purge_orphaned_files            # locally: report only
+./flyssh.sh python manage.py purge_orphaned_files       # on the Fly.io Machine
+./flyssh.sh python manage.py purge_orphaned_files --delete
+```
+
 ## Google sign-in
 
 As well as the usual username and password, the admin login page can offer **Sign
