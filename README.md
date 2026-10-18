@@ -236,6 +236,13 @@ its proxy, not SSH sessions, so a long session or command may be cut off, and SS
 fails while the Machine is stopped. Load the site first, or run
 `./flyctl.sh machine start`.
 
+`./fly-machine-id.sh` prints the Machine's ID (it needs `jq`), for `flyctl`
+commands that take one:
+
+```bash
+./flyctl.sh machine status $(./fly-machine-id.sh)
+```
+
 Don't commit the name anywhere, including in issues, PRs or pasted command output.
 On the Machine, `LIFETRACKER_ALLOWED_HOSTS` and `LIFETRACKER_BACKUP_HOSTNAME`
 default from the name (via `FLY_APP_NAME`, which Fly sets), so they need no
