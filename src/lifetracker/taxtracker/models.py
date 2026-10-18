@@ -1,12 +1,12 @@
 import datetime
-import re
 from pathlib import Path
 
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
-from lifetracker.core.models import FileExtension, FileType, database_storage
+from lifetracker.core.attachments import AttachmentAutofillMixin
+from lifetracker.core.models import FileType, database_storage
 
 
 class FinancialYear(models.Model):
@@ -311,22 +311,7 @@ class ReceivedDocument(models.Model):
         return f"{self.year}: {self.title}"
 
 
-# Matches YYYY[-]MM[-]DD where YYYY is not preceded by a digit.
-# The separator between year/month and month/day is independently optional.
-_DATE_IN_FILENAME_RE = re.compile(r"(?<!\d)(\d{4})-?(\d{2})-?(\d{2})")
-
-
-def _extract_date_from_filename(name: str) -> datetime.date | None:
-    """Return the first valid calendar date found in *name*, or ``None``."""
-    for m in _DATE_IN_FILENAME_RE.finditer(name):
-        try:
-            return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-        except ValueError:
-            continue
-    return None
-
-
-class Attachment(models.Model):
+class Attachment(AttachmentAutofillMixin, models.Model):
     """A file attachment associated with an Item or a ReceivedDocument."""
 
     item = models.ForeignKey(
@@ -407,27 +392,3 @@ class Attachment(models.Model):
                 "Attachment must belong to exactly one of Item or Received "
                 "Document, not both or neither."
             )
-
-    def save(self, *args, **kwargs):
-        if not self.title and self.file:
-            self.title = Path(self.file.name).name
-        if not self.file_type_id and self.file:
-            ext = Path(self.file.name).suffix.lstrip(".").lower()
-            if ext:
-                try:
-                    fe = FileExtension.objects.get(extension=ext)
-                    self.file_type = fe.file_type
-                except FileExtension.DoesNotExist:
-                    pass
-        if self.date is None and self.file:
-            extracted = _extract_date_from_filename(Path(self.file.name).name)
-            if extracted is not None:
-                self.date = extracted
-        super().save(*args, **kwargs)
-
-    def delete(self, *args, **kwargs):
-        # Delete the stored file from the database when the attachment is removed.
-        file_name = self.file.name if self.file else None
-        super().delete(*args, **kwargs)
-        if file_name:
-            self.file.storage.delete(file_name)

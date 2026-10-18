@@ -25,14 +25,13 @@ from lifetracker.taxtracker.archives import (
     extract_from_archive,
     extract_from_archive_with_skips,
 )
-from lifetracker.taxtracker.forms import AttachmentForm, FlexibleDateField
+from lifetracker.taxtracker.forms import AttachmentForm
 from lifetracker.taxtracker.models import (
     Attachment,
     FinancialYear,
     FinancialYearStatusHistory,
     Item,
     ReceivedDocument,
-    _extract_date_from_filename,
 )
 
 
@@ -1068,54 +1067,6 @@ class AttachmentDateTests(TestCase):
         return ContentFile(b"data", name=name)
 
     # ------------------------------------------------------------------
-    # Unit tests for the helper function
-    # ------------------------------------------------------------------
-
-    def test_extract_iso_date(self):
-        self.assertEqual(
-            _extract_date_from_filename("statement-2026-01-15.pdf"),
-            datetime.date(2026, 1, 15),
-        )
-
-    def test_extract_compact_date_no_separator(self):
-        self.assertEqual(
-            _extract_date_from_filename("report20260115.pdf"),
-            datetime.date(2026, 1, 15),
-        )
-
-    def test_extract_date_followed_by_digits(self):
-        """DD may be followed by digits – the match is still valid."""
-        self.assertEqual(
-            _extract_date_from_filename("20260101123.pdf"),
-            datetime.date(2026, 1, 1),
-        )
-
-    def test_year_preceded_by_non_digit_allowed(self):
-        """Year preceded by a non-digit character (e.g. '-') is valid."""
-        self.assertEqual(
-            _extract_date_from_filename("123-2026-01-01.pdf"),
-            datetime.date(2026, 1, 1),
-        )
-
-    def test_year_preceded_by_digit_rejected(self):
-        """Year directly preceded by another digit must not be matched."""
-        self.assertIsNone(_extract_date_from_filename("1232026-01-01.pdf"))
-
-    def test_invalid_calendar_date_skipped(self):
-        """A pattern that is not a real date (e.g. month 13) must be ignored."""
-        self.assertIsNone(_extract_date_from_filename("2026-13-45.pdf"))
-
-    def test_returns_first_valid_date(self):
-        """When multiple date patterns exist, the first valid one is returned."""
-        self.assertEqual(
-            _extract_date_from_filename("2026-13-45_2025-06-30.txt"),
-            datetime.date(2025, 6, 30),
-        )
-
-    def test_no_date_in_filename(self):
-        self.assertIsNone(_extract_date_from_filename("nodatehere.pdf"))
-
-    # ------------------------------------------------------------------
     # Integration tests via Attachment.save()
     # ------------------------------------------------------------------
 
@@ -1281,42 +1232,11 @@ class AttachmentParentConstraintTests(TestCase):
 
 
 class AttachmentDateInputFormatTests(TestCase):
-    """Tests for FlexibleDateField and the extra English date-input formats."""
+    """AttachmentForm accepts FlexibleDateField's extra English date formats."""
 
     def setUp(self):
         self.fy = FinancialYear.objects.create(year=2024)
         self.item = Item.objects.create(year=self.fy, title="Income", order=1)
-        self.field = FlexibleDateField(required=False)
-
-    # ------------------------------------------------------------------
-    # Unit tests for FlexibleDateField
-    # ------------------------------------------------------------------
-
-    def test_iso_format_accepted(self):
-        self.assertEqual(self.field.clean("2023-07-20"), datetime.date(2023, 7, 20))
-
-    def test_day_month_year_full_name(self):
-        """'20 July 2023' should parse to 2023-07-20."""
-        self.assertEqual(self.field.clean("20 July 2023"), datetime.date(2023, 7, 20))
-
-    def test_month_day_comma_year_full_name(self):
-        """'June 30, 2023' should parse to 2023-06-30."""
-        self.assertEqual(self.field.clean("June 30, 2023"), datetime.date(2023, 6, 30))
-
-    def test_day_month_year_abbreviated(self):
-        """'20 Jul 2023' should parse to 2023-07-20."""
-        self.assertEqual(self.field.clean("20 Jul 2023"), datetime.date(2023, 7, 20))
-
-    def test_month_day_comma_year_abbreviated(self):
-        """'Jun 30, 2023' should parse to 2023-06-30."""
-        self.assertEqual(self.field.clean("Jun 30, 2023"), datetime.date(2023, 6, 30))
-
-    def test_invalid_date_string_raises(self):
-        with self.assertRaises(ValidationError):
-            self.field.clean("not a date")
-
-    def test_empty_string_returns_none(self):
-        self.assertIsNone(self.field.clean(""))
 
     # ------------------------------------------------------------------
     # Integration: AttachmentForm accepts the extra formats
@@ -1399,6 +1319,37 @@ class DatabaseStorageTests(TestCase):
         att.save()
         pk = att.file.storage._name_to_pk(att.file.name)
         att.delete()
+        self.assertFalse(DBStoredFile.objects.filter(pk=pk).exists())
+
+    def test_cascade_deletes_remove_db_records(self):
+        """Attachments deleted by cascade (which doesn't call their delete())
+        still remove their DBStoredFile records."""
+        doc = ReceivedDocument.objects.create(year=self.fy, title="Notice")
+        child = Item.objects.create(
+            year=self.fy, parent=self.item, title="Child", order=1
+        )
+        pks = []
+        for kwargs in (
+            {"item": self.item},
+            {"item": child},
+            {"received_document": doc},
+        ):
+            att = Attachment(file=self._simple_file("c.pdf"), **kwargs)
+            att.save()
+            pks.append(att.file.storage._name_to_pk(att.file.name))
+        self.item.delete()
+        self.assertFalse(DBStoredFile.objects.filter(pk__in=pks[:2]).exists())
+        self.assertTrue(DBStoredFile.objects.filter(pk=pks[2]).exists())
+        self.fy.delete()
+        self.assertFalse(DBStoredFile.objects.filter(pk__in=pks).exists())
+
+    def test_queryset_delete_removes_db_records(self):
+        """QuerySet.delete() (as the admin's "Delete selected" action uses)
+        removes the DBStoredFile records too."""
+        att = Attachment(item=self.item, file=self._simple_file("q.pdf"))
+        att.save()
+        pk = att.file.storage._name_to_pk(att.file.name)
+        Attachment.objects.filter(pk=att.pk).delete()
         self.assertFalse(DBStoredFile.objects.filter(pk=pk).exists())
 
     # ------------------------------------------------------------------

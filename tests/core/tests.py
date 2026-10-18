@@ -45,7 +45,12 @@ from lifetracker.core.admin import (
     MimeTypeFormSet,
     _AtLeastOnePrimaryFormSet,
 )
+from lifetracker.core.attachments import (
+    extract_date_from_filename,
+    file_type_for_filename,
+)
 from lifetracker.core.backup import CLOUD_BACKUP_S3_CONFIG, run_cloud_backup
+from lifetracker.core.forms import FlexibleDateField
 from lifetracker.core.management.commands.ensure_superuser import (
     _initial_admin_password_file,
 )
@@ -2199,3 +2204,97 @@ class CloudBackupStatusMoveMigrationTests(TransactionTestCase):
         self.assertNotIn(
             "core_cloudbackupstatus", connection.introspection.table_names()
         )
+
+
+class ExtractDateFromFilenameTests(TestCase):
+    def test_extract_iso_date(self):
+        self.assertEqual(
+            extract_date_from_filename("statement-2026-01-15.pdf"),
+            datetime.date(2026, 1, 15),
+        )
+
+    def test_extract_compact_date_no_separator(self):
+        self.assertEqual(
+            extract_date_from_filename("report20260115.pdf"),
+            datetime.date(2026, 1, 15),
+        )
+
+    def test_extract_date_followed_by_digits(self):
+        """DD may be followed by digits – the match is still valid."""
+        self.assertEqual(
+            extract_date_from_filename("20260101123.pdf"),
+            datetime.date(2026, 1, 1),
+        )
+
+    def test_year_preceded_by_non_digit_allowed(self):
+        """Year preceded by a non-digit character (e.g. '-') is valid."""
+        self.assertEqual(
+            extract_date_from_filename("123-2026-01-01.pdf"),
+            datetime.date(2026, 1, 1),
+        )
+
+    def test_year_preceded_by_digit_rejected(self):
+        """Year directly preceded by another digit must not be matched."""
+        self.assertIsNone(extract_date_from_filename("1232026-01-01.pdf"))
+
+    def test_invalid_calendar_date_skipped(self):
+        """A pattern that is not a real date (e.g. month 13) must be ignored."""
+        self.assertIsNone(extract_date_from_filename("2026-13-45.pdf"))
+
+    def test_returns_first_valid_date(self):
+        """When multiple date patterns exist, the first valid one is returned."""
+        self.assertEqual(
+            extract_date_from_filename("2026-13-45_2025-06-30.txt"),
+            datetime.date(2025, 6, 30),
+        )
+
+    def test_no_date_in_filename(self):
+        self.assertIsNone(extract_date_from_filename("nodatehere.pdf"))
+
+
+class FileTypeForFilenameTests(TestCase):
+    def setUp(self):
+        self.pdf = FileType.objects.create(short_name="PDF", full_name="PDF Document")
+        FileExtension.objects.create(file_type=self.pdf, extension="pdf")
+
+    def test_matches_extension_case_insensitively(self):
+        self.assertEqual(file_type_for_filename("Statement.PDF"), self.pdf)
+
+    def test_unknown_extension(self):
+        self.assertIsNone(file_type_for_filename("notes.xyz"))
+
+    def test_no_extension(self):
+        self.assertIsNone(file_type_for_filename("README"))
+
+
+class FlexibleDateFieldTests(TestCase):
+    """Tests for FlexibleDateField and the extra English date-input formats."""
+
+    def setUp(self):
+        self.field = FlexibleDateField(required=False)
+
+    def test_iso_format_accepted(self):
+        self.assertEqual(self.field.clean("2023-07-20"), datetime.date(2023, 7, 20))
+
+    def test_day_month_year_full_name(self):
+        """'20 July 2023' should parse to 2023-07-20."""
+        self.assertEqual(self.field.clean("20 July 2023"), datetime.date(2023, 7, 20))
+
+    def test_month_day_comma_year_full_name(self):
+        """'June 30, 2023' should parse to 2023-06-30."""
+        self.assertEqual(self.field.clean("June 30, 2023"), datetime.date(2023, 6, 30))
+
+    def test_day_month_year_abbreviated(self):
+        """'20 Jul 2023' should parse to 2023-07-20."""
+        self.assertEqual(self.field.clean("20 Jul 2023"), datetime.date(2023, 7, 20))
+
+    def test_month_day_comma_year_abbreviated(self):
+        """'Jun 30, 2023' should parse to 2023-06-30."""
+        self.assertEqual(self.field.clean("Jun 30, 2023"), datetime.date(2023, 6, 30))
+
+    def test_invalid_date_string_raises(self):
+        with self.assertRaises(ValidationError):
+            self.field.clean("not a date")
+
+    def test_empty_string_returns_none(self):
+        self.assertIsNone(self.field.clean(""))

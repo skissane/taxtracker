@@ -16,11 +16,11 @@ from lifetracker.core.models import (
     database_storage,
 )
 from lifetracker.tasktracker.admin import TaskTypeAdmin
+from lifetracker.tasktracker.forms import TaskAttachmentForm
 from lifetracker.tasktracker.models import (
     Task,
     TaskAttachment,
     TaskType,
-    _extract_date_from_filename,
 )
 
 
@@ -261,32 +261,6 @@ class TaskModelTests(TestCase):
         self.assertEqual(a.get_folder_path(), ["B", "A"])
 
 
-class TaskAttachmentDateTests(TestCase):
-    def test_extract_iso_date(self):
-        self.assertEqual(
-            _extract_date_from_filename("statement-2026-01-15.pdf"),
-            datetime.date(2026, 1, 15),
-        )
-
-    def test_extract_compact_date(self):
-        self.assertEqual(
-            _extract_date_from_filename("report20260115.pdf"),
-            datetime.date(2026, 1, 15),
-        )
-
-    def test_invalid_date_skipped(self):
-        self.assertIsNone(_extract_date_from_filename("2026-13-45.pdf"))
-
-    def test_returns_first_valid_date(self):
-        self.assertEqual(
-            _extract_date_from_filename("2026-13-45_2025-06-30.txt"),
-            datetime.date(2025, 6, 30),
-        )
-
-    def test_no_date_in_filename(self):
-        self.assertIsNone(_extract_date_from_filename("nodatehere.pdf"))
-
-
 class TaskAttachmentModelTests(TestCase):
     def setUp(self):
         self.task = Task.objects.create(title="Inbox", order=1)
@@ -348,6 +322,24 @@ class TaskAttachmentModelTests(TestCase):
         self.assertFalse(DBStoredFile.objects.filter(pk=pk).exists())
         self.assertFalse(database_storage.exists(file_name))
 
+    def test_deleting_task_removes_attachments_stored_files(self):
+        # The attachments go by cascade, which doesn't call their delete().
+        child = Task.objects.create(title="Child", parent=self.task, order=1)
+        names = []
+        for task in (self.task, child):
+            attachment = TaskAttachment(task=task, file=self._make_file())
+            attachment.save()
+            names.append(attachment.file.name)
+        self.task.delete()
+        for name in names:
+            self.assertFalse(database_storage.exists(name))
+
+    def test_queryset_delete_removes_stored_files(self):
+        attachment = TaskAttachment(task=self.task, file=self._make_file())
+        attachment.save()
+        TaskAttachment.objects.all().delete()
+        self.assertFalse(database_storage.exists(attachment.file.name))
+
     def test_task_fk_required(self):
         with self.assertRaises(IntegrityError), transaction.atomic():
             TaskAttachment.objects.create(file=self._make_file("orphan.pdf"))
@@ -365,6 +357,24 @@ class TaskAttachmentModelTests(TestCase):
         attachment.save()
         attachment.refresh_from_db()
         self.assertIsNone(attachment.file_type)
+
+
+class TaskAttachmentFormTests(TestCase):
+    def setUp(self):
+        self.task = Task.objects.create(title="Inbox", order=1)
+
+    def test_accepts_english_month_name_dates(self):
+        form = TaskAttachmentForm(
+            data={"task": self.task.pk, "title": "T", "date": "20 July 2023"}
+        )
+        self.assertNotIn("date", form.errors)
+        self.assertEqual(form.cleaned_data["date"], datetime.date(2023, 7, 20))
+
+    def test_admin_uses_it(self):
+        self.assertIs(admin.site._registry[TaskAttachment].form, TaskAttachmentForm)
+        task_admin = admin.site._registry[Task]
+        inline = next(i for i in task_admin.inlines if i.model is TaskAttachment)
+        self.assertIs(inline.form, TaskAttachmentForm)
 
 
 class TaskTypeAdminGenericProtectionTests(TestCase):

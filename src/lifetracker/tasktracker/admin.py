@@ -1,5 +1,6 @@
 from django.contrib import admin
 
+from lifetracker.tasktracker.forms import TaskAttachmentForm
 from lifetracker.tasktracker.models import Task, TaskAttachment, TaskType
 
 
@@ -13,6 +14,7 @@ class ChildTaskInline(admin.TabularInline):
 
 class TaskAttachmentInline(admin.TabularInline):
     model = TaskAttachment
+    form = TaskAttachmentForm
     extra = 1
     fields = ("title", "date", "file_type", "file", "notes")
     autocomplete_fields = ("file_type",)
@@ -57,6 +59,7 @@ class TaskTypeAdmin(admin.ModelAdmin):
 
 @admin.register(TaskAttachment)
 class TaskAttachmentAdmin(admin.ModelAdmin):
+    form = TaskAttachmentForm
     list_display = ("title", "date", "task", "file_type", "file")
     list_filter = ("file_type",)
     search_fields = ("title", "notes", "task__title")
