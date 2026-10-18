@@ -296,11 +296,22 @@ S3-compatible bucket: AWS S3, Cloudflare R2, Backblaze B2 and others. The page
 shows when the last cloud backup ran and has a **Run Backup Now** button. Each backup is uploaded as a new object named
 `<hostname>/db-backup.<YYYY-MM-DD.HH.MM.SS>.sqlite3` (the timestamp is in UTC),
 e.g. `my-laptop.local/db-backup.2026-10-11.01.13.53.sqlite3`, so backups from each
-machine or environment sit in their own folder. Backups only run when you click the
-button; nothing schedules them. **View Backups in Bucket** on the same page lists
+machine or environment sit in their own folder. **View Backups in Bucket** on the same page lists
 the backups actually in the bucket (key, size and last-modified time in UTC,
 newest first): this machine's folder by default, with links to each other folder
 and to everything in the bucket.
+
+The `cloud_backup` management command does the same as **Run Backup Now** from the
+command line, printing the uploaded object's key, and exits non-zero if the backup
+fails:
+
+```bash
+UV_ENV_FILE=.env uv run python manage.py cloud_backup   # locally, with .env's settings
+./flyssh.sh python manage.py cloud_backup               # on the Fly.io Machine
+```
+
+Backups only run when you click the button or run the command; nothing schedules
+them.
 
 The bucket and credentials come from these environment variables:
 

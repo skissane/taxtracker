@@ -3,11 +3,13 @@ uploading it to (and listing) an S3-compatible cloud backup bucket.
 
 These back up the whole database, so they're shared by every module. The
 admin views that use them are on ``CloudBackupStatusAdmin`` in
-``core/admin.py``; callers must enforce authorization themselves.
+``core/admin.py``, and the ``cloud_backup`` management command also runs a cloud
+backup; callers must enforce authorization themselves.
 """
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 from django.db import connections
 from django.utils import timezone
@@ -22,6 +24,11 @@ CLOUD_BACKUP_S3_CONFIG = Config(
     read_timeout=30,
     retries={"mode": "standard", "max_attempts": 2},
 )
+
+
+# What a cloud backup or listing raises for an expected failure (bad settings, S3
+# errors), as opposed to a bug. Callers report these and carry on.
+CLOUD_BACKUP_ERRORS = (BotoCoreError, ClientError, RuntimeError)
 
 
 class CloudBackupStatusUpdateError(RuntimeError):

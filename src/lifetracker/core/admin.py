@@ -2,7 +2,6 @@ import logging
 import mimetypes
 from urllib.parse import quote
 
-from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -14,6 +13,7 @@ from django.utils import timezone
 from django.utils.timesince import timesince
 
 from lifetracker.core.backup import (
+    CLOUD_BACKUP_ERRORS,
     CloudBackupStatusUpdateError,
     backup_timestamp,
     check_sqlite,
@@ -300,7 +300,7 @@ class CloudBackupStatusAdmin(admin.ModelAdmin):
                     "Cloud backup uploaded successfully as "
                     f"{exc.object_key}, but failed to record backup status.",
                 )
-            except (BotoCoreError, ClientError, RuntimeError) as exc:
+            except CLOUD_BACKUP_ERRORS as exc:
                 messages.error(request, f"Cloud backup failed: {exc}")
 
         context = {
@@ -335,7 +335,7 @@ class CloudBackupStatusAdmin(admin.ModelAdmin):
                 folders, objects = list_cloud_backups(prefix)
                 # Offer this instance's folder even before its first backup.
                 folders = sorted({*folders, own_prefix})
-            except (BotoCoreError, ClientError, RuntimeError) as exc:
+            except CLOUD_BACKUP_ERRORS as exc:
                 messages.error(request, f"Failed to list cloud backups: {exc}")
 
         context = {
