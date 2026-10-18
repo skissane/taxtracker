@@ -1,0 +1,13 @@
+{% extends "admin/base_site.html" %}
+
+{% comment %}
+  Extends the admin's own base_site.html (Django skips this file when resolving
+  the same name), adding top bar links to admin pages that belong to no model,
+  so have no admin index entry. If these grow numerous, make them a menu.
+{% endcomment %}
+{% block userlinks %}
+  {% if user.is_active and user.is_superuser %}
+    <a href="{% url 'admin:idle_watchdog' %}">Idle Watchdog</a> /
+  {% endif %}
+  {{ block.super }}
+{% endblock userlinks %}

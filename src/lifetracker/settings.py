@@ -189,7 +189,9 @@ ROOT_URLCONF = "lifetracker.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        # Project-wide overrides, ahead of the apps' (and so the admin's own)
+        # templates.
+        "DIRS": [Path(__file__).resolve().parent / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [

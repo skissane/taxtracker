@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.contrib import admin
+from django.urls import path
 from django.utils.html import format_html
 
 # Git's default abbreviated object name length (core.abbrev's minimum), also what
@@ -63,6 +64,22 @@ class LifetrackerAdminSite(admin.AdminSite):
     # unconditionally: the template's tag checks per request whether SSO is
     # enabled, and renders the stock admin login (no Google button) when it isn't.
     login_template = "google_sso/login.html"
+
+    def get_urls(self):
+        # Imported here: core.admin registers its models on admin.site, an
+        # instance of this class, so a top-level import would be circular.
+        from lifetracker.core.admin import idle_watchdog_view  # noqa: PLC0415
+
+        # Pages that belong to no model, so get no admin index entry; the top
+        # bar links them instead (templates/admin/base_site.html).
+        return [
+            path(
+                "idle-watchdog/",
+                self.admin_view(idle_watchdog_view),
+                name="idle_watchdog",
+            ),
+            *super().get_urls(),
+        ]
 
     def each_context(self, request):
         context = super().each_context(request)

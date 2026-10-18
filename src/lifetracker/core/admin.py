@@ -1,3 +1,4 @@
+import datetime
 import logging
 import mimetypes
 from urllib.parse import quote
@@ -12,6 +13,7 @@ from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.timesince import timesince
 
+from lifetracker.core import idle_watchdog
 from lifetracker.core.backup import (
     CLOUD_BACKUP_ERRORS,
     CloudBackupStatusUpdateError,
@@ -369,3 +371,127 @@ class CloudBackupStatusAdmin(admin.ModelAdmin):
         response = HttpResponse(backup_bytes, content_type="application/x-sqlite3")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
+
+
+# ---------------------------------------------------------------------------
+# Idle watchdog status page
+# ---------------------------------------------------------------------------
+
+# How many check intervals can pass without a check before the page warns that
+# the watchdog may have died.
+_IDLE_WATCHDOG_STALE_INTERVALS = 3
+
+
+def _format_duration(seconds):
+    """E.g. "28 seconds", "28 minutes" or "3 hours, 5 minutes"."""
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds} second{'' if seconds == 1 else 's'}"
+    now = timezone.now()
+    return timesince(now - datetime.timedelta(seconds=seconds), now, depth=2)
+
+
+def _parse_status_time(value):
+    return datetime.datetime.fromisoformat(value) if value else None
+
+
+def idle_watchdog_page_context(now=None):
+    """The idle watchdog page's context, from the environment (the same as the
+    watchdog's) and its status file."""
+    now = now or timezone.now()
+    context = {
+        "config": None,
+        "config_error": None,
+        "status": None,
+        "status_error": None,
+        "system_uptime": None,
+    }
+    try:
+        config = idle_watchdog.config_from_env()
+    except ValueError as exc:
+        context["config_error"] = str(exc)
+        return context
+    context["config"] = config
+    uptime = idle_watchdog.system_uptime()
+    if uptime is not None:
+        context["system_uptime"] = _format_duration(uptime)
+    try:
+        raw = idle_watchdog.read_status(config.status_file)
+    except (OSError, ValueError) as exc:
+        context["status_error"] = f"Couldn't read {config.status_file}: {exc}"
+        return context
+    if raw is None:
+        return context
+    try:
+        checked_at = _parse_status_time(raw["checked_at"])
+        started_at = _parse_status_time(raw["started_at"])
+        stop_due_at = _parse_status_time(raw["stop_due_at"])
+        interval = float(raw["check_interval_seconds"])
+        status = {
+            "mode": raw["mode"],
+            "state": raw["state"],
+            "pid": raw["pid"],
+            "master_pid": raw["master_pid"],
+            "started_at": started_at,
+            "uptime": _format_duration((now - started_at).total_seconds()),
+            "checked_at": checked_at,
+            "idle_timeout": _format_duration(raw["idle_timeout_seconds"]),
+            "check_interval": _format_duration(interval),
+            "last_request_at": _parse_status_time(raw.get("last_request_at")),
+            "idle_since": _parse_status_time(raw["idle_since"]),
+            "stop_due_at": stop_due_at,
+            "ports": [
+                {
+                    "port": port["port"],
+                    "connections": port["connections"],
+                    "last_connection_at": _parse_status_time(
+                        port["last_connection_at"]
+                    ),
+                }
+                for port in raw["ports"]
+            ],
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        context["status_error"] = (
+            f"Unexpected contents in {config.status_file}: {exc!r}"
+        )
+        return context
+    status["checked_ago"] = (
+        _format_duration((now - checked_at).total_seconds()) if checked_at else None
+    )
+    # Before its first check, judge by when it started instead.
+    last_sign_of_life = checked_at or started_at
+    status["stale"] = (
+        now - last_sign_of_life
+    ).total_seconds() > _IDLE_WATCHDOG_STALE_INTERVALS * interval
+    status["stale_intervals"] = _IDLE_WATCHDOG_STALE_INTERVALS
+    for name in ("last_request_at", "idle_since"):
+        value = status[name]
+        status[f"{name}_ago"] = (
+            _format_duration((now - value).total_seconds()) if value else None
+        )
+    remaining = (stop_due_at - now).total_seconds()
+    status["stop_overdue"] = remaining <= 0
+    status["stop_due_in"] = _format_duration(abs(remaining))
+    for port in status["ports"]:
+        seen = port["last_connection_at"]
+        port["last_connection_ago"] = (
+            _format_duration((now - seen).total_seconds()) if seen else None
+        )
+    context["status"] = status
+    return context
+
+
+def idle_watchdog_view(request):
+    """The superuser-only idle watchdog status page. The admin site serves it
+    (wrapped in ``admin_view``) at ``idle-watchdog/`` and links it from the top
+    bar, as it belongs to no model."""
+    if not request.user.is_superuser:
+        raise PermissionDenied
+
+    context = {
+        **admin.site.each_context(request),
+        **idle_watchdog_page_context(),
+        "title": "Idle Watchdog",
+    }
+    return render(request, "admin/core/idle_watchdog.html", context)

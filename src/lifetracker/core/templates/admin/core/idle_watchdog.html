@@ -1,0 +1,158 @@
+{% extends "admin/base_site.html" %}
+
+{% load i18n static %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'core/admin_pages.css' %}">
+{% endblock extrastyle %}
+{% block breadcrumbs %}
+  <ol class="breadcrumbs">
+    <li><a href="{% url 'admin:index' %}">{% trans "Home" %}</a></li>
+    <li aria-current="page">Idle Watchdog</li>
+  </ol>
+{% endblock breadcrumbs %}
+{% block content %}
+  {% if config_error %}
+    <p class="errornote">The idle watchdog's settings are invalid, so it isn't running: {{ config_error }}</p>
+  {% endif %}
+  {% if status_error %}<p class="errornote">{{ status_error }}</p>{% endif %}
+  {% if config %}
+    <div class="lt-info-box">
+      <table class="lt-table">
+        <tr>
+          <th class="lt-label">Mode</th>
+          <td>
+            <code>{{ config.mode }}</code>
+            {% if config.mode == "off" %}
+              (set <code>LIFETRACKER_IDLE_STOP</code> to <code>monitor</code> or <code>stop</code> to turn it on)
+            {% elif config.mode == "monitor" %}
+              (reports only, never stops anything)
+            {% else %}
+              (stops gunicorn, and so the Machine, once idle)
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <th class="lt-label">Status File</th>
+          <td>
+            <code>{{ config.status_file }}</code>
+          </td>
+        </tr>
+        {% if system_uptime %}
+          <tr>
+            <th class="lt-label">Machine Uptime</th>
+            <td>{{ system_uptime }}</td>
+          </tr>
+        {% endif %}
+      </table>
+    </div>
+    {% if status %}
+      {% if status.stale %}
+        <p class="errornote">
+          The watchdog hasn't checked for longer than {{ status.stale_intervals }} check intervals, so it has probably stopped running.
+        </p>
+      {% endif %}
+      <div class="lt-info-box">
+        <table class="lt-table">
+          <tr>
+            <th class="lt-label">Last Checked</th>
+            <td>
+              {% if status.checked_at %}
+                {{ status.checked_ago }} ago ({{ status.checked_at|date:"Y-m-d H:i:s T" }}), every {{ status.check_interval }}
+              {% else %}
+                Not yet
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th class="lt-label">State</th>
+            <td>
+              {% if status.state == "active" %}
+                Active (connections open)
+              {% elif status.state == "stopping" %}
+                Stopping gunicorn
+              {% else %}
+                Idle (no connections open)
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th class="lt-label">Last Request</th>
+            <td>
+              {% if status.last_request_at %}
+                {{ status.last_request_at_ago }} ago ({{ status.last_request_at|date:"Y-m-d H:i:s T" }})
+              {% else %}
+                None seen
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th class="lt-label">Idle Since</th>
+            <td>{{ status.idle_since_ago }} ago ({{ status.idle_since|date:"Y-m-d H:i:s T" }})</td>
+          </tr>
+          <tr>
+            <th class="lt-label">Idle Timeout</th>
+            <td>
+              {{ status.idle_timeout }}:
+              {% if status.state == "stopping" %}
+                reached
+              {% elif status.stop_overdue %}
+                {% if status.mode == "stop" %}
+                  due {{ status.stop_due_in }} ago
+                {% else %}
+                  reached {{ status.stop_due_in }} ago (monitor mode: not stopping)
+                {% endif %}
+              {% elif status.mode == "stop" %}
+                stops in {{ status.stop_due_in }} if nothing happens ({{ status.stop_due_at|date:"Y-m-d H:i:s T" }})
+              {% else %}
+                would stop in {{ status.stop_due_in }} if nothing happens ({{ status.stop_due_at|date:"Y-m-d H:i:s T" }})
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th class="lt-label">Watchdog</th>
+            <td>
+              Up {{ status.uptime }} (since {{ status.started_at|date:"Y-m-d H:i:s T" }}), PID {{ status.pid }}, gunicorn master PID {{ status.master_pid }}
+            </td>
+          </tr>
+        </table>
+      </div>
+      <div class="lt-info-box">
+        <table class="lt-table">
+          <tr>
+            <th class="lt-label">Port</th>
+            <th class="lt-label">Open Connections</th>
+            <th class="lt-label">Last Connection Seen</th>
+          </tr>
+          {% for port in status.ports %}
+            <tr>
+              <td>
+                <code>{{ port.port }}</code>
+              </td>
+              <td>{{ port.connections }}</td>
+              <td>
+                {% if port.last_connection_at %}
+                  {{ port.last_connection_ago }} ago ({{ port.last_connection_at|date:"Y-m-d H:i:s T" }})
+                {% else %}
+                  Never
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </table>
+      </div>
+      <p>
+        Loading this page is itself a request, so it counts as activity: the next check will see it and restart the idle timer.
+      </p>
+    {% elif not status_error %}
+      <p>
+        {% if config.mode == "off" %}
+          No status yet: the watchdog is off.
+        {% else %}
+          No status yet: the watchdog writes it on its first check. It only runs under gunicorn (the Docker image), not <code>./run.sh</code>.
+        {% endif %}
+      </p>
+    {% endif %}
+  {% endif %}
+{% endblock content %}
