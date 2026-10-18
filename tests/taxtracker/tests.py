@@ -946,9 +946,17 @@ class AdminViewTests(TestCase):
         self.assertContains(response, '<td class="tt-num">2.0\xa0KB</td>', html=True)
         # The other hostname's folder and "All" are offered as links.
         self.assertContains(
-            response, '<a href="?prefix=other-host/"><code>other-host/</code></a>'
+            response,
+            '<a href="?prefix=other-host/"><code>other-host/</code></a>',
+            html=True,
         )
         self.assertContains(response, '<a href="?prefix=">All</a>', html=True)
+        # Last-modified times are shown in UTC, like the keys' timestamps.
+        self.assertContains(
+            response,
+            '<td class="tt-num">2026-03-01 00:00:00 UTC</td>',
+            html=True,
+        )
 
     @override_settings(
         LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",

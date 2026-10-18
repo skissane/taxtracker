@@ -1,6 +1,6 @@
 {% extends "admin/base_site.html" %}
 
-{% load i18n static %}
+{% load i18n static tz %}
 
 {% block extrastyle %}
   {{ block.super }}
@@ -90,7 +90,10 @@
                 <code>{{ obj.key }}</code>
               </td>
               <td class="tt-num">{{ obj.size|filesizeformat }}</td>
-              <td class="tt-num">{{ obj.last_modified|date:"Y-m-d H:i:s T" }}</td>
+              {# UTC, like the timestamp in the backup's key. #}
+              {% timezone "UTC" %}
+                <td class="tt-num">{{ obj.last_modified|date:"Y-m-d H:i:s T" }}</td>
+              {% endtimezone %}
             </tr>
           {% endfor %}
         </tbody>

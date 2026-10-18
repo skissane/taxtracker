@@ -265,9 +265,9 @@ Financial Years list (superusers only) to see when the last backup ran and to cl
 e.g. `my-laptop.local/db-backup.2026-10-11.01.13.53.sqlite3`, so backups from each
 machine or environment sit in their own folder. Backups only run when you click the
 button; nothing schedules them. **View Backups in Bucket** on the same page lists
-the backups actually in the bucket (key, size and last-modified time, newest
-first): this machine's folder by default, with links to each other folder and to
-everything in the bucket.
+the backups actually in the bucket (key, size and last-modified time in UTC,
+newest first): this machine's folder by default, with links to each other folder
+and to everything in the bucket.
 
 The bucket and credentials come from these environment variables:
 
