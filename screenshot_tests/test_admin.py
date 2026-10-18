@@ -38,22 +38,32 @@ def _screenshot(page, name):
     page.screenshot(path=SCREENSHOT_DIR / f"{name}.png", full_page=True)
 
 
+def _capture_variant(page, name, *, color_scheme):
+    page.emulate_media(color_scheme=color_scheme)
+    return name + f"-{color_scheme}"
+
+
 def test_login(page, settings):
     # Enough Google SSO config to show its "Sign in with Google" button; the
     # credentials are fake, so the button itself wouldn't work.
     settings.GOOGLE_SSO_ENABLED = True
     settings.GOOGLE_SSO_CLIENT_ID = "screenshots-client-id"
     settings.GOOGLE_SSO_CLIENT_SECRET = "screenshots-client-secret"
-    page.goto("/admin/login/")
-    _screenshot(page, "login")
+    for color_scheme in ("light", "dark"):
+        page.emulate_media(color_scheme=color_scheme)
+        page.goto("/admin/login/")
+        _screenshot(page, f"login-{color_scheme}")
 
 
 # admin_user before page: Django refuses ORM calls while Playwright's event loop
 # is running, so the user must be created before the browser starts.
 def test_index(admin_user, page):
-    page.goto("/admin/login/")
-    page.fill("input[name=username]", admin_user.username)
-    page.fill("input[name=password]", "password")
-    page.click("input[type=submit]")
-    page.wait_for_url("**/admin/")
-    _screenshot(page, "index")
+    for color_scheme in ("light", "dark"):
+        page.context.clear_cookies()
+        page.emulate_media(color_scheme=color_scheme)
+        page.goto("/admin/login/")
+        page.fill("input[name=username]", admin_user.username)
+        page.fill("input[name=password]", "password")
+        page.click("input[type=submit]")
+        page.wait_for_url("**/admin/")
+        _screenshot(page, f"index-{color_scheme}")
