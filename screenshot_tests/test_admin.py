@@ -34,8 +34,14 @@ def page(transactional_db, live_server, settings):
             browser.close()
 
 
+# Each screen is captured in both colour schemes. Switching the emulated scheme
+# re-renders the current page in place, so nothing needs reloading in between.
 def _screenshot(page, name):
-    page.screenshot(path=SCREENSHOT_DIR / f"{name}.png", full_page=True)
+    for color_scheme in ("light", "dark"):
+        page.emulate_media(color_scheme=color_scheme)
+        page.screenshot(
+            path=SCREENSHOT_DIR / f"{name}-{color_scheme}.png", full_page=True
+        )
 
 
 def test_login(page, settings):

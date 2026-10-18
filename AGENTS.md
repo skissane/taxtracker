@@ -56,7 +56,7 @@ uv run pytest tests/taxtracker/tests.py::ItemModelTests::test_str_root
 # Run tests under coverage, print a report, and write coverage.xml and junit.xml (no minimum enforced)
 just coverage
 
-# Screenshot the admin login and index pages into screenshots/ (gitignored)
+# Screenshot the admin login and index pages, in light and dark mode, into screenshots/ (gitignored)
 just screenshots
 
 # Post screenshots/ to PR 123 as a comment, or update it (as gh's logged-in user)
@@ -98,7 +98,7 @@ referencing these as `tests.*` labels rather than the `lifetracker.*` app labels
 
 **Screenshots:** `screenshot_tests/` holds Playwright tests that drive a headless Chromium
 against pytest-django's `live_server` (empty test DB) and save full-page PNGs to the gitignored
-`screenshots/` directory, for eyeballing UI changes. They're run by `just screenshots`
+`screenshots/` directory (each screen as `<name>-light.png` and `<name>-dark.png`), for eyeballing UI changes. They're run by `just screenshots`
 (which also runs `playwright install chromium`): they're outside `testpaths`, so `pytest`,
 `just coverage` and the `test` job never collect or measure them, and Playwright is in its own
 `screenshots` dependency group, which only the `screenshots` CI job installs. That job (which
