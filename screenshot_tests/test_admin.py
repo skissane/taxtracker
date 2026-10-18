@@ -7,6 +7,7 @@ gitignored `screenshots/` directory.
 """
 
 import datetime
+import json
 from pathlib import Path
 from unittest import mock
 
@@ -104,3 +105,39 @@ def test_cloud_backup_list(admin_user, page, settings):
         _log_in(page, admin_user)
         page.goto("/admin/core/cloudbackupstatus/list/")
         _screenshot(page, "cloud-backup-list")
+
+
+def test_idle_watchdog(admin_user, page, monkeypatch, tmp_path):
+    # A made-up status, as the watchdog would write it mid-SSH-session.
+    now = datetime.datetime.now(datetime.UTC).replace(microsecond=0)
+
+    def iso(minutes_ago):
+        return (now - datetime.timedelta(minutes=minutes_ago)).isoformat()
+
+    status_file = tmp_path / "status.json"
+    status_file.write_text(
+        json.dumps(
+            {
+                "mode": "monitor",
+                "state": "active",
+                "pid": 42,
+                "master_pid": 41,
+                "started_at": iso(95),
+                "checked_at": iso(0.4),
+                "check_interval_seconds": 30,
+                "idle_timeout_seconds": 600,
+                "last_request_at": iso(7),
+                "idle_since": iso(0.4),
+                "stop_due_at": iso(-9.6),
+                "ports": [
+                    {"port": 8000, "connections": 0, "last_connection_at": iso(7)},
+                    {"port": 22, "connections": 1, "last_connection_at": iso(0.4)},
+                ],
+            }
+        )
+    )
+    monkeypatch.setenv("LIFETRACKER_IDLE_STOP", "monitor")
+    monkeypatch.setenv("LIFETRACKER_IDLE_STOP_STATUS_FILE", str(status_file))
+    _log_in(page, admin_user)
+    page.goto("/admin/core/idlewatchdogstatus/")
+    _screenshot(page, "idle-watchdog")

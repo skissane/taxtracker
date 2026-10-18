@@ -48,6 +48,8 @@ from lifetracker.core.admin import (
     DBStoredFileAdmin,
     MimeTypeFormSet,
     _AtLeastOnePrimaryFormSet,
+    _format_duration,
+    idle_watchdog_page_context,
 )
 from lifetracker.core.attachments import (
     extract_date_from_filename,
@@ -2953,3 +2955,260 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
         self.assertEqual(
             status["ports"], [{"port": 1, "connections": 0, "last_connection_at": None}]
         )
+
+
+def _watchdog_status(now, **overrides):
+    """A status file's contents, as ``Watchdog.status`` writes them, with times
+    relative to ``now`` (a UTC datetime)."""
+
+    def iso(seconds_ago):
+        return (now - datetime.timedelta(seconds=seconds_ago)).isoformat()
+
+    status = {
+        "mode": "monitor",
+        "state": "active",
+        "pid": 42,
+        "master_pid": 41,
+        "started_at": iso(3600),
+        "checked_at": iso(20),
+        "check_interval_seconds": 30,
+        "idle_timeout_seconds": 600,
+        "last_request_at": iso(300),
+        "idle_since": iso(20),
+        "stop_due_at": iso(20 - 600),
+        "ports": [
+            {"port": 8000, "connections": 0, "last_connection_at": None},
+            {"port": 22, "connections": 1, "last_connection_at": iso(20)},
+        ],
+    }
+    status.update(overrides)
+    return status
+
+
+class IdleWatchdogReadTests(SimpleTestCase):
+    def test_read_status(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "status.json"
+            self.assertIsNone(idle_watchdog.read_status(path))
+
+            idle_watchdog.write_status(path, {"state": "idle"})
+            self.assertEqual(idle_watchdog.read_status(path), {"state": "idle"})
+
+            path.write_text("[1, 2]")
+            with self.assertRaisesMessage(ValueError, "doesn't hold a JSON object"):
+                idle_watchdog.read_status(path)
+
+            path.write_text("{")
+            with self.assertRaises(ValueError):
+                idle_watchdog.read_status(path)
+
+    def test_system_uptime(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "uptime"
+            self.assertIsNone(idle_watchdog.system_uptime(path))
+
+            path.write_text("12345.67 54321.00\n")
+            self.assertEqual(idle_watchdog.system_uptime(path), 12345.67)
+
+            path.write_text("")
+            self.assertIsNone(idle_watchdog.system_uptime(path))
+
+
+class IdleWatchdogPageContextTests(SimpleTestCase):
+    NOW = datetime.datetime(2027, 1, 15, 8, 0, tzinfo=datetime.UTC)
+
+    def _context(self, status=None, env=None, raw=None):
+        with tempfile.TemporaryDirectory() as tempdir:
+            status_file = Path(tempdir) / "status.json"
+            if status is not None:
+                idle_watchdog.write_status(status_file, status)
+            if raw is not None:
+                status_file.write_text(raw)
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        "LIFETRACKER_IDLE_STOP": "monitor",
+                        "LIFETRACKER_IDLE_STOP_STATUS_FILE": str(status_file),
+                        **(env or {}),
+                    },
+                ),
+                mock.patch.object(idle_watchdog, "system_uptime", return_value=90),
+            ):
+                return idle_watchdog_page_context(now=self.NOW)
+
+    def test_format_duration(self):
+        for seconds, expected in [
+            (-5, "0 seconds"),
+            (1, "1 second"),
+            (59.9, "59 seconds"),
+            (60, "1\xa0minute"),
+            (3 * 3600 + 5 * 60 + 7, "3\xa0hours, 5\xa0minutes"),
+        ]:
+            with self.subTest(seconds=seconds):
+                self.assertEqual(_format_duration(seconds), expected)
+
+    def test_status(self):
+        context = self._context(_watchdog_status(self.NOW))
+
+        self.assertIsNone(context["config_error"])
+        self.assertIsNone(context["status_error"])
+        self.assertEqual(context["config"].mode, "monitor")
+        self.assertEqual(context["system_uptime"], "1\xa0minute")
+        status = context["status"]
+        self.assertEqual(status["checked_ago"], "20 seconds")
+        self.assertEqual(status["check_interval"], "30 seconds")
+        self.assertEqual(status["idle_timeout"], "10\xa0minutes")
+        self.assertEqual(status["uptime"], "1\xa0hour")
+        self.assertEqual(status["last_request_at_ago"], "5\xa0minutes")
+        self.assertEqual(status["idle_since_ago"], "20 seconds")
+        self.assertFalse(status["stale"])
+        self.assertFalse(status["stop_overdue"])
+        self.assertEqual(status["stop_due_in"], "9\xa0minutes")
+        self.assertEqual(
+            [
+                (port["port"], port["connections"], port["last_connection_ago"])
+                for port in status["ports"]
+            ],
+            [(8000, 0, None), (22, 1, "20 seconds")],
+        )
+
+    def test_stale_and_overdue(self):
+        context = self._context(
+            _watchdog_status(
+                self.NOW,
+                checked_at=(self.NOW - datetime.timedelta(minutes=30)).isoformat(),
+                stop_due_at=(self.NOW - datetime.timedelta(minutes=2)).isoformat(),
+            )
+        )
+
+        self.assertTrue(context["status"]["stale"])
+        self.assertTrue(context["status"]["stop_overdue"])
+        self.assertEqual(context["status"]["stop_due_in"], "2\xa0minutes")
+
+    def test_before_first_check_judged_by_start_time(self):
+        for started_seconds_ago, stale in [(10, False), (600, True)]:
+            with self.subTest(started_seconds_ago=started_seconds_ago):
+                started_at = self.NOW - datetime.timedelta(seconds=started_seconds_ago)
+                context = self._context(
+                    _watchdog_status(
+                        self.NOW, checked_at=None, started_at=started_at.isoformat()
+                    )
+                )
+
+                self.assertIsNone(context["status"]["checked_ago"])
+                self.assertEqual(context["status"]["stale"], stale)
+
+    def test_no_status_file(self):
+        context = self._context()
+
+        self.assertIsNone(context["status"])
+        self.assertIsNone(context["status_error"])
+
+    def test_invalid_config(self):
+        context = self._context(env={"LIFETRACKER_IDLE_STOP": "sometimes"})
+
+        self.assertIn("LIFETRACKER_IDLE_STOP must be one of", context["config_error"])
+        self.assertIsNone(context["config"])
+
+    def test_unreadable_status(self):
+        context = self._context(raw="not json")
+
+        self.assertIn("Couldn't read", context["status_error"])
+        self.assertIsNone(context["status"])
+
+    def test_unexpected_status_contents(self):
+        status = _watchdog_status(self.NOW)
+        del status["ports"]
+
+        context = self._context(status)
+
+        self.assertIn("Unexpected contents", context["status_error"])
+        self.assertIsNone(context["status"])
+
+
+class IdleWatchdogAdminViewTests(TestCase):
+    URL = "/admin/core/idlewatchdogstatus/"
+
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            "admin", "admin@example.com", "password"
+        )
+        self.client.login(username="admin", password="password")
+        tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        self.status_file = Path(tempdir.name) / "status.json"
+        env = mock.patch.dict(
+            os.environ,
+            {
+                "LIFETRACKER_IDLE_STOP": "stop",
+                "LIFETRACKER_IDLE_STOP_STATUS_FILE": str(self.status_file),
+            },
+        )
+        env.start()
+        self.addCleanup(env.stop)
+
+    def test_url(self):
+        self.assertEqual(reverse("admin:core_idlewatchdogstatus_changelist"), self.URL)
+
+    def test_admin_index_links_to_page_for_superusers_only(self):
+        self.assertContains(self.client.get(reverse("admin:index")), self.URL)
+
+        staff = User.objects.create_user("staff", "s@example.com", "pass")
+        staff.is_staff = True
+        staff.save()
+        client = Client()
+        client.login(username="staff", password="pass")
+        self.assertNotContains(client.get(reverse("admin:index")), self.URL)
+        self.assertEqual(client.get(self.URL).status_code, 403)
+
+    def test_page_shows_status(self):
+        idle_watchdog.write_status(
+            self.status_file,
+            _watchdog_status(timezone.now(), mode="stop", state="idle"),
+        )
+
+        response = self.client.get(self.URL)
+
+        self.assertContains(response, "<code>stop</code>")
+        self.assertContains(response, "Idle (no connections open)")
+        self.assertContains(response, "stops in")
+        self.assertContains(response, "gunicorn master PID 41")
+        self.assertContains(response, "<code>22</code>")
+        self.assertNotContains(response, "has probably stopped running")
+
+    def test_page_warns_when_stale(self):
+        stale = timezone.now() - datetime.timedelta(hours=1)
+        idle_watchdog.write_status(
+            self.status_file,
+            _watchdog_status(stale, state="stopping"),
+        )
+
+        response = self.client.get(self.URL)
+
+        self.assertContains(response, "has probably stopped running")
+        self.assertContains(response, "Stopping gunicorn")
+
+    def test_page_without_status(self):
+        response = self.client.get(self.URL)
+
+        self.assertContains(response, "No status yet: the watchdog writes it")
+
+    def test_page_when_off(self):
+        with mock.patch.dict(os.environ, {"LIFETRACKER_IDLE_STOP": "off"}):
+            response = self.client.get(self.URL)
+
+        self.assertContains(response, "No status yet: the watchdog is off.")
+
+    def test_page_with_invalid_config(self):
+        with mock.patch.dict(os.environ, {"LIFETRACKER_IDLE_STOP_MINUTES": "x"}):
+            response = self.client.get(self.URL)
+
+        self.assertContains(response, "settings are invalid")
+
+    def test_page_with_unreadable_status(self):
+        self.status_file.write_text("{")
+
+        response = self.client.get(self.URL)
+
+        self.assertContains(response, "Couldn&#x27;t read")

@@ -23,8 +23,8 @@ It doesn't import Django.
 Configured by environment variables (see ``config_from_env``); off unless
 ``LIFETRACKER_IDLE_STOP`` is ``monitor`` (check and report, never stop) or
 ``stop``. Linux only, as it reads ``/proc/net``; the Docker image is Linux
-whatever the host. Every check rewrites a JSON status file (``Watchdog.status``)
-for an admin page to show.
+whatever the host. Every check rewrites a JSON status file (``Watchdog.status``),
+which the admin's Idle Watchdog page shows (``read_status``).
 """
 
 import dataclasses
@@ -46,6 +46,7 @@ DEFAULT_STATUS_FILE = "/tmp/lifetracker-idle-watchdog.json"
 DEFAULT_REQUEST_FILE = "/tmp/lifetracker-last-request"
 SSH_PORT = 22
 PROC_NET_TCP_FILES = (Path("/proc/net/tcp"), Path("/proc/net/tcp6"))
+PROC_UPTIME_FILE = Path("/proc/uptime")
 # The `st` column of /proc/net/tcp{,6}: 01 is TCP_ESTABLISHED (0A is LISTEN).
 TCP_ESTABLISHED = "01"
 
@@ -265,6 +266,29 @@ class Watchdog:
                 for port in self.config.ports
             ],
         }
+
+
+def read_status(path: Path) -> dict | None:
+    """The status ``write_status`` last wrote to ``path``, or None if there's
+    no such file. Raises ValueError if it isn't a JSON object, and OSError if it
+    can't be read."""
+    try:
+        text = path.read_text()
+    except FileNotFoundError:
+        return None
+    status = json.loads(text)
+    if not isinstance(status, dict):
+        raise ValueError(f"{path} doesn't hold a JSON object")
+    return status
+
+
+def system_uptime(path: Path = PROC_UPTIME_FILE) -> float | None:
+    """Seconds since the (virtual) machine booted, from /proc/uptime, or None
+    where that's missing or unreadable (not Linux)."""
+    try:
+        return float(path.read_text().split()[0])
+    except OSError, ValueError, IndexError:
+        return None
 
 
 def write_status(path: Path, status: dict) -> None:

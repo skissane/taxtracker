@@ -228,6 +228,18 @@ database_storage = DatabaseStorage()
 CLOUD_BACKUP_STATUS_PK = 1
 
 
+class IdleWatchdogStatus(models.Model):
+    """No table: exists only so the admin index has an entry (under Core) for
+    the idle watchdog's status page, which ``IdleWatchdogStatusAdmin`` serves
+    from the watchdog's status file (see ``core/idle_watchdog.py``)."""
+
+    class Meta:
+        managed = False
+        verbose_name = "Idle Watchdog"
+        verbose_name_plural = "Idle Watchdog"
+        default_permissions = ()
+
+
 class CloudBackupStatus(models.Model):
     """Tracks the latest successful cloud backup upload."""
 
