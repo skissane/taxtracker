@@ -48,6 +48,7 @@ from lifetracker.core.admin import (
 from lifetracker.core.attachments import (
     extract_date_from_filename,
     file_type_for_filename,
+    orphaned_stored_file_pks,
 )
 from lifetracker.core.backup import CLOUD_BACKUP_S3_CONFIG, run_cloud_backup
 from lifetracker.core.forms import FlexibleDateField
@@ -63,6 +64,8 @@ from lifetracker.core.models import (
     FileType,
     MimeType,
 )
+from lifetracker.tasktracker.models import Task, TaskAttachment
+from lifetracker.taxtracker.models import Attachment, FinancialYear, Item
 from lifetracker.wsgi import application as wsgi_application
 
 _GOOGLE_SSO_ENABLED_SETTINGS = {
@@ -2373,3 +2376,89 @@ class FlexibleDateFieldTests(TestCase):
 
     def test_empty_string_returns_none(self):
         self.assertIsNone(self.field.clean(""))
+
+
+class PurgeOrphanedFilesTests(TestCase):
+    """Tests for orphaned_stored_file_pks and the purge_orphaned_files command.
+
+    They use taxtracker's and tasktracker's attachment models to check that
+    file fields are found across apps.
+    """
+
+    def setUp(self):
+        item = Item.objects.create(
+            year=FinancialYear.objects.create(year=2024), title="Item", order=1
+        )
+        self.attachment = Attachment.objects.create(
+            item=item, file=ContentFile(b"kept", name="kept.pdf")
+        )
+        self.task_attachment = TaskAttachment.objects.create(
+            task=Task.objects.create(title="Task", order=1),
+            file=ContentFile(b"also kept", name="task.pdf"),
+        )
+        # As left behind by a delete before delete_stored_files was connected.
+        self.orphans = [
+            DBStoredFile.objects.create(filename="a.pdf", content=b"12345"),
+            DBStoredFile.objects.create(filename="b.pdf", content=b"123"),
+        ]
+        self.orphan_pks = [orphan.pk for orphan in self.orphans]
+
+    def call(self, *args):
+        """Call purge_orphaned_files and return captured stdout."""
+        out = io.StringIO()
+        call_command("purge_orphaned_files", *args, stdout=out)
+        return out.getvalue()
+
+    def referenced_pks(self):
+        return {
+            att.file.storage._name_to_pk(att.file.name)
+            for att in (self.attachment, self.task_attachment)
+        }
+
+    def test_finds_only_unreferenced_files(self):
+        self.assertEqual(orphaned_stored_file_pks(), self.orphan_pks)
+
+    def test_ignores_rows_without_a_file_or_with_an_unparseable_name(self):
+        # Neither refers to a stored file, so neither keeps one.
+        Attachment.objects.filter(pk=self.attachment.pk).update(file="")
+        TaskAttachment.objects.filter(pk=self.task_attachment.pk).update(
+            file="not-a-db-path.pdf"
+        )
+        self.assertEqual(
+            orphaned_stored_file_pks(),
+            sorted(self.orphan_pks + list(self.referenced_pks())),
+        )
+
+    def test_dry_run_reports_without_deleting(self):
+        output = self.call()
+        self.assertEqual(
+            output,
+            "Found 2 orphaned stored file(s), 8 bytes. Run with --delete to delete.\n",
+        )
+        self.assertEqual(DBStoredFile.objects.count(), 4)
+
+    def test_delete_removes_only_orphans(self):
+        output = self.call("--delete")
+        self.assertEqual(output, "Deleted 2 orphaned stored file(s), 8 bytes.\n")
+        self.assertEqual(
+            set(DBStoredFile.objects.values_list("pk", flat=True)),
+            self.referenced_pks(),
+        )
+        self.attachment.refresh_from_db()
+        self.assertEqual(self.attachment.file.read(), b"kept")
+
+    def test_nothing_orphaned(self):
+        DBStoredFile.objects.filter(pk__in=self.orphan_pks).delete()
+        self.assertEqual(
+            self.call("--delete"), "Deleted 0 orphaned stored file(s), 0 bytes.\n"
+        )
+        self.assertEqual(DBStoredFile.objects.count(), 2)
+
+    @mock.patch(
+        "lifetracker.core.management.commands.purge_orphaned_files._BATCH_SIZE", 1
+    )
+    def test_deletes_in_batches(self):
+        self.assertEqual(
+            self.call("--delete"), "Deleted 2 orphaned stored file(s), 8 bytes.\n"
+        )
+        self.assertFalse(DBStoredFile.objects.filter(pk__in=self.orphan_pks).exists())
