@@ -29,10 +29,9 @@ if [ "$#" -eq 0 ]; then
 fi
 
 # setpriv leaves HOME as /root, which lifetracker can't write to (see
-# docker-entrypoint.sh), and USER/LOGNAME as root, which getpass.getuser() (and
-# so Django's changepassword and createsuperuser defaults) reads. sh only
-# changes directory; the command is then exec'd from its own arguments, not
-# parsed by it.
+# docker-entrypoint.sh). The SSH session doesn't set USER or LOGNAME, so set
+# them too, for tools that expect them. sh only changes directory; the command
+# is then exec'd from its own arguments, not parsed by it.
 command='env HOME=/home/lifetracker USER=lifetracker LOGNAME=lifetracker setpriv --reuid=lifetracker --regid=lifetracker --init-groups'
 command+=' sh -c '"$(squote 'cd "${LIFETRACKER_APP_DIR:-/app}" && exec "$@"')"' sh'
 for arg in "$@"; do
