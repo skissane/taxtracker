@@ -24,8 +24,7 @@ from django_google_sso.main import GoogleAuth
 
 from lifetracker import google_sso
 from lifetracker.admin_site import (
-    _CODE_STYLE,
-    _LINK_STYLE,
+    _TEXT_STYLE,
     LifetrackerAdminSite,
     _build_admin_site_header,
 )
@@ -826,11 +825,11 @@ class AdminSiteHeaderTests(TestCase):
                 )
             ),
             (
-                f'Life Tracker <code style="{_CODE_STYLE}"><a'
+                f'Life Tracker <code style="{_TEXT_STYLE}"><a'
                 f' href="https://github.com/skissane/taxtracker/commit/{self.COMMIT_ID}"'
                 ' target="_blank" rel="noopener noreferrer"'
-                f' title="{self.COMMIT_ID}" style="{_LINK_STYLE}">0123abc</a></code>'
-                f' <code style="{_CODE_STYLE}">instance.local</code>'
+                f' title="{self.COMMIT_ID}" style="{_TEXT_STYLE}">0123abc</a></code>'
+                f' <code style="{_TEXT_STYLE}">instance.local</code>'
             ),
         )
 
@@ -845,13 +844,12 @@ class AdminSiteHeaderTests(TestCase):
                     instance_name="instance.local",
                 )
             ),
-            f'Life Tracker <code style="{_CODE_STYLE}">instance.local</code>',
+            f'Life Tracker <code style="{_TEXT_STYLE}">instance.local</code>',
         )
 
     def test_uses_site_name_color(self):
-        # The other tests compare against the constants, so pin their values here.
-        self.assertTrue(_CODE_STYLE.startswith("color: var(--header-branding-color);"))
-        self.assertEqual(_LINK_STYLE, "color: var(--header-branding-color);")
+        # The other tests compare against the constant, so pin its value here.
+        self.assertEqual(_TEXT_STYLE, "color: var(--header-branding-color);")
 
     def test_accepts_base_url_without_trailing_slash(self):
         self.assertEqual(
@@ -865,11 +863,11 @@ class AdminSiteHeaderTests(TestCase):
                 )
             ),
             (
-                f'Life Tracker <code style="{_CODE_STYLE}"><a'
+                f'Life Tracker <code style="{_TEXT_STYLE}"><a'
                 f' href="https://github.com/skissane/taxtracker/commit/{self.COMMIT_ID}"'
                 ' target="_blank" rel="noopener noreferrer"'
-                f' title="{self.COMMIT_ID}" style="{_LINK_STYLE}">0123abc</a></code>'
-                f' <code style="{_CODE_STYLE}">instance.local</code>'
+                f' title="{self.COMMIT_ID}" style="{_TEXT_STYLE}">0123abc</a></code>'
+                f' <code style="{_TEXT_STYLE}">instance.local</code>'
             ),
         )
 
@@ -885,8 +883,8 @@ class AdminSiteHeaderTests(TestCase):
                 )
             ),
             (
-                f'Example <code style="{_CODE_STYLE}" title="{self.COMMIT_ID}">0123abc'
-                f'</code> <code style="{_CODE_STYLE}">instance.local</code>'
+                f'Example <code style="{_TEXT_STYLE}" title="{self.COMMIT_ID}">0123abc'
+                f'</code> <code style="{_TEXT_STYLE}">instance.local</code>'
             ),
         )
 
@@ -901,7 +899,7 @@ class AdminSiteHeaderTests(TestCase):
                     instance_name="instance.local",
                 )
             ),
-            f'&lt;b&gt; <code style="{_CODE_STYLE}">instance.local</code>',
+            f'&lt;b&gt; <code style="{_TEXT_STYLE}">instance.local</code>',
         )
 
 
@@ -922,9 +920,9 @@ class AdminSitePerRequestHeaderTests(TestCase):
         self.assertContains(response, "<title>Log in | Example Site</title>", html=True)
         self.assertContains(
             response,
-            f'Example Site <code style="{_CODE_STYLE}" '
+            f'Example Site <code style="{_TEXT_STYLE}" '
             f'title="{AdminSiteHeaderTests.COMMIT_ID}">0123abc'
-            f'</code> <code style="{_CODE_STYLE}">instance.local</code>',
+            f'</code> <code style="{_TEXT_STYLE}">instance.local</code>',
         )
         self.assertNotContains(response, self.COMMIT_URL)
         self.assertNotContains(response, "Life Tracker")
@@ -938,7 +936,7 @@ class AdminSitePerRequestHeaderTests(TestCase):
         )
         self.assertContains(
             response,
-            f'Life Tracker <code style="{_CODE_STYLE}"><a href="{self.COMMIT_URL}"',
+            f'Life Tracker <code style="{_TEXT_STYLE}"><a href="{self.COMMIT_URL}"',
         )
         self.assertNotContains(response, "Example Site")
 

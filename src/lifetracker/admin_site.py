@@ -16,11 +16,7 @@ def _commit_url(commit_url_base, commit_id):
 # The admin's gold "Life Tracker" color, from its own stylesheet, so the commit ID
 # and instance name match the site name in both the light and dark themes.
 _TEXT_COLOR = "var(--header-branding-color)"
-_CODE_STYLE = (
-    f"color: {_TEXT_COLOR}; background-color: rgba(17, 24, 39, 0.08); "
-    "border-radius: 0.25rem; padding: 0 0.25em;"
-)
-_LINK_STYLE = f"color: {_TEXT_COLOR};"
+_TEXT_STYLE = f"color: {_TEXT_COLOR};"
 
 
 def _build_admin_site_header(
@@ -31,28 +27,28 @@ def _build_admin_site_header(
             '{} <code style="{}"><a href="{}" target="_blank" rel="noopener noreferrer"'
             ' title="{}" style="{}">{}</a></code> <code style="{}">{}</code>',
             site_name,
-            _CODE_STYLE,
+            _TEXT_STYLE,
             _commit_url(commit_url_base, commit_id),
             commit_id,
-            _LINK_STYLE,
+            _TEXT_STYLE,
             commit_id[:_SHORT_COMMIT_ID_LENGTH],
-            _CODE_STYLE,
+            _TEXT_STYLE,
             instance_name,
         )
     if commit_id:
         return format_html(
             '{} <code style="{}" title="{}">{}</code> <code style="{}">{}</code>',
             site_name,
-            _CODE_STYLE,
+            _TEXT_STYLE,
             commit_id,
             commit_id[:_SHORT_COMMIT_ID_LENGTH],
-            _CODE_STYLE,
+            _TEXT_STYLE,
             instance_name,
         )
     return format_html(
         '{} <code style="{}">{}</code>',
         site_name,
-        _CODE_STYLE,
+        _TEXT_STYLE,
         instance_name,
     )
 
