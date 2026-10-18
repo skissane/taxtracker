@@ -217,6 +217,16 @@ export FLY_APP=<app-name>
 fly status
 ```
 
+To get a shell on the Machine as the `lifetracker` user, use `./flyssh.sh`. With
+no arguments it opens an interactive login shell; with arguments it runs them as
+one command (each argument quoted, so spaces and quotes survive). It goes through
+`./flyctl.sh`, and passes `--pty` only when run from a terminal:
+
+```bash
+./flyssh.sh
+./flyssh.sh python manage.py showmigrations
+```
+
 Don't commit the name anywhere, including in issues, PRs or pasted command output.
 On the Machine, `LIFETRACKER_ALLOWED_HOSTS` and `LIFETRACKER_BACKUP_HOSTNAME`
 default from the name (via `FLY_APP_NAME`, which Fly sets), so they need no
