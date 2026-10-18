@@ -2817,6 +2817,30 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
 
         self.assertIn("LIFETRACKER_IDLE_STOP_MINUTES", stderr.getvalue())
 
+    def test_main_runs_watchdog_for_master_pid(self):
+        with (
+            mock.patch.dict(os.environ, {"LIFETRACKER_IDLE_STOP": "monitor"}),
+            mock.patch("signal.signal") as set_handler,
+            mock.patch.object(idle_watchdog, "run", return_value=0) as run,
+        ):
+            self.assertEqual(idle_watchdog.main(["99"]), 0)
+
+        run.assert_called_once_with(
+            idle_watchdog.config_from_env({"LIFETRACKER_IDLE_STOP": "monitor"}), 99
+        )
+        set_handler.assert_has_calls(
+            [
+                mock.call(signal.SIGINT, idle_watchdog._exit_quietly),
+                mock.call(signal.SIGTERM, idle_watchdog._exit_quietly),
+            ]
+        )
+
+    def test_exit_quietly_exits_zero(self):
+        with self.assertRaises(SystemExit) as raised:
+            idle_watchdog._exit_quietly(signal.SIGTERM, None)
+
+        self.assertEqual(raised.exception.code, 0)
+
     def test_real_process_stops_its_parent(self):
         """End to end: a shell stands in for gunicorn's master, starts the
         watchdog as its child, and is sent SIGTERM once it's been idle."""
