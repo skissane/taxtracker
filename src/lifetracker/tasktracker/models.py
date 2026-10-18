@@ -7,6 +7,7 @@ from django.db import models
 
 from lifetracker.core.attachments import AttachmentAutofillMixin
 from lifetracker.core.models import FileType, database_storage
+from lifetracker.core.trees import TreeNodeMixin
 
 # The pk of the built-in "Generic" task type, created by a data migration.
 # Its name and (lack of) content_type are pinned by both a DB-level check
@@ -89,14 +90,7 @@ class TaskType(models.Model):
         super().delete(*args, **kwargs)
 
 
-class Task(models.Model):
-    STATUS_PENDING = "pending"
-    STATUS_DONE = "done"
-    STATUS_CHOICES = [
-        (STATUS_PENDING, "Pending"),
-        (STATUS_DONE, "Done"),
-    ]
-
+class Task(TreeNodeMixin, models.Model):
     parent = models.ForeignKey(
         "self",
         null=True,
@@ -107,8 +101,8 @@ class Task(models.Model):
     title = models.CharField(max_length=255)
     status = models.CharField(
         max_length=20,
-        choices=STATUS_CHOICES,
-        default=STATUS_PENDING,
+        choices=TreeNodeMixin.STATUS_CHOICES,
+        default=TreeNodeMixin.STATUS_PENDING,
     )
     notes = models.TextField(blank=True)
     order = models.PositiveIntegerField(
@@ -137,52 +131,10 @@ class Task(models.Model):
         verbose_name_plural = "Tasks"
 
     def __str__(self):
-        parts = [self.title]
-        visited = {self.pk}
-        current = self
-        while current.parent_id is not None:
-            if current.parent_id in visited:
-                parts.insert(0, "…")
-                break
-            visited.add(current.parent_id)
-            current = current.parent
-            parts.insert(0, current.title)
-        return " > ".join(parts)
-
-    @property
-    def is_done(self):
-        return self.status == self.STATUS_DONE
+        return self.tree_path_str()
 
     def clean(self):
-        skip_cycle_detection = False
-        if self.parent_id is not None and self.pk is not None:
-            try:
-                original_parent_id = (
-                    Task.objects.only("parent_id").get(pk=self.pk).parent_id
-                )
-                if original_parent_id == self.parent_id:
-                    skip_cycle_detection = True
-            except Task.DoesNotExist:
-                pass
-            if not skip_cycle_detection:
-                visited = {self.pk}
-                current_id = self.parent_id
-                while current_id is not None:
-                    if current_id in visited:
-                        raise ValidationError(
-                            {
-                                "parent": (
-                                    "Setting this parent would create a circular"
-                                    " reference."
-                                )
-                            }
-                        )
-                    visited.add(current_id)
-                    try:
-                        ancestor = Task.objects.only("parent_id").get(pk=current_id)
-                        current_id = ancestor.parent_id
-                    except Task.DoesNotExist:
-                        break
+        self.check_parent_cycle()
 
         if (self.content_type_id is None) != (self.object_id is None):
             raise ValidationError(
@@ -218,19 +170,6 @@ class Task(models.Model):
                     )
                 }
             )
-
-    def get_folder_path(self):
-        """Return a list of titles representing the path from root to this task."""
-        path = [self.title]
-        visited = {self.pk}
-        current = self
-        while current.parent_id is not None:
-            if current.parent_id in visited:
-                break
-            visited.add(current.parent_id)
-            current = current.parent
-            path.insert(0, current.title)
-        return path
 
 
 class TaskAttachment(AttachmentAutofillMixin, models.Model):

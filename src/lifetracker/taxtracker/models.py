@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from lifetracker.core.attachments import AttachmentAutofillMixin
 from lifetracker.core.models import FileType, database_storage
+from lifetracker.core.trees import TreeNodeMixin
 
 
 class FinancialYear(models.Model):
@@ -162,15 +163,8 @@ class FinancialYearStatusHistory(models.Model):
         )
 
 
-class Item(models.Model):
+class Item(TreeNodeMixin, models.Model):
     """A tax return checklist item, optionally nested under a parent item."""
-
-    STATUS_PENDING = "pending"
-    STATUS_DONE = "done"
-    STATUS_CHOICES = [
-        (STATUS_PENDING, "Pending"),
-        (STATUS_DONE, "Done"),
-    ]
 
     year = models.ForeignKey(
         FinancialYear,
@@ -187,8 +181,8 @@ class Item(models.Model):
     title = models.CharField(max_length=255)
     status = models.CharField(
         max_length=20,
-        choices=STATUS_CHOICES,
-        default=STATUS_PENDING,
+        choices=TreeNodeMixin.STATUS_CHOICES,
+        default=TreeNodeMixin.STATUS_PENDING,
     )
     notes = models.TextField(blank=True)
     order = models.PositiveIntegerField(
@@ -202,22 +196,7 @@ class Item(models.Model):
         verbose_name_plural = "Items"
 
     def __str__(self):
-        parts = [self.title]
-        visited = {self.pk}
-        current = self
-        while current.parent_id is not None:
-            if current.parent_id in visited:
-                parts.insert(0, "…")
-                break
-            visited.add(current.parent_id)
-            current = current.parent
-            parts.insert(0, current.title)
-        parts.insert(0, str(self.year))
-        return " > ".join(parts)
-
-    @property
-    def is_done(self):
-        return self.status == self.STATUS_DONE
+        return f"{self.year} > {self.tree_path_str()}"
 
     def clean(self):
         if self.parent_id is not None:
@@ -227,42 +206,7 @@ class Item(models.Model):
                 self.year_id = parent.year_id
             except Item.DoesNotExist:
                 pass
-
-            # Cycle detection only makes sense for existing items with a parent.
-            if self.pk is not None:
-                # If the parent_id is unchanged from the persisted value, a cycle
-                # already exists in the DB and we are not making it worse — skip
-                # detection so that existing cycles don't block every subsequent save
-                # (e.g. inline formsets re-validate unchanged rows, which would
-                # otherwise surface an invisible "Please correct the error below"
-                # message when the parent field is hidden).
-                try:
-                    original_parent_id = (
-                        Item.objects.only("parent_id").get(pk=self.pk).parent_id
-                    )
-                    if original_parent_id == self.parent_id:
-                        return
-                except Item.DoesNotExist:
-                    pass
-                # Walk the ancestor chain; if we encounter self, there is a cycle.
-                visited = {self.pk}
-                current_id = self.parent_id
-                while current_id is not None:
-                    if current_id in visited:
-                        raise ValidationError(
-                            {
-                                "parent": (
-                                    "Setting this parent would create a circular"
-                                    " reference."
-                                )
-                            }
-                        )
-                    visited.add(current_id)
-                    try:
-                        ancestor = Item.objects.only("parent_id").get(pk=current_id)
-                        current_id = ancestor.parent_id
-                    except Item.DoesNotExist:
-                        break
+        self.check_parent_cycle()
 
     def save(self, *args, **kwargs):
         # Enforce year inheritance at the ORM level too, so direct saves (shell,
@@ -275,19 +219,6 @@ class Item(models.Model):
             except Item.DoesNotExist:
                 pass
         super().save(*args, **kwargs)
-
-    def get_folder_path(self):
-        """Return a list of titles representing the path from root to this item."""
-        path = [self.title]
-        visited = {self.pk}
-        current = self
-        while current.parent_id is not None:
-            if current.parent_id in visited:
-                break
-            visited.add(current.parent_id)
-            current = current.parent
-            path.insert(0, current.title)
-        return path
 
 
 class ReceivedDocument(models.Model):
