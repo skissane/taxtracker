@@ -61,12 +61,14 @@ coverage:
 # The screenshot tests live outside `testpaths`, so plain `pytest` (and
 # `just test`/`just coverage`) never collects them; `-n 0` because two tests
 # don't justify a worker per core. `playwright install` is a quick no-op once
-# its Chromium is downloaded.
+# its Chromium is downloaded. The admin header shows LIFETRACKER_COMMIT_ID, so
+# it's set to HEAD unless already set; CI sets it to a PR's head commit, because
+# on a PR actions/checkout checks out a merge commit instead.
 
 # Screenshot admin screens into screenshots/ (needs a Playwright Chromium)
 screenshots:
     uv run --group screenshots playwright install chromium
-    uv run --group dev --group screenshots pytest screenshot_tests -n 0
+    LIFETRACKER_COMMIT_ID="${LIFETRACKER_COMMIT_ID:-$(git rev-parse HEAD)}" uv run --group dev --group screenshots pytest screenshot_tests -n 0
 
 # screenshots-post's arguments are a PR number and, optionally, --commit and
 # --run-url for the comment's "Taken for" line (see --help for the rest). It

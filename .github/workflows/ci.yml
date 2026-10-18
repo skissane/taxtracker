@@ -126,7 +126,11 @@ jobs:
       - name: Install Playwright Chromium
         run: uv run --group screenshots playwright install --with-deps chromium
 
+      # On a PR, the checkout is a merge commit; show the PR's head commit in
+      # the admin header instead, the one the screenshot comment names.
       - name: Take screenshots
+        env:
+          LIFETRACKER_COMMIT_ID: ${{ github.event.pull_request.head.sha || github.sha }}
         run: just screenshots
 
       # Even if a screenshot test failed, the ones taken may show why.
