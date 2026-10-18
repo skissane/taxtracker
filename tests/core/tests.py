@@ -18,7 +18,7 @@ from django.contrib.auth.models import User
 from django.contrib.staticfiles import finders
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
-from django.core.management import call_command
+from django.core.management import CommandError, call_command
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.forms import inlineformset_factory
@@ -2149,6 +2149,81 @@ class BackupAdminViewTests(TestCase):
         url = reverse("admin:core_cloudbackupstatus_list")
         response = client.get(url)
         self.assertEqual(response.status_code, 403)
+
+
+@override_settings(
+    LIFETRACKER_BACKUP_S3_ENDPOINT_URL="https://example.invalid",
+    LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+    LIFETRACKER_BACKUP_S3_REGION_NAME="auto",
+    LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+    LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
+)
+class CloudBackupCommandTests(TestCase):
+    """Tests for the cloud_backup management command."""
+
+    def call(self):
+        """Call cloud_backup and return captured stdout."""
+        out = io.StringIO()
+        call_command("cloud_backup", stdout=out)
+        return out.getvalue()
+
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_uploads_and_records_status(self, mock_client):
+        output = self.call()
+        put_object = mock_client.return_value.put_object
+        put_object.assert_called_once()
+        key = put_object.call_args.kwargs["Key"]
+        self.assertEqual(put_object.call_args.kwargs["Bucket"], "test-bucket")
+        self.assertRegex(key, r"^test-host\.local/db-backup\.")
+        self.assertTrue(
+            put_object.call_args.kwargs["Body"].startswith(b"SQLite format 3\x00")
+        )
+        self.assertEqual(output, f"Cloud backup uploaded successfully as {key}.\n")
+        status = CloudBackupStatus.objects.get(pk=CLOUD_BACKUP_STATUS_PK)
+        self.assertEqual(status.last_backup_object_key, key)
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="",
+    )
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_missing_settings_fail(self, mock_client):
+        with self.assertRaisesMessage(
+            CommandError,
+            "Cloud backup failed: Cloud backup settings are incomplete. Missing: "
+            "LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID, "
+            "LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY.",
+        ):
+            self.call()
+        mock_client.assert_not_called()
+
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_upload_error_fails(self, mock_client):
+        mock_client.return_value.put_object.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
+            "PutObject",
+        )
+        with self.assertRaisesMessage(CommandError, "Cloud backup failed: "):
+            self.call()
+        self.assertFalse(CloudBackupStatus.objects.exists())
+
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_status_update_error_fails_naming_uploaded_key(self, mock_client):
+        with mock.patch.object(
+            CloudBackupStatus.objects,
+            "update_or_create",
+            side_effect=IntegrityError("boom"),
+        ):
+            with self.assertRaises(CommandError) as cm:
+                self.call()
+        key = mock_client.return_value.put_object.call_args.kwargs["Key"]
+        self.assertEqual(
+            str(cm.exception),
+            f"Cloud backup uploaded successfully as {key}, "
+            "but failed to record backup status.",
+        )
+        self.assertIsInstance(cm.exception.__cause__.__cause__, IntegrityError)
 
 
 class CloudBackupStatusMoveMigrationTests(TransactionTestCase):
