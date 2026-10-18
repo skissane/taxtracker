@@ -34,6 +34,7 @@ primary_region = "syd"
 # The idle watchdog stops the Machine by making gunicorn exit 0. on-failure
 # (what `fly deploy` uses when none is set) restarts the Machine only after a
 # non-zero exit, so a clean exit leaves it stopped until Fly Proxy starts it.
+# After 10 failed restarts in a row it gives up and leaves the Machine stopped.
 [[restart]]
   policy = "on-failure"
   retries = 10

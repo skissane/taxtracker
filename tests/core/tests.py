@@ -2499,6 +2499,7 @@ class IdleWatchdogConfigTests(SimpleTestCase):
                 interval_seconds=30,
                 ports=(8000, 22),
                 status_file=Path("/tmp/lifetracker-idle-watchdog.json"),
+                request_file=Path("/tmp/lifetracker-last-request"),
             ),
         )
 
@@ -2527,6 +2528,7 @@ class IdleWatchdogConfigTests(SimpleTestCase):
                 "LIFETRACKER_IDLE_STOP_INTERVAL_SECONDS": "5",
                 "LIFETRACKER_IDLE_STOP_PORTS": "8080, 2222,8080",
                 "LIFETRACKER_IDLE_STOP_STATUS_FILE": "/run/status.json",
+                "LIFETRACKER_IDLE_STOP_REQUEST_FILE": "/run/last-request",
             }
         )
 
@@ -2538,6 +2540,7 @@ class IdleWatchdogConfigTests(SimpleTestCase):
                 interval_seconds=5,
                 ports=(8080, 2222),
                 status_file=Path("/run/status.json"),
+                request_file=Path("/run/last-request"),
             ),
         )
 
@@ -2596,6 +2599,7 @@ def _watchdog_config(mode="stop", status_file=Path("/nonexistent/status.json")):
         interval_seconds=10,
         ports=(8000, 22),
         status_file=status_file,
+        request_file=Path("/nonexistent/last-request"),
     )
 
 
@@ -2605,20 +2609,47 @@ class IdleWatchdogStateTests(SimpleTestCase):
     def test_idle_time_counts_from_startup(self):
         watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1, self.START)
 
-        self.assertFalse(watchdog.check(self.START + 59, {8000: 0, 22: 0}))
-        self.assertTrue(watchdog.check(self.START + 60, {8000: 0, 22: 0}))
+        self.assertFalse(watchdog.check(self.START + 59, {8000: 0, 22: 0}, None))
+        self.assertTrue(watchdog.check(self.START + 60, {8000: 0, 22: 0}, None))
 
     def test_connection_resets_idle_time(self):
         watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1, self.START)
 
-        self.assertFalse(watchdog.check(self.START + 50, {8000: 0, 22: 1}))
-        self.assertFalse(watchdog.check(self.START + 100, {8000: 0, 22: 0}))
-        self.assertTrue(watchdog.check(self.START + 110, {8000: 0, 22: 0}))
+        self.assertFalse(watchdog.check(self.START + 50, {8000: 0, 22: 1}, None))
+        self.assertFalse(watchdog.check(self.START + 100, {8000: 0, 22: 0}, None))
+        self.assertTrue(watchdog.check(self.START + 110, {8000: 0, 22: 0}, None))
+
+    def test_request_resets_idle_time(self):
+        watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1, self.START)
+        idle = {8000: 0, 22: 0}
+
+        # A request between checks, whose connection no check saw open.
+        self.assertFalse(watchdog.check(self.START + 50, idle, self.START + 45))
+        self.assertFalse(watchdog.check(self.START + 100, idle, self.START + 45))
+        self.assertTrue(watchdog.check(self.START + 105, idle, self.START + 45))
+        self.assertEqual(
+            watchdog.status()["last_request_at"], "2027-01-15T08:00:45+00:00"
+        )
+
+    def test_request_before_startup_is_ignored(self):
+        watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1, self.START)
+
+        self.assertTrue(
+            watchdog.check(self.START + 60, {8000: 0, 22: 0}, self.START - 3600)
+        )
+
+    def test_request_time_in_future_counts_as_now(self):
+        watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1, self.START)
+        idle = {8000: 0, 22: 0}
+
+        watchdog.check(self.START + 10, idle, self.START + 3600)
+
+        self.assertEqual(watchdog.idle_since, self.START + 10)
 
     def test_status(self):
         watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1234, self.START)
-        watchdog.check(self.START + 10, {8000: 2, 22: 0})
-        watchdog.check(self.START + 20, {8000: 0, 22: 0})
+        watchdog.check(self.START + 10, {8000: 2, 22: 0}, None)
+        watchdog.check(self.START + 20, {8000: 0, 22: 0}, None)
 
         self.assertEqual(
             watchdog.status(),
@@ -2631,6 +2662,7 @@ class IdleWatchdogStateTests(SimpleTestCase):
                 "checked_at": "2027-01-15T08:00:20+00:00",
                 "check_interval_seconds": 10,
                 "idle_timeout_seconds": 60,
+                "last_request_at": None,
                 "idle_since": "2027-01-15T08:00:10+00:00",
                 "stop_due_at": "2027-01-15T08:01:10+00:00",
                 "ports": [
@@ -2648,7 +2680,7 @@ class IdleWatchdogStateTests(SimpleTestCase):
         watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1, self.START)
         self.assertEqual(watchdog.status()["checked_at"], None)
 
-        watchdog.check(self.START + 1, {8000: 0, 22: 1})
+        watchdog.check(self.START + 1, {8000: 0, 22: 1}, None)
         self.assertEqual(watchdog.status()["state"], "active")
 
         watchdog.stopping = True
@@ -2695,6 +2727,7 @@ class IdleWatchdogRunTests(SimpleTestCase):
                     clock=lambda: now[0],
                     sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
                     count=lambda ports: next(counts),
+                    request_time=lambda path: None,
                     getppid=getppid or (lambda: self.MASTER_PID),
                     kill=kill,
                 )
@@ -2793,6 +2826,52 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
         popen.assert_called_once_with(
             [sys.executable, "-m", "lifetracker.core.idle_watchdog", "99"], env=env
         )
+
+    def test_request_file_from_env(self):
+        for env, expected in [
+            ({}, None),
+            ({"LIFETRACKER_IDLE_STOP": "bogus"}, None),
+            (
+                {"LIFETRACKER_IDLE_STOP": "monitor"},
+                Path("/tmp/lifetracker-last-request"),
+            ),
+            (
+                {
+                    "LIFETRACKER_IDLE_STOP": "stop",
+                    "LIFETRACKER_IDLE_STOP_REQUEST_FILE": "/run/last-request",
+                },
+                Path("/run/last-request"),
+            ),
+        ]:
+            with self.subTest(env=env):
+                self.assertEqual(idle_watchdog.request_file_from_env(env), expected)
+
+    def test_record_request_touches_file(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "last-request"
+            self.assertIsNone(idle_watchdog.last_request_time(path))
+
+            idle_watchdog.record_request(path)
+            first = idle_watchdog.last_request_time(path)
+            os.utime(path, (first - 100, first - 100))
+            idle_watchdog.record_request(path)
+
+            self.assertIsNotNone(first)
+            self.assertGreaterEqual(idle_watchdog.last_request_time(path), first)
+
+    def test_record_request_never_raises(self):
+        idle_watchdog.record_request(None)
+        idle_watchdog.record_request(Path("/nonexistent/last-request"))
+
+    def test_gunicorn_post_request_records_request(self):
+        path = Path("/run/last-request")
+        with (
+            mock.patch.object(gunicorn_conf, "_REQUEST_FILE", path),
+            mock.patch.object(idle_watchdog, "record_request") as record_request,
+        ):
+            gunicorn_conf.post_request(mock.Mock(), mock.Mock(), {}, mock.Mock())
+
+        record_request.assert_called_once_with(path)
 
     def test_gunicorn_when_ready_spawns_for_master(self):
         server = mock.Mock(pid=1234)

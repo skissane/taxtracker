@@ -6,9 +6,13 @@ bypass it), so its own auto-stop can stop the Machine mid-session (issue #135).
 This watchdog replaces it: gunicorn's ``when_ready`` hook (``gunicorn_conf``)
 starts it as a separate process via ``spawn``, and every check it counts the
 established TCP connections to the monitored local ports (the app's and SSH's)
-in ``/proc/net/tcp`` and ``/proc/net/tcp6``. Once there have been none for the
-idle timeout, it sends gunicorn's master SIGTERM, which shuts gunicorn down
-gracefully and exits 0.
+in ``/proc/net/tcp`` and ``/proc/net/tcp6``. A check only sees the connections
+open at that instant, which catches SSH sessions but misses most HTTP requests
+(gunicorn's sync workers close the connection after each one), so gunicorn's
+``post_request`` hook also touches a file (``record_request``), and a newer
+modification time than the last activity counts as activity too. Once there's
+been no activity for the idle timeout, it sends gunicorn's master SIGTERM,
+which shuts gunicorn down gracefully and exits 0.
 
 It's a process rather than a thread in the master because the master forks
 replacement workers after startup, and forking a multi-threaded process can
@@ -39,6 +43,7 @@ MODES = ("off", "monitor", "stop")
 DEFAULT_IDLE_MINUTES = 10
 DEFAULT_INTERVAL_SECONDS = 30
 DEFAULT_STATUS_FILE = "/tmp/lifetracker-idle-watchdog.json"
+DEFAULT_REQUEST_FILE = "/tmp/lifetracker-last-request"
 SSH_PORT = 22
 PROC_NET_TCP_FILES = (Path("/proc/net/tcp"), Path("/proc/net/tcp6"))
 # The `st` column of /proc/net/tcp{,6}: 01 is TCP_ESTABLISHED (0A is LISTEN).
@@ -52,6 +57,7 @@ class Config:
     interval_seconds: float
     ports: tuple[int, ...]
     status_file: Path
+    request_file: Path
 
 
 def _positive_number(environ: Mapping[str, str], name: str, default: float) -> float:
@@ -79,6 +85,8 @@ def config_from_env(environ: Mapping[str, str] = os.environ) -> Config:
       (default 30).
     - ``LIFETRACKER_IDLE_STOP_STATUS_FILE``: where to write the status JSON
       (default ``/tmp/lifetracker-idle-watchdog.json``).
+    - ``LIFETRACKER_IDLE_STOP_REQUEST_FILE``: the file gunicorn's workers touch
+      after each request (default ``/tmp/lifetracker-last-request``).
     """
     mode = environ.get("LIFETRACKER_IDLE_STOP", "").strip().lower() or "off"
     if mode not in MODES:
@@ -107,13 +115,48 @@ def config_from_env(environ: Mapping[str, str] = os.environ) -> Config:
         environ.get("LIFETRACKER_IDLE_STOP_STATUS_FILE", "").strip()
         or DEFAULT_STATUS_FILE
     )
+    request_file = Path(
+        environ.get("LIFETRACKER_IDLE_STOP_REQUEST_FILE", "").strip()
+        or DEFAULT_REQUEST_FILE
+    )
     return Config(
         mode=mode,
         idle_seconds=idle_minutes * 60,
         interval_seconds=interval_seconds,
         ports=ports,
         status_file=status_file,
+        request_file=request_file,
     )
+
+
+def request_file_from_env(environ: Mapping[str, str] = os.environ) -> Path | None:
+    """The file for ``record_request`` to touch, or None if the watchdog is
+    off or misconfigured (``spawn`` logs that)."""
+    try:
+        config = config_from_env(environ)
+    except ValueError:
+        return None
+    return None if config.mode == "off" else config.request_file
+
+
+def record_request(path: Path | None) -> None:
+    """Mark that a request has just finished, for the watchdog to see. Called
+    by every gunicorn worker after every request, so it's one cheap system call
+    and never raises."""
+    if path is None:
+        return
+    try:
+        path.touch()
+    except OSError:
+        pass
+
+
+def last_request_time(path: Path) -> float | None:
+    """When ``record_request`` last touched ``path``, or None if never."""
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
 
 
 def established_local_ports(text: str) -> Iterable[int]:
@@ -165,17 +208,27 @@ class Watchdog:
         self.checked_at: float | None = None
         self.counts = dict.fromkeys(config.ports, 0)
         self.last_seen: dict[int, float | None] = dict.fromkeys(config.ports)
+        self.last_request: float | None = None
         self.stopping = False
 
-    def check(self, now: float, counts: Mapping[int, int]) -> bool:
-        """Record one check's connection counts; return whether it's time to
-        stop (whatever the mode)."""
+    def check(
+        self, now: float, counts: Mapping[int, int], last_request: float | None
+    ) -> bool:
+        """Record one check's connection counts and the request file's
+        modification time; return whether it's time to stop (whatever the
+        mode)."""
         self.checked_at = now
         self.counts = dict(counts)
         for port, count in counts.items():
             if count:
                 self.last_seen[port] = now
                 self.idle_since = now
+        self.last_request = last_request
+        # Only a request newer than the current idle start counts, so one left
+        # from before this watchdog started (e.g. a previous run's, as /tmp
+        # outlives it outside Fly) is ignored.
+        if last_request is not None and last_request > self.idle_since:
+            self.idle_since = min(last_request, now)
         return not any(counts.values()) and self.idle_due(now)
 
     def idle_due(self, now: float) -> bool:
@@ -200,6 +253,7 @@ class Watchdog:
             "checked_at": _iso(self.checked_at),
             "check_interval_seconds": self.config.interval_seconds,
             "idle_timeout_seconds": self.config.idle_seconds,
+            "last_request_at": _iso(self.last_request),
             "idle_since": _iso(self.idle_since),
             "stop_due_at": _iso(self.idle_since + self.config.idle_seconds),
             "ports": [
@@ -240,6 +294,7 @@ def run(
     clock=time.time,
     sleep=time.sleep,
     count=count_connections,
+    request_time=last_request_time,
     getppid=os.getppid,
     kill=os.kill,
 ) -> int:
@@ -258,7 +313,9 @@ def run(
         if getppid() != master_pid:
             log(f"gunicorn master {master_pid} has exited, exiting")
             return 0
-        due = watchdog.check(clock(), count(config.ports))
+        due = watchdog.check(
+            clock(), count(config.ports), request_time(config.request_file)
+        )
         if due and config.mode == "stop":
             watchdog.stopping = True
         try:
@@ -268,15 +325,14 @@ def run(
         idle_minutes = config.idle_seconds / 60
         if watchdog.stopping:
             log(
-                f"no connections for {idle_minutes:g} minutes, sending SIGTERM to"
+                f"no activity for {idle_minutes:g} minutes, sending SIGTERM to"
                 f" gunicorn master {master_pid}"
             )
             kill(master_pid, signal.SIGTERM)
             return 0
         if due and not reported_due:
             log(
-                f"no connections for {idle_minutes:g} minutes"
-                " (monitor mode: not stopping)"
+                f"no activity for {idle_minutes:g} minutes (monitor mode: not stopping)"
             )
         reported_due = due
         sleep(config.interval_seconds)

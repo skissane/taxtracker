@@ -231,14 +231,17 @@ passes `--pty` only when run from a terminal:
 ./flyssh.sh python manage.py showmigrations
 ```
 
-If the Machine is stopped, `./flyssh.sh` starts it first (this needs `jq`).
+If the Machine isn't running, `./flyssh.sh` starts it first, waiting for it to
+finish stopping if need be (this needs `jq`).
 The Machine auto-stops when idle, and Fly judges that by HTTP traffic through
 its proxy, not SSH sessions, so a long session or command may still be cut off.
 
 The fix is the idle watchdog (`src/lifetracker/core/idle_watchdog.py`), which
 gunicorn starts as a separate process. It counts established connections to the
-app's port and SSH's (port 22) in `/proc/net/tcp` and `/proc/net/tcp6`, and once
-there have been none for a while it stops gunicorn gracefully. A clean exit
+app's port and SSH's (port 22) in `/proc/net/tcp` and `/proc/net/tcp6`. Most
+HTTP requests are over between two checks, so gunicorn's workers also touch a
+file after every request, which counts as activity too. Once there's been no
+activity for a while, the watchdog stops gunicorn gracefully. A clean exit
 leaves the Machine stopped until the next request starts it. It's off unless
 `LIFETRACKER_IDLE_STOP` is set:
 
@@ -248,8 +251,9 @@ leaves the Machine stopped until the next request starts it. It's off unless
 
 `LIFETRACKER_IDLE_STOP_MINUTES` sets the idle timeout (default 10). Other
 settings are `LIFETRACKER_IDLE_STOP_PORTS` (default `$PORT` or 8000, and 22),
-`LIFETRACKER_IDLE_STOP_INTERVAL_SECONDS` (default 30) and
-`LIFETRACKER_IDLE_STOP_STATUS_FILE`. Every check, it writes its status as JSON
+`LIFETRACKER_IDLE_STOP_INTERVAL_SECONDS` (default 30),
+`LIFETRACKER_IDLE_STOP_REQUEST_FILE` (the file the workers touch, default
+`/tmp/lifetracker-last-request`) and `LIFETRACKER_IDLE_STOP_STATUS_FILE`. Every check, it writes its status as JSON
 to that file (default `/tmp/lifetracker-idle-watchdog.json`). It logs to stderr,
 so on Fly its messages are in `./flyctl.sh logs`. It needs Linux, as it reads
 `/proc/net`; the Docker image is Linux even on a macOS host, so it works with

@@ -53,11 +53,24 @@ machine="$("$dir/flyctl.sh" machine list --json \
   | jq -r '.[0] // error("the app has no Fly Machine") | "\(.id) \(.state)"')"
 id="${machine%% *}"
 state="${machine#* }"
-if [ "$state" != started ]; then
-  echo "flyssh.sh: starting Machine $id (it's $state)" >&2
-  "$dir/flyctl.sh" machine start "$id" >&2
-  "$dir/flyctl.sh" machine wait "$id" --state started >&2
-fi
+# Starting a Machine that's still stopping or suspending (as just after an idle
+# stop) may fail, so wait for that to finish first.
+case "$state" in
+  started) ;;
+  starting)
+    echo "flyssh.sh: waiting for Machine $id to start" >&2
+    "$dir/flyctl.sh" machine wait "$id" --state started >&2
+    ;;
+  *)
+    case "$state" in
+      stopping) "$dir/flyctl.sh" machine wait "$id" --state stopped >&2 ;;
+      suspending) "$dir/flyctl.sh" machine wait "$id" --state suspended >&2 ;;
+    esac
+    echo "flyssh.sh: starting Machine $id (it's $state)" >&2
+    "$dir/flyctl.sh" machine start "$id" >&2
+    "$dir/flyctl.sh" machine wait "$id" --state started >&2
+    ;;
+esac
 
 exec "$dir/flyctl.sh" ssh console --machine "$id" ${pty[@]+"${pty[@]}"} \
   --command="$command"
