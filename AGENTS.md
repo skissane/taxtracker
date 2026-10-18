@@ -98,7 +98,7 @@ referencing these as `tests.*` labels rather than the `lifetracker.*` app labels
 
 **Screenshots:** `screenshot_tests/` holds Playwright tests that drive a headless Chromium
 against pytest-django's `live_server` (empty test DB) and save full-page PNGs to the gitignored
-`screenshots/` directory (each screen as `<name>-light.png` and `<name>-dark.png`), for eyeballing UI changes. `just screenshots` sets `LIFETRACKER_COMMIT_ID` to `git rev-parse HEAD` unless it's already set, so the admin header shows the commit; the `screenshots` CI job sets it to the PR's head commit (`github.event.pull_request.head.sha`, falling back to `github.sha` off PRs), since on a PR `actions/checkout` checks out a merge commit. They're run by `just screenshots`
+`screenshots/` directory (each screen as `<name>-light.png` and `<name>-dark.png`), for eyeballing UI changes. `just screenshots` sets `LIFETRACKER_COMMIT_ID` to `git rev-parse HEAD` unless it's already set, so the admin header shows the commit; the `screenshots` CI job sets it to the PR's head commit (`github.event.pull_request.head.sha`, falling back to `github.sha` off PRs), since on a PR `actions/checkout` checks out a merge commit. The tests are run by `just screenshots`
 (which also runs `playwright install chromium`): they're outside `testpaths`, so `pytest`,
 `just coverage` and the `test` job never collect or measure them, and Playwright is in its own
 `screenshots` dependency group, which only the `screenshots` CI job installs. That job (which
