@@ -1,0 +1,104 @@
+{% extends "admin/base_site.html" %}
+
+{% load i18n static %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'taxtracker/buttons.css' %}">
+  <style>
+  .tt-folders {
+    margin-bottom: 1em;
+  }
+
+  .tt-folders a,
+  .tt-folders strong {
+    margin-right: 1em;
+  }
+
+  .tt-backups {
+    width: 100%;
+  }
+
+  .tt-backups .tt-num {
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .tt-footer {
+    margin-top: 1.5em;
+  }
+  </style>
+{% endblock extrastyle %}
+{% block breadcrumbs %}
+  <ol class="breadcrumbs">
+    <li><a href="{% url 'admin:index' %}">{% trans "Home" %}</a></li>
+    <li><a href="{% url 'admin:app_list' app_label='taxtracker' %}">Tax Tracker</a></li>
+    <li><a href="{% url 'admin:taxtracker_financialyear_changelist' %}">Financial Years</a></li>
+    <li><a href="{% url 'admin:taxtracker_financialyear_cloud_backup_status' %}">Cloud Backup Status</a></li>
+    <li aria-current="page">Cloud Backups</li>
+  </ol>
+{% endblock breadcrumbs %}
+{% block content %}
+  {% if missing_required %}
+    <p class="errornote">
+      Backups can't be listed until these settings are configured:
+      {% for name in missing_required %}
+        <code>{{ name }}</code>{% if not forloop.last %},{% endif %}
+      {% endfor %}
+    </p>
+  {% endif %}
+  {% if folders %}
+    <p class="tt-folders">
+      Show:
+      {% for folder in folders %}
+        {% if folder == prefix %}
+          <strong><code>{{ folder }}</code>{% if folder == own_prefix %} (this instance){% endif %}</strong>
+        {% else %}
+          <a href="?prefix={{ folder|urlencode }}"><code>{{ folder }}</code>{% if folder == own_prefix %} (this instance){% endif %}</a>
+        {% endif %}
+      {% endfor %}
+      {% if prefix %}
+        <a href="?prefix=">All</a>
+      {% else %}
+        <strong>All</strong>
+      {% endif %}
+    </p>
+  {% endif %}
+  {% if objects is not None %}
+    <p>
+      Bucket <code>{{ bucket_name }}</code>,
+      {% if prefix %}
+        prefix <code>{{ prefix }}</code>:
+      {% else %}
+        all objects:
+      {% endif %}
+      {{ objects|length }} object{{ objects|length|pluralize }}, {{ total_size|filesizeformat }} in total.
+    </p>
+    {% if objects %}
+      <table class="tt-backups">
+        <thead>
+          <tr>
+            <th scope="col">Key</th>
+            <th scope="col" class="tt-num">Size</th>
+            <th scope="col" class="tt-num">Last Modified</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for obj in objects %}
+            <tr>
+              <td>
+                <code>{{ obj.key }}</code>
+              </td>
+              <td class="tt-num">{{ obj.size|filesizeformat }}</td>
+              <td class="tt-num">{{ obj.last_modified|date:"Y-m-d H:i:s T" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  {% endif %}
+  <div class="tt-footer">
+    <a class="button cancel"
+       href="{% url 'admin:taxtracker_financialyear_cloud_backup_status' %}">Back</a>
+  </div>
+{% endblock content %}

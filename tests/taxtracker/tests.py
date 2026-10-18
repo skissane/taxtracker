@@ -863,6 +863,186 @@ class AdminViewTests(TestCase):
             "backup status.",
         )
 
+    def test_cloud_backup_status_links_to_list(self):
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_status")
+        response = self.client.get(url)
+        self.assertContains(
+            response, reverse("admin:taxtracker_financialyear_cloud_backup_list")
+        )
+
+    def _mock_bucket_listing(self, mock_client, folders, objects):
+        """Make the mocked S3 client's paginator return *folders* for the
+        delimited top-level listing and *objects* (split across two pages)
+        for the prefixed one."""
+
+        def paginate(**kwargs):
+            if kwargs.get("Delimiter") == "/":
+                return [{"CommonPrefixes": [{"Prefix": f} for f in folders]}, {}]
+            matching = [o for o in objects if o["Key"].startswith(kwargs["Prefix"])]
+            return [{"Contents": matching[:1]}, {"Contents": matching[1:]}]
+
+        paginator = mock_client.return_value.get_paginator.return_value
+        paginator.paginate.side_effect = paginate
+        return paginator
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_ENDPOINT_URL="https://example.invalid",
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_REGION_NAME="auto",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+        LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
+    )
+    @mock.patch("lifetracker.taxtracker.admin.boto3.client")
+    def test_cloud_backup_list_defaults_to_own_hostname(self, mock_client):
+        utc = datetime.UTC
+        paginator = self._mock_bucket_listing(
+            mock_client,
+            folders=["other-host/", "test-host.local/"],
+            objects=[
+                {
+                    "Key": "test-host.local/db-backup.2026-01-01.00.00.00.sqlite3",
+                    "Size": 1024,
+                    "LastModified": datetime.datetime(2026, 1, 1, tzinfo=utc),
+                },
+                {
+                    "Key": "test-host.local/db-backup.2026-03-01.00.00.00.sqlite3",
+                    "Size": 2048,
+                    "LastModified": datetime.datetime(2026, 3, 1, tzinfo=utc),
+                },
+                {
+                    "Key": "other-host/db-backup.2026-02-01.00.00.00.sqlite3",
+                    "Size": 4096,
+                    "LastModified": datetime.datetime(2026, 2, 1, tzinfo=utc),
+                },
+            ],
+        )
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_list")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        mock_client.assert_called_once_with(
+            "s3",
+            endpoint_url="https://example.invalid",
+            region_name="auto",
+            aws_access_key_id="access-key",
+            aws_secret_access_key="secret-key",
+            config=CLOUD_BACKUP_S3_CONFIG,
+        )
+        mock_client.return_value.get_paginator.assert_called_with("list_objects_v2")
+        paginator.paginate.assert_any_call(Bucket="test-bucket", Delimiter="/")
+        paginator.paginate.assert_any_call(
+            Bucket="test-bucket", Prefix="test-host.local/"
+        )
+        keys = [obj["key"] for obj in response.context["objects"]]
+        self.assertEqual(
+            keys,
+            [
+                "test-host.local/db-backup.2026-03-01.00.00.00.sqlite3",
+                "test-host.local/db-backup.2026-01-01.00.00.00.sqlite3",
+            ],
+        )
+        self.assertNotContains(response, "other-host/db-backup")
+        self.assertContains(response, "2 objects, 3.0\xa0KB in total.")
+        self.assertContains(response, '<td class="tt-num">2.0\xa0KB</td>', html=True)
+        # The other hostname's folder and "All" are offered as links.
+        self.assertContains(
+            response, '<a href="?prefix=other-host/"><code>other-host/</code></a>'
+        )
+        self.assertContains(response, '<a href="?prefix=">All</a>', html=True)
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+        LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
+    )
+    @mock.patch("lifetracker.taxtracker.admin.boto3.client")
+    def test_cloud_backup_list_all_prefixes(self, mock_client):
+        utc = datetime.UTC
+        paginator = self._mock_bucket_listing(
+            mock_client,
+            folders=["other-host/"],
+            objects=[
+                {
+                    "Key": "other-host/db-backup.2026-02-01.00.00.00.sqlite3",
+                    "Size": 4096,
+                    "LastModified": datetime.datetime(2026, 2, 1, tzinfo=utc),
+                },
+            ],
+        )
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_list")
+        response = self.client.get(url, {"prefix": ""})
+        paginator.paginate.assert_any_call(Bucket="test-bucket", Prefix="")
+        self.assertContains(response, "other-host/db-backup.2026-02-01.00.00.00")
+        self.assertContains(response, "all objects:")
+        self.assertContains(response, "<strong>All</strong>", html=True)
+        # This instance's folder is offered even though it has no backups yet.
+        self.assertEqual(
+            response.context["folders"], ["other-host/", "test-host.local/"]
+        )
+        self.assertContains(response, "(this instance)")
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="",
+    )
+    @mock.patch("lifetracker.taxtracker.admin.boto3.client")
+    def test_cloud_backup_list_with_missing_settings(self, mock_client):
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_list")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Backups can't be listed until")
+        self.assertContains(
+            response, "<code>LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID</code>", html=True
+        )
+        self.assertIsNone(response.context["objects"])
+        mock_client.assert_not_called()
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    )
+    @mock.patch("lifetracker.taxtracker.admin.boto3.client")
+    def test_cloud_backup_list_s3_error_shows_message(self, mock_client):
+        paginator = mock_client.return_value.get_paginator.return_value
+        paginator.paginate.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
+            "ListObjectsV2",
+        )
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_list")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Failed to list cloud backups:")
+        self.assertContains(response, "AccessDenied")
+
+    @override_settings(
+        LIFETRACKER_BACKUP_S3_ENDPOINT_URL="not a url",
+        LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+        LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+        LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    )
+    def test_cloud_backup_list_invalid_endpoint_shows_message(self):
+        # Uses the real boto3.client, which raises ValueError for this endpoint.
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_list")
+        response = self.client.get(url)
+        self.assertContains(
+            response,
+            "Failed to list cloud backups: Invalid S3 configuration: "
+            "Invalid endpoint: not a url",
+        )
+
+    def test_cloud_backup_list_requires_superuser(self):
+        non_super = User.objects.create_user("regular3", "r3@example.com", "pass")
+        non_super.is_staff = True
+        non_super.save()
+        client = Client()
+        client.login(username="regular3", **{"password": "pass"})
+        url = reverse("admin:taxtracker_financialyear_cloud_backup_list")
+        response = client.get(url)
+        self.assertEqual(response.status_code, 403)
+
     def test_item_changelist_shows_year_link(self):
         url = reverse("admin:taxtracker_item_changelist")
         response = self.client.get(url)

@@ -932,6 +932,11 @@ class FinancialYearAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.cloud_backup_status_view),
                 name="taxtracker_financialyear_cloud_backup_status",
             ),
+            path(
+                "cloud-backup/list/",
+                self.admin_site.admin_view(self.cloud_backup_list_view),
+                name="taxtracker_financialyear_cloud_backup_list",
+            ),
         ]
         return custom + super().get_urls()
 
@@ -1140,6 +1145,23 @@ class FinancialYearAdmin(admin.ModelAdmin):
             if not value
         ]
 
+    def _cloud_backup_s3_client(self):
+        """Return a boto3 S3 client for the configured backup bucket."""
+        endpoint_url = settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL or None
+        region_name = settings.LIFETRACKER_BACKUP_S3_REGION_NAME or None
+        try:
+            return boto3.client(
+                "s3",
+                endpoint_url=endpoint_url,
+                region_name=region_name,
+                aws_access_key_id=settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY,
+                config=CLOUD_BACKUP_S3_CONFIG,
+            )
+        except ValueError as exc:
+            # e.g. a malformed endpoint URL ("Invalid endpoint: ...").
+            raise RuntimeError(f"Invalid S3 configuration: {exc}") from exc
+
     def _run_cloud_backup_now(self):
         """Run a cloud backup upload.
 
@@ -1165,20 +1187,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
         object_key = (
             f"{settings.LIFETRACKER_BACKUP_HOSTNAME}/db-backup.{timestamp}.sqlite3"
         )
-        endpoint_url = settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL or None
-        region_name = settings.LIFETRACKER_BACKUP_S3_REGION_NAME or None
-        try:
-            s3_client = boto3.client(
-                "s3",
-                endpoint_url=endpoint_url,
-                region_name=region_name,
-                aws_access_key_id=settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY,
-                config=CLOUD_BACKUP_S3_CONFIG,
-            )
-        except ValueError as exc:
-            # e.g. a malformed endpoint URL ("Invalid endpoint: ...").
-            raise RuntimeError(f"Invalid S3 configuration: {exc}") from exc
+        s3_client = self._cloud_backup_s3_client()
         s3_client.put_object(
             Bucket=settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
             Key=object_key,
@@ -1251,6 +1260,70 @@ class FinancialYearAdmin(admin.ModelAdmin):
         return render(
             request,
             "admin/taxtracker/financialyear/cloud_backup_status.html",
+            context,
+        )
+
+    def _list_cloud_backups(self, prefix):
+        """List the bucket's top-level folders and the objects under *prefix*.
+
+        Returns ``(folders, objects)``: the top-level folder prefixes (one per
+        backup hostname), sorted, and the objects whose keys start with
+        *prefix*, newest first.
+        """
+        s3_client = self._cloud_backup_s3_client()
+        bucket = settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME
+        paginator = s3_client.get_paginator("list_objects_v2")
+        folders = sorted(
+            common_prefix["Prefix"]
+            for page in paginator.paginate(Bucket=bucket, Delimiter="/")
+            for common_prefix in page.get("CommonPrefixes", [])
+        )
+        objects = [
+            {
+                "key": obj["Key"],
+                "size": obj["Size"],
+                "last_modified": obj["LastModified"],
+            }
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix)
+            for obj in page.get("Contents", [])
+        ]
+        objects.sort(key=lambda obj: (obj["last_modified"], obj["key"]), reverse=True)
+        return folders, objects
+
+    def cloud_backup_list_view(self, request):
+        if not request.user.is_superuser:
+            raise PermissionDenied
+
+        # No "prefix" parameter means this instance's own backups; an empty one
+        # means everything in the bucket.
+        own_prefix = f"{settings.LIFETRACKER_BACKUP_HOSTNAME}/"
+        prefix = request.GET.get("prefix", own_prefix)
+        missing_required = self._missing_cloud_backup_settings()
+        folders = []
+        objects = None
+        if not missing_required:
+            try:
+                folders, objects = self._list_cloud_backups(prefix)
+                # Offer this instance's folder even before its first backup.
+                folders = sorted({*folders, own_prefix})
+            except (BotoCoreError, ClientError, RuntimeError) as exc:
+                messages.error(request, f"Failed to list cloud backups: {exc}")
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Cloud Backups",
+            "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
+            "prefix": prefix,
+            "own_prefix": own_prefix,
+            "folders": folders,
+            "objects": objects,
+            "total_size": sum(obj["size"] for obj in objects or []),
+            "missing_required": missing_required,
+            "opts": self.model._meta,
+        }
+        return render(
+            request,
+            "admin/taxtracker/financialyear/cloud_backup_list.html",
             context,
         )
 
