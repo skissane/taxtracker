@@ -22,6 +22,10 @@ requirements-fix:
 lock-os-arch-check:
     uv run --no-project python scripts/validate_uv_lock_os_arch.py
 
+# Check Git-tracked text files for trailing whitespace and bad newlines
+whitespace-check:
+    uv run --no-project python scripts/check_whitespace.py
+
 # Lint Python code with ruff
 lint:
     uv run --group dev ruff check .
@@ -132,8 +136,8 @@ docker-shell *args:
 fly-setup *args:
     ./fly-setup.sh "$@"
 
-# Run every ruff/djlint lint and format-check step (no fixes, no tests)
-check: lint fmt-check lint-templates fmt-check-templates
+# Run every whitespace, ruff and djlint check (no fixes, no tests)
+check: whitespace-check lint fmt-check lint-templates fmt-check-templates
 
 # Autofix lint issues and reformat code/templates
 fix: lint-fix fmt fmt-templates
