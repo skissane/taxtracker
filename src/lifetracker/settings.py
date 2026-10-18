@@ -174,6 +174,8 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # First, so its timing (admin footer, Server-Timing) covers the rest.
+    "lifetracker.core.timing.RequestTimingMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
