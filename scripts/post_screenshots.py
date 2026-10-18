@@ -27,7 +27,7 @@ def _screenshot_paths(directory: Path) -> list[Path]:
     if not paths:
         raise ValueError(f"no screenshots (*.png) in {directory}")
     for path in paths:
-        if not _NAME_RE.match(path.name):
+        if not _NAME_RE.fullmatch(path.name):
             raise ValueError(
                 f"screenshot name {path.name!r} doesn't match {_NAME_RE.pattern}"
             )
@@ -79,7 +79,7 @@ def _request(
         if urllib.parse.urlsplit(url).hostname == host:
             request.add_header("Authorization", f"Bearer {token}")
         try:
-            with urllib.request.urlopen(request) as response:
+            with urllib.request.urlopen(request, timeout=60) as response:
                 payload = response.read()
             return json.loads(payload) if payload else None
         except urllib.error.HTTPError as e:
@@ -210,7 +210,7 @@ def main(argv: list[str]) -> int:
             detail = e.read().decode(errors="replace")
         print(f"HTTP {e.code} from {e.filename}:\n{detail}", file=sys.stderr)
         return 1
-    except RuntimeError as e:
+    except (urllib.error.URLError, TimeoutError, RuntimeError) as e:
         print(e, file=sys.stderr)
         return 1
     print(f"Posted {len(paths)} screenshot(s) to PR #{args.pr}.")

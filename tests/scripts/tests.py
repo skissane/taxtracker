@@ -297,6 +297,8 @@ class PostScreenshotsTests(SimpleTestCase):
         def fake_request(method, url, token, *, json_body=None, data=None, **kw):
             requests.append((method, url, token, json_body, data))
             if fail and method == fail[0] and url.startswith(fail[1]):
+                if len(fail) > 2:
+                    raise fail[2]
                 raise urllib.error.HTTPError(
                     url, 403, "Forbidden", {}, io.BytesIO(b"nope")
                 )
@@ -431,6 +433,14 @@ class PostScreenshotsTests(SimpleTestCase):
         self.assertIn("nope", stderr)
         self.assertEqual(self._writes(requests)[1:], [])
 
+    def test_network_error_reported(self):
+        code, stderr, _ = self._run(
+            ["index.png"],
+            fail=("POST", "https://uploads.", urllib.error.URLError("unreachable")),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("unreachable", stderr)
+
     def test_upload_without_url_fails(self):
         code, stderr, requests = self._run(["index.png"], asset_url=False)
         self.assertEqual(code, 1)
@@ -501,6 +511,7 @@ class PostScreenshotsRequestTests(SimpleTestCase):
             )
         self.assertEqual(result, {"a": 1})
         request = urlopen.call_args.args[0]
+        self.assertEqual(urlopen.call_args.kwargs, {"timeout": 60})
         self.assertEqual(request.get_method(), "POST")
         self.assertEqual(request.data, b'{"b": 2}')
         self.assertEqual(request.get_header("Content-type"), "application/json")
