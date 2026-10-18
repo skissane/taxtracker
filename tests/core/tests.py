@@ -3196,7 +3196,11 @@ class IdleWatchdogAdminViewTests(TestCase):
 
         response = self.client.get(self.URL)
 
-        self.assertContains(response, "has probably stopped running")
+        self.assertContains(
+            response,
+            "hasn't checked for longer than 3 check intervals, so it has probably"
+            " stopped running",
+        )
         self.assertContains(response, "Stopping gunicorn")
 
     def test_page_without_status(self):

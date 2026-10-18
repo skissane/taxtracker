@@ -464,6 +464,7 @@ def idle_watchdog_page_context(now=None):
     status["stale"] = (
         now - last_sign_of_life
     ).total_seconds() > _IDLE_WATCHDOG_STALE_INTERVALS * interval
+    status["stale_intervals"] = _IDLE_WATCHDOG_STALE_INTERVALS
     for name in ("last_request_at", "idle_since"):
         value = status[name]
         status[f"{name}_ago"] = (

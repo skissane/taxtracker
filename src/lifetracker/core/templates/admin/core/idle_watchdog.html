@@ -50,7 +50,7 @@
     {% if status %}
       {% if status.stale %}
         <p class="errornote">
-          The watchdog hasn't checked for longer than three check intervals, so it has probably stopped running.
+          The watchdog hasn't checked for longer than {{ status.stale_intervals }} check intervals, so it has probably stopped running.
         </p>
       {% endif %}
       <div class="lt-info-box">
