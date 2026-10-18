@@ -112,7 +112,8 @@ PNGs as one PR comment via `gh pr comment --attach`, then deletes the previous c
 posted, found by a hidden `<!-- lifetracker-screenshots -->` marker and the posting user
 (not `--edit-last`, which edits that user's last comment of any kind). gh's `--attach` refuses
 installation tokens such as `GITHUB_TOKEN`, so it posts with the `SCREENSHOTS_TOKEN` Actions
-secret, a fine-grained PAT for this repo with read/write Contents and Pull requests, and
+secret, a fine-grained PAT for this repo with only Pull requests: read and write (enough to
+upload, post and delete; Contents and Issues aren't needed), and
 the job fails if it's unset; comments therefore appear as that token's user. It installs a
 pinned gh release (checked by SHA-256) since the runner's may predate `--attach`. It's skipped
 for fork PRs and Dependabot, which don't get the secret; it runs the PR branch's script but
