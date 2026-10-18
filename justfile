@@ -68,6 +68,17 @@ screenshots:
     uv run --group screenshots playwright install chromium
     uv run --group dev --group screenshots pytest screenshot_tests -n 0
 
+# screenshots-post's arguments are a PR number and, optionally, --commit and
+# --run-url for the comment's "Taken for" line. It posts as whoever gh is
+# logged in as (GH_TOKEN in CI), and needs a gh with `--attach` (2.102.0 has
+# it). It deletes that user's previous screenshot comment on the PR, found by a
+# hidden marker, once the new one is up.
+
+# Post screenshots/ to a PR as a comment, replacing the previous one
+[positional-arguments]
+screenshots-post *args:
+    uv run --no-project python scripts/post_screenshots.py "$@"
+
 # Build the container image
 docker-build:
     docker build --build-arg LIFETRACKER_COMMIT_ID="$(git rev-parse HEAD)" -t lifetracker .

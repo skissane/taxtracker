@@ -1,11 +1,16 @@
 import contextlib
 import io
+import json
+import subprocess
 import tempfile
 import textwrap
 from pathlib import Path
+from unittest import mock
 
 from django.test import SimpleTestCase
 
+from scripts.post_screenshots import MARKER
+from scripts.post_screenshots import main as post_screenshots_main
 from scripts.requirements_min_versions import main
 from scripts.validate_uv_lock_os_arch import (
     PlatformClassification,
@@ -276,3 +281,121 @@ class ValidateUvLockOsArchTests(SimpleTestCase):
     def test_wheel_without_location_rejected(self):
         with self.assertRaisesRegex(ValueError, "no url, path or filename"):
             self._run_wheels('hash = "sha256:00"')
+
+
+class PostScreenshotsTests(SimpleTestCase):
+    def _run(
+        self, filenames, *args, comments=(), fail_post=False
+    ) -> tuple[int, str, list[tuple[str, ...]], list[str | None]]:
+        """Run main() on PR 7 in a temp dir whose screenshots/ holds the given
+        (empty) files, with gh faked: it is logged in as "me" and the PR has
+        the given comments. Return the exit code, stderr, and the arguments and
+        stdin of each gh call."""
+        calls, inputs = [], []
+
+        def fake_run(cmd, input=None, **kwargs):
+            self.assertEqual(cmd[0], "gh")
+            calls.append(tuple(cmd[1:]))
+            inputs.append(input)
+            stdout = ""
+            if cmd[1:3] == ["api", "user"]:
+                stdout = "me\n"
+            elif cmd[1:4] == ["api", "--paginate", "--slurp"]:
+                stdout = json.dumps([list(comments)])
+            elif cmd[1:3] == ["pr", "comment"] and fail_post:
+                raise subprocess.CalledProcessError(1, cmd, stderr="upload refused")
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            (path / "screenshots").mkdir()
+            for filename in filenames:
+                (path / "screenshots" / filename).touch()
+            stderr = io.StringIO()
+            with (
+                contextlib.chdir(path),
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(stderr),
+                mock.patch("scripts.post_screenshots.subprocess.run", fake_run),
+            ):
+                code = post_screenshots_main(["7", *args])
+        return code, stderr.getvalue(), calls, inputs
+
+    def test_posts_comment_with_attachments(self):
+        code, _, calls, inputs = self._run(
+            ["login.png", "index.png", "notes.txt"],
+            "--commit",
+            "abc1234",
+            "--run-url",
+            "https://example.com/run",
+        )
+        self.assertEqual(code, 0)
+        post = calls.index(
+            (
+                "pr",
+                "comment",
+                "7",
+                "--body-file",
+                "-",
+                "--attach",
+                "screenshots/index.png",
+                "--attach",
+                "screenshots/login.png",
+            )
+        )
+        body = inputs[post]
+        self.assertTrue(body.startswith(MARKER + "\n"))
+        self.assertIn(
+            "Taken for abc1234 by [this workflow run](https://example.com/run).",
+            body,
+        )
+        # Sorted by name, and referencing the attached paths so gh rewrites them.
+        self.assertLess(
+            body.index("![index](screenshots/index.png)"),
+            body.index("![login](screenshots/login.png)"),
+        )
+        self.assertNotIn("notes", body)
+
+    def test_replaces_own_previous_comments_only(self):
+        comments = [
+            {"id": 1, "user": {"login": "me"}, "body": MARKER + "\nold"},
+            {"id": 2, "user": {"login": "me"}, "body": "a review reply"},
+            {"id": 3, "user": {"login": "someone"}, "body": MARKER + "\ntheirs"},
+            {"id": 4, "user": {"login": "me"}, "body": MARKER + "\nolder"},
+        ]
+        code, _, calls, _ = self._run(["index.png"], comments=comments)
+        self.assertEqual(code, 0)
+        deletes = [c for c in calls if c[:3] == ("api", "--method", "DELETE")]
+        self.assertEqual(
+            deletes,
+            [
+                ("api", "--method", "DELETE", "repos/{owner}/{repo}/issues/comments/1"),
+                ("api", "--method", "DELETE", "repos/{owner}/{repo}/issues/comments/4"),
+            ],
+        )
+        # Deleted only after the new comment is posted.
+        post = next(i for i, c in enumerate(calls) if c[:2] == ("pr", "comment"))
+        self.assertLess(post, calls.index(deletes[0]))
+
+    def test_failed_post_deletes_nothing(self):
+        comments = [{"id": 1, "user": {"login": "me"}, "body": MARKER + "\nold"}]
+        code, stderr, calls, _ = self._run(
+            ["index.png"], comments=comments, fail_post=True
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("upload refused", stderr)
+        self.assertFalse([c for c in calls if "DELETE" in c])
+
+    def test_no_screenshots(self):
+        code, stderr, calls, _ = self._run(["notes.txt"])
+        self.assertEqual(code, 1)
+        self.assertIn("no screenshots", stderr)
+        self.assertEqual(calls, [])
+
+    def test_unsafe_names_rejected(self):
+        for name in ["--help.png", "a b.png", "x](y).png", "Index.png"]:
+            with self.subTest(name):
+                code, stderr, calls, _ = self._run(["index.png", name])
+                self.assertEqual(code, 1)
+                self.assertIn("doesn't match", stderr)
+                self.assertEqual(calls, [])
