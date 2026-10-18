@@ -1,7 +1,27 @@
-# lifetracker
+# Life Tracker
 
-Personal life admin tracker app. Tax return tracking (`taxtracker`) is currently its
-only module.
+Personal life admin tracker app. It started out as Tax Tracker, which is why the
+repository (and so the published image) is still named `taxtracker`.
+
+It runs on Linux (x86_64 or aarch64) and macOS. Windows isn't supported.
+
+## What it does
+
+The whole UI is the Django admin, and `/` redirects to `/admin/`. It has two
+modules:
+
+- **Tax tracker:** a checklist of items for each Australian financial year (ending
+  30 June), arranged as a tree, with notes, a done/pending status and file
+  attachments. Each year has a summary page and a ZIP download of its attachments
+  with a Markdown index, and several years can be downloaded as one ZIP. **Copy to
+  new year** starts next year's checklist from this year's. An item can import PDFs
+  from a Fidelity `.har` file or a `.zip`, and move attachments dated outside its
+  year to the matching item in the right year.
+- **Task tracker:** tasks arranged as a tree, each pending or done, with notes and
+  file attachments. A task's type can let it link to another record in the app.
+
+Attachments are stored in the SQLite database rather than as separate files, so the
+database (and a backup of it) holds everything.
 
 ## Running locally
 
@@ -50,7 +70,9 @@ values unquoted.
 
 ## Docker
 
-Build the image with:
+CI publishes the image from every commit to `master` as
+`ghcr.io/skissane/taxtracker:latest` (and `:<commit SHA>`), which anyone can pull.
+It's built for x86_64 only. To build your own from your checkout instead, run:
 
 ```bash
 just docker-build
@@ -85,7 +107,8 @@ exports, DB backups and archive imports run in the request and can be slow for a
 large database. Change it with `LIFETRACKER_GUNICORN_TIMEOUT` (in seconds).
 On first start, `ensure_superuser` creates an `admin` user with a random password and
 prints it to the container log (`docker logs lifetracker`); on later starts it leaves
-the existing user's password alone. If you miss it (the log is gone once the
+the existing user's password alone, but turns its active, staff and superuser flags
+back on if any have been turned off. If you miss the password (the log is gone once the
 container exits), reset it with `just docker-shell python manage.py changepassword
 admin` (or, without `just`, `docker exec -it -u lifetracker lifetracker python
 manage.py changepassword admin`).
@@ -142,8 +165,8 @@ The image defaults to `LIFETRACKER_DEBUG=0`, and then refuses to start unless
 
 | Variable | Purpose |
 |---|---|
-| `LIFETRACKER_ALLOWED_HOSTS` | Required, except on Fly.io, where it defaults to `<app>.fly.dev`. Hostnames the app answers to, e.g. `tax.example.com`. |
-| `LIFETRACKER_CSRF_TRUSTED_ORIGINS` | Public origins, e.g. `https://tax.example.com`. Needed behind a TLS-terminating reverse proxy, or the admin login fails its CSRF check. |
+| `LIFETRACKER_ALLOWED_HOSTS` | Required, except on Fly.io, where it defaults to `<app>.fly.dev`. Hostnames the app answers to, e.g. `lifetracker.example.com`. |
+| `LIFETRACKER_CSRF_TRUSTED_ORIGINS` | Public origins, e.g. `https://lifetracker.example.com`. Needed behind a TLS-terminating reverse proxy, or the admin login fails its CSRF check. |
 | `LIFETRACKER_TRUST_X_FORWARDED_PROTO` | Set to `1` instead of listing origins, if the proxy always sets `X-Forwarded-Proto` and the container is reachable only through it. |
 | `LIFETRACKER_BACKUP_S3_*` | Optional. Cloud backup bucket and credentials; see [Cloud backup](#cloud-backup). |
 | `LIFETRACKER_GOOGLE_SSO_*` | Optional. Google sign-in client and allowed emails; see [Google sign-in](#google-sign-in). |
@@ -156,10 +179,13 @@ For example:
 
 ```bash
 docker run -d --name=lifetracker -p 127.0.0.1:8000:8000 -v lifetracker-data:/data \
-  -e LIFETRACKER_ALLOWED_HOSTS=tax.example.com \
-  -e LIFETRACKER_CSRF_TRUSTED_ORIGINS=https://tax.example.com \
-  lifetracker
+  -e LIFETRACKER_ALLOWED_HOSTS=lifetracker.example.com \
+  -e LIFETRACKER_CSRF_TRUSTED_ORIGINS=https://lifetracker.example.com \
+  ghcr.io/skissane/taxtracker:latest
 ```
+
+For an image you built with `just docker-build`, use `lifetracker` as the image
+name instead.
 
 With `DEBUG` off, session and CSRF cookies are marked `Secure`, so the app must be
 served over HTTPS (typically via the reverse proxy); over plain HTTP you can't log in.
@@ -204,7 +230,9 @@ configuration.
    `fly.toml`), the admin password, S3 and Google sign-in settings as Fly secrets, and the
    `FLY_APP` and `FLY_API_TOKEN` GitHub Actions secrets, the latter a new deploy
    token scoped to the app. It's safe to re-run, and never changes anything that already exists; to
-   change a value, use `fly secrets set` or `gh secret set` directly.
+   change a value, use `fly secrets set` or `gh secret set` directly. It refuses
+   a value in `.env` containing `#`, a quote, `\` or `$`, which Fly might store
+   differently; set that one with `fly secrets set` instead.
 3. If `FLY_API_TOKEN` already existed (e.g. from an earlier app, which its token
    is scoped to), run `just fly-setup --replace-token`. That always creates a new
    deploy token and overwrites the secret with it, so also use it to rotate the
@@ -278,7 +306,7 @@ It's configured with these environment variables (lists are comma-separated):
 | `LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET` | Required. The OAuth client's secret. Google sign-in is enabled only when both this and the client ID are set; otherwise the login page shows no Google button and `/google_sso/` returns 404. |
 | `LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS` | Google email addresses allowed to sign in, e.g. `me@gmail.com`. Empty (the default) means no one can, even with the client configured. |
 | `LIFETRACKER_GOOGLE_SSO_PROJECT_ID` | Optional. The Google Cloud project ID; not needed to sign in. |
-| `LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN` | Optional. Host (and port, if any) used to build the callback URL that Google redirects back to, e.g. `tax.example.com`. Defaults to the host of the request, which is normally right; set it if the app is reached through a proxy that rewrites the `Host` header. |
+| `LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN` | Optional. Host (and port, if any) used to build the callback URL that Google redirects back to, e.g. `lifetracker.example.com`. Defaults to the host of the request, which is normally right; set it if the app is reached through a proxy that rewrites the `Host` header. |
 
 The callback URL is `<scheme>://<host>/google_sso/callback/`, and it must exactly
 match one of the client's authorized redirect URIs in Google Cloud, or Google
@@ -361,3 +389,35 @@ For another host, pass the same variables to the container with `-e` or
 HTTPS through a proxy that sets `X-Forwarded-Proto: https`, so the callback URL is
 `https`; the callback URL takes the scheme from that header regardless of
 `LIFETRACKER_TRUST_X_FORWARDED_PROTO`.
+
+## Command-line utilities
+
+The `lifetracker-cli` command has a few standalone helpers for preparing files to
+attach, separate from the web app: extracting attachments from `.eml` files and PDFs
+from Fidelity `.har` files, filtering ZIPs, converting ZIPs of `.eml` files to PDF or
+text, and grouping lists of dates by financial year. List them with:
+
+```bash
+uv run lifetracker-cli --help
+```
+
+and run `uv run lifetracker-cli <command> --help` for each one's options.
+`zip-eml-to-pdf` also needs [wkhtmltopdf](https://wkhtmltopdf.org/) installed.
+
+## Development
+
+The project's tasks are [just](https://just.systems/) recipes (the `Makefile` only
+forwards to `just`). Run `just --list` to see them all. The main ones:
+
+| Command | What it does |
+|---|---|
+| `just test` | Runs the test suite (pytest, in parallel across CPU cores). |
+| `just check` | Runs the whitespace, ruff and djlint checks, without fixing anything. |
+| `just fix` | Fixes lint issues and reformats code and templates. |
+| `just coverage` | Runs the tests and prints a coverage report. |
+| `just screenshots` | Saves light and dark mode screenshots of admin pages to `screenshots/`, using a headless Chromium it installs with Playwright. |
+| `just ci` | Runs everything CI runs, including building the Docker image. |
+
+On a pull request, CI also takes the screenshots and posts them as a comment on it.
+
+[`AGENTS.md`](AGENTS.md) has more detail on the code's layout, CI and conventions.
