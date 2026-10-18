@@ -1,13 +1,34 @@
 {% extends "admin/base_site.html" %}
 
+{% load page_timing %}
+
 {% comment %}
   Extends the admin's own base_site.html (Django skips this file when resolving
   the same name), adding top bar links to admin pages that belong to no model,
-  so have no admin index entry. If these grow numerous, make them a menu.
+  so have no admin index entry. If these grow numerous, make them a menu. Also
+  adds the page generation time (see core/timing.py) to every page's footer.
 {% endcomment %}
+{% block extrastyle %}
+  {{ block.super }}
+  <style>
+    .lt-page-time {
+      color: var(--body-quiet-color);
+      font-size: 0.75rem;
+      text-align: right;
+      margin: 0 40px 10px;
+    }
+  </style>
+{% endblock extrastyle %}
 {% block userlinks %}
   {% if user.is_active and user.is_superuser %}
     <a href="{% url 'admin:idle_watchdog' %}">Idle Watchdog</a> /
   {% endif %}
   {{ block.super }}
 {% endblock userlinks %}
+{% block footer %}
+  {{ block.super }}
+  {% page_generation_time as seconds %}
+  {% if seconds %}
+    <p class="lt-page-time">Page generated in {{ seconds }} seconds</p>
+  {% endif %}
+{% endblock footer %}
