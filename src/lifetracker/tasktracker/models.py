@@ -1,5 +1,3 @@
-import datetime
-import re
 from pathlib import Path
 
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -7,7 +5,8 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import models
 
-from lifetracker.core.models import FileExtension, FileType, database_storage
+from lifetracker.core.attachments import AttachmentAutofillMixin
+from lifetracker.core.models import FileType, database_storage
 
 # The pk of the built-in "Generic" task type, created by a data migration.
 # Its name and (lack of) content_type are pinned by both a DB-level check
@@ -234,19 +233,7 @@ class Task(models.Model):
         return path
 
 
-_DATE_IN_FILENAME_RE = re.compile(r"(?<!\d)(\d{4})-?(\d{2})-?(\d{2})")
-
-
-def _extract_date_from_filename(name: str) -> datetime.date | None:
-    for m in _DATE_IN_FILENAME_RE.finditer(name):
-        try:
-            return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-        except ValueError:
-            continue
-    return None
-
-
-class TaskAttachment(models.Model):
+class TaskAttachment(AttachmentAutofillMixin, models.Model):
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="attachments")
     title = models.CharField(
         max_length=255,
@@ -286,26 +273,3 @@ class TaskAttachment(models.Model):
         else:
             label = "(no file)"
         return f"{label} ({self.task})"
-
-    def save(self, *args, **kwargs):
-        if not self.title and self.file:
-            self.title = Path(self.file.name).name
-        if not self.file_type_id and self.file:
-            ext = Path(self.file.name).suffix.lstrip(".").lower()
-            if ext:
-                try:
-                    fe = FileExtension.objects.get(extension=ext)
-                    self.file_type = fe.file_type
-                except FileExtension.DoesNotExist:
-                    pass
-        if self.date is None and self.file:
-            extracted = _extract_date_from_filename(Path(self.file.name).name)
-            if extracted is not None:
-                self.date = extracted
-        super().save(*args, **kwargs)
-
-    def delete(self, *args, **kwargs):
-        file_name = self.file.name if self.file else None
-        super().delete(*args, **kwargs)
-        if file_name:
-            self.file.storage.delete(file_name)

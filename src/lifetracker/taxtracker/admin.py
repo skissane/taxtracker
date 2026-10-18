@@ -12,6 +12,7 @@ from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils.html import format_html
 
+from lifetracker.core.attachments import extract_date_from_filename
 from lifetracker.core.models import DBStoredFile
 from lifetracker.taxtracker.archives import (
     UnsupportedArchiveError,
@@ -28,7 +29,6 @@ from lifetracker.taxtracker.models import (
     FinancialYearStatusHistory,
     Item,
     ReceivedDocument,
-    _extract_date_from_filename,
 )
 
 # ---------------------------------------------------------------------------
@@ -647,7 +647,7 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
                         doc = ReceivedDocument.objects.create(
                             year=fy,
                             title=base_name,
-                            date=_extract_date_from_filename(base_name),
+                            date=extract_date_from_filename(base_name),
                         )
                         att = Attachment(received_document=doc)
                         # save=False: store the file in the storage backend now
