@@ -376,8 +376,14 @@ class PostScreenshotsTests(SimpleTestCase):
             body,
         )
         self.assertLess(
-            body.index("![index](https://example.com/index.png)"),
-            body.index("![login](https://example.com/login.png)"),
+            body.index(
+                '<details><summary>index</summary><img src="https://example.com/'
+                'index.png" alt="index"></details>'
+            ),
+            body.index(
+                '<details><summary>login</summary><img src="https://example.com/'
+                'login.png" alt="login"></details>'
+            ),
         )
         self.assertNotIn("notes", body)
 

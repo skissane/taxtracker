@@ -22,7 +22,7 @@ _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*\.png$")
 
 def _screenshot_paths(directory: Path) -> list[Path]:
     """The PNGs in directory, sorted by name. Names are restricted so that one
-    can't inject Markdown into the comment."""
+    can't inject Markdown or HTML into the comment."""
     paths = sorted(directory.glob("*.png"))
     if not paths:
         raise ValueError(f"no screenshots (*.png) in {directory}")
@@ -44,8 +44,14 @@ def _build_body(urls: dict[str, str], commit: str | None, run_url: str | None) -
         if run_url:
             taken += f" by [this workflow run]({run_url})"
         lines += [f"{taken}.", ""]
+    # Collapsed, so the comment stays short; an <img> tag rather than Markdown
+    # image syntax, which GitHub only renders after a blank line inside <details>.
     for name, url in urls.items():
-        lines += [f"### {name}", "", f"![{name}]({url})", ""]
+        lines += [
+            f'<details><summary>{name}</summary><img src="{url}" alt="{name}">'
+            "</details>",
+            "",
+        ]
     return "\n".join(lines)
 
 
