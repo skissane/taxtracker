@@ -71,6 +71,12 @@ def test_index(admin_user, page):
     _screenshot(page, "index")
 
 
+def test_backups(admin_user, page):
+    _log_in(page, admin_user)
+    page.goto("/admin/core/cloudbackupstatus/")
+    _screenshot(page, "backups")
+
+
 def test_cloud_backup_list(admin_user, page, settings):
     # Fake settings and a mocked S3 client, so the page lists made-up backups
     # without touching a real bucket.
@@ -91,10 +97,10 @@ def test_cloud_backup_list(admin_user, page, settings):
         "/": [{"CommonPrefixes": [{"Prefix": "other.example/"}]}],
         "screenshots.example/": [{"Contents": objects}],
     }
-    with mock.patch("lifetracker.taxtracker.admin.boto3.client") as client:
+    with mock.patch("lifetracker.core.backup.boto3.client") as client:
         client.return_value.get_paginator.return_value.paginate.side_effect = (
             lambda **kwargs: pages[kwargs.get("Delimiter") or kwargs["Prefix"]]
         )
         _log_in(page, admin_user)
-        page.goto("/admin/taxtracker/financialyear/cloud-backup/list/")
+        page.goto("/admin/core/cloudbackupstatus/list/")
         _screenshot(page, "cloud-backup-list")

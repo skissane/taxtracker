@@ -4,26 +4,8 @@
 
 {% block extrastyle %}
   {{ block.super }}
-  <link rel="stylesheet" href="{% static 'taxtracker/buttons.css' %}">
+  <link rel="stylesheet" href="{% static 'core/admin_pages.css' %}">
   <style>
-  .tt-info-box {
-    background: var(--darkened-bg);
-    border: 1px solid var(--border-color);
-    padding: 1em 1.5em;
-    border-radius: 4px;
-    margin-bottom: 1.5em;
-  }
-
-  .tt-table {
-    border-collapse: collapse;
-    width: 100%;
-  }
-
-  .tt-label {
-    text-align: left;
-    padding: 4px 12px 4px 0;
-  }
-
   .tt-badge-override {
     color: #856404;
     background: #fff3cd;
@@ -172,14 +154,14 @@
       {% endif %}
     </p>
   {% endif %}
-  <div class="tt-info-box">
-    <table class="tt-table">
+  <div class="lt-info-box">
+    <table class="lt-table">
       <tr>
-        <th class="tt-label">Period</th>
+        <th class="lt-label">Period</th>
         <td>{{ fy.start_date }} – {{ fy.end_date }}</td>
       </tr>
       <tr>
-        <th class="tt-label">Lodgement Date</th>
+        <th class="lt-label">Lodgement Date</th>
         <td>
           {{ fy.effective_lodgement_date }}
           {% if fy.lodgement_date_override %}
@@ -190,7 +172,7 @@
         </td>
       </tr>
       <tr>
-        <th class="tt-label">Days Until Lodgement</th>
+        <th class="lt-label">Days Until Lodgement</th>
         <td>
           {% if fy.days_until_lodgement > 0 %}
             {{ fy.days_until_lodgement }} days remaining
@@ -202,7 +184,7 @@
         </td>
       </tr>
       <tr>
-        <th class="tt-label">Progress</th>
+        <th class="lt-label">Progress</th>
         <td>
           <strong>{{ done }}</strong> done,
           <strong>{{ pending }}</strong> pending

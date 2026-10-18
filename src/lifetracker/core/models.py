@@ -222,3 +222,34 @@ class DatabaseStorage(Storage):
 
 
 database_storage = DatabaseStorage()
+
+
+# The only allowed primary key for CloudBackupStatus, which is a single row.
+CLOUD_BACKUP_STATUS_PK = 1
+
+
+class CloudBackupStatus(models.Model):
+    """Tracks the latest successful cloud backup upload."""
+
+    last_backup_at = models.DateTimeField(null=True, blank=True)
+    # 1024 is S3's maximum object key length.
+    last_backup_object_key = models.CharField(max_length=1024, blank=True)
+    last_backup_size = models.PositiveBigIntegerField(
+        null=True, blank=True, help_text="Size of the last backup, in bytes."
+    )
+
+    class Meta:
+        verbose_name = "Cloud Backup Status"
+        # Shown in the admin index, where the entry leads to the backups page.
+        verbose_name_plural = "Backups"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(pk=CLOUD_BACKUP_STATUS_PK),
+                name="cloudbackupstatus_singleton",
+            ),
+        ]
+
+    def __str__(self):
+        if self.last_backup_at is None:
+            return "Cloud backup status: never backed up"
+        return f"Cloud backup status: last backup at {self.last_backup_at}"

@@ -4,27 +4,9 @@
 
 {% block extrastyle %}
   {{ block.super }}
-  <link rel="stylesheet" href="{% static 'taxtracker/buttons.css' %}">
+  <link rel="stylesheet" href="{% static 'core/admin_pages.css' %}">
   <style>
-  .tt-info-box {
-    background: var(--darkened-bg);
-    border: 1px solid var(--border-color);
-    padding: 1em 1.5em;
-    border-radius: 4px;
-    margin-bottom: 1.5em;
-  }
-
-  .tt-table {
-    border-collapse: collapse;
-    width: 100%;
-  }
-
-  .tt-label {
-    text-align: left;
-    padding: 4px 12px 4px 0;
-  }
-
-  .tt-footer {
+  .lt-footer {
     margin-top: 1.5em;
   }
   </style>
@@ -32,9 +14,8 @@
 {% block breadcrumbs %}
   <ol class="breadcrumbs">
     <li><a href="{% url 'admin:index' %}">{% trans "Home" %}</a></li>
-    <li><a href="{% url 'admin:app_list' app_label='taxtracker' %}">Tax Tracker</a></li>
-    <li><a href="{% url 'admin:taxtracker_financialyear_changelist' %}">Financial Years</a></li>
-    <li aria-current="page">Cloud Backup Status</li>
+    <li><a href="{% url 'admin:app_list' app_label='core' %}">Core</a></li>
+    <li aria-current="page">Backups</li>
   </ol>
 {% endblock breadcrumbs %}
 {% block content %}
@@ -46,10 +27,10 @@
       {% endfor %}
     </p>
   {% endif %}
-  <div class="tt-info-box">
-    <table class="tt-table">
+  <div class="lt-info-box">
+    <table class="lt-table">
       <tr>
-        <th class="tt-label">Endpoint</th>
+        <th class="lt-label">Endpoint</th>
         <td>
           {% if config.endpoint_url %}
             <code>{{ config.endpoint_url }}</code>
@@ -59,7 +40,7 @@
         </td>
       </tr>
       <tr>
-        <th class="tt-label">Bucket</th>
+        <th class="lt-label">Bucket</th>
         <td>
           {% if config.bucket_name %}
             <code>{{ config.bucket_name }}</code>
@@ -69,7 +50,7 @@
         </td>
       </tr>
       <tr>
-        <th class="tt-label">Region</th>
+        <th class="lt-label">Region</th>
         <td>
           {% if config.region_name %}
             <code>{{ config.region_name }}</code>
@@ -79,13 +60,13 @@
         </td>
       </tr>
       <tr>
-        <th class="tt-label">Backup Hostname</th>
+        <th class="lt-label">Backup Hostname</th>
         <td>
           <code>{{ config.hostname }}</code>
         </td>
       </tr>
       <tr>
-        <th class="tt-label">Last Successful Backup</th>
+        <th class="lt-label">Last Successful Backup</th>
         <td>
           {% if status.last_backup_at %}
             {{ status.last_backup_at|date:"Y-m-d H:i:s T" }} ({{ last_backup_ago }} ago)
@@ -96,7 +77,7 @@
       </tr>
       {% if status.last_backup_object_key %}
         <tr>
-          <th class="tt-label">Object Key</th>
+          <th class="lt-label">Object Key</th>
           <td>
             <code>{{ status.last_backup_object_key }}</code>
           </td>
@@ -104,20 +85,19 @@
       {% endif %}
       {% if status.last_backup_size is not None %}
         <tr>
-          <th class="tt-label">Size</th>
+          <th class="lt-label">Size</th>
           <td>{{ status.last_backup_size|filesizeformat }}</td>
         </tr>
       {% endif %}
     </table>
   </div>
-  <form method="post" class="tt-footer">
+  <form method="post" class="lt-footer">
     {% csrf_token %}
     <button type="submit"
             class="button default"
             {% if missing_required %} disabled{% endif %}>Run Backup Now</button>
+    <a class="button" href="{% url 'admin:core_cloudbackupstatus_list' %}">View Backups in Bucket</a>
     <a class="button"
-       href="{% url 'admin:taxtracker_financialyear_cloud_backup_list' %}">View Backups in Bucket</a>
-    <a class="button cancel"
-       href="{% url 'admin:taxtracker_financialyear_changelist' %}">Back</a>
+       href="{% url 'admin:core_cloudbackupstatus_download_db_backup' %}">Download DB Backup</a>
   </form>
 {% endblock content %}
