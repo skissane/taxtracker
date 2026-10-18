@@ -13,28 +13,44 @@ def _commit_url(commit_url_base, commit_id):
     return f"{commit_url_base.rstrip('/')}/{commit_id}"
 
 
+# The admin's gold "Life Tracker" color, from its own stylesheet, so the commit ID
+# and instance name match the site name in both the light and dark themes.
+_TEXT_COLOR = "var(--header-branding-color)"
+_TEXT_STYLE = f"color: {_TEXT_COLOR};"
+
+
 def _build_admin_site_header(
     *, site_name, commit_id, commit_url_base, instance_name, link_commit
 ):
     if commit_id and link_commit:
         return format_html(
-            '{} <code><a href="{}" target="_blank" rel="noopener noreferrer"'
-            ' title="{}">{}</a></code> <code>{}</code>',
+            '{} <code style="{}"><a href="{}" target="_blank" rel="noopener noreferrer"'
+            ' title="{}" style="{}">{}</a></code> <code style="{}">{}</code>',
             site_name,
+            _TEXT_STYLE,
             _commit_url(commit_url_base, commit_id),
             commit_id,
+            _TEXT_STYLE,
             commit_id[:_SHORT_COMMIT_ID_LENGTH],
+            _TEXT_STYLE,
             instance_name,
         )
     if commit_id:
         return format_html(
-            '{} <code title="{}">{}</code> <code>{}</code>',
+            '{} <code style="{}" title="{}">{}</code> <code style="{}">{}</code>',
             site_name,
+            _TEXT_STYLE,
             commit_id,
             commit_id[:_SHORT_COMMIT_ID_LENGTH],
+            _TEXT_STYLE,
             instance_name,
         )
-    return format_html("{} <code>{}</code>", site_name, instance_name)
+    return format_html(
+        '{} <code style="{}">{}</code>',
+        site_name,
+        _TEXT_STYLE,
+        instance_name,
+    )
 
 
 class LifetrackerAdminSite(admin.AdminSite):

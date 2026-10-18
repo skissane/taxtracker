@@ -12,17 +12,22 @@ import coverage
 from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.models import User
+from django.contrib.staticfiles import finders
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.management import call_command
 from django.db import IntegrityError
 from django.forms import inlineformset_factory
-from django.test import Client, TestCase, override_settings
+from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django_google_sso.main import GoogleAuth
 
 from lifetracker import google_sso
-from lifetracker.admin_site import LifetrackerAdminSite, _build_admin_site_header
+from lifetracker.admin_site import (
+    _TEXT_STYLE,
+    LifetrackerAdminSite,
+    _build_admin_site_header,
+)
 from lifetracker.asgi import application as asgi_application
 from lifetracker.core.admin import (
     DBStoredFileAdmin,
@@ -66,6 +71,14 @@ class GoogleSSOSettingsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Sign in with Google")
         self.assertContains(response, 'href="/google_sso/login/"')
+        self.assertContains(response, 'src="/static/core/google_g_logo.svg"')
+        self.assertNotContains(response, "upload.wikimedia.org")
+
+    def test_google_sso_logo_is_a_static_file(self):
+        # Asserting the src attribute alone would pass even if nothing served it.
+        url = settings.GOOGLE_SSO_LOGO_URL(RequestFactory().get("/"))
+        path = url.removeprefix(settings.STATIC_URL)
+        self.assertIsNotNone(finders.find(path))
 
     @override_settings(GOOGLE_SSO_ENABLED=False)
     def test_google_sso_admin_login_button_hidden_when_disabled(self):
@@ -812,11 +825,11 @@ class AdminSiteHeaderTests(TestCase):
                 )
             ),
             (
-                "Life Tracker <code><a"
+                f'Life Tracker <code style="{_TEXT_STYLE}"><a'
                 f' href="https://github.com/skissane/taxtracker/commit/{self.COMMIT_ID}"'
                 ' target="_blank" rel="noopener noreferrer"'
-                f' title="{self.COMMIT_ID}">0123abc</a></code>'
-                " <code>instance.local</code>"
+                f' title="{self.COMMIT_ID}" style="{_TEXT_STYLE}">0123abc</a></code>'
+                f' <code style="{_TEXT_STYLE}">instance.local</code>'
             ),
         )
 
@@ -831,8 +844,12 @@ class AdminSiteHeaderTests(TestCase):
                     instance_name="instance.local",
                 )
             ),
-            "Life Tracker <code>instance.local</code>",
+            f'Life Tracker <code style="{_TEXT_STYLE}">instance.local</code>',
         )
+
+    def test_uses_site_name_color(self):
+        # The other tests compare against the constant, so pin its value here.
+        self.assertEqual(_TEXT_STYLE, "color: var(--header-branding-color);")
 
     def test_accepts_base_url_without_trailing_slash(self):
         self.assertEqual(
@@ -846,11 +863,11 @@ class AdminSiteHeaderTests(TestCase):
                 )
             ),
             (
-                "Life Tracker <code><a"
+                f'Life Tracker <code style="{_TEXT_STYLE}"><a'
                 f' href="https://github.com/skissane/taxtracker/commit/{self.COMMIT_ID}"'
                 ' target="_blank" rel="noopener noreferrer"'
-                f' title="{self.COMMIT_ID}">0123abc</a></code>'
-                " <code>instance.local</code>"
+                f' title="{self.COMMIT_ID}" style="{_TEXT_STYLE}">0123abc</a></code>'
+                f' <code style="{_TEXT_STYLE}">instance.local</code>'
             ),
         )
 
@@ -866,8 +883,8 @@ class AdminSiteHeaderTests(TestCase):
                 )
             ),
             (
-                f'Example <code title="{self.COMMIT_ID}">0123abc</code>'
-                " <code>instance.local</code>"
+                f'Example <code style="{_TEXT_STYLE}" title="{self.COMMIT_ID}">0123abc'
+                f'</code> <code style="{_TEXT_STYLE}">instance.local</code>'
             ),
         )
 
@@ -882,7 +899,7 @@ class AdminSiteHeaderTests(TestCase):
                     instance_name="instance.local",
                 )
             ),
-            "&lt;b&gt; <code>instance.local</code>",
+            f'&lt;b&gt; <code style="{_TEXT_STYLE}">instance.local</code>',
         )
 
 
@@ -903,8 +920,9 @@ class AdminSitePerRequestHeaderTests(TestCase):
         self.assertContains(response, "<title>Log in | Example Site</title>", html=True)
         self.assertContains(
             response,
-            f'Example Site <code title="{AdminSiteHeaderTests.COMMIT_ID}">0123abc'
-            "</code> <code>instance.local</code>",
+            f'Example Site <code style="{_TEXT_STYLE}" '
+            f'title="{AdminSiteHeaderTests.COMMIT_ID}">0123abc'
+            f'</code> <code style="{_TEXT_STYLE}">instance.local</code>',
         )
         self.assertNotContains(response, self.COMMIT_URL)
         self.assertNotContains(response, "Life Tracker")
@@ -916,7 +934,10 @@ class AdminSitePerRequestHeaderTests(TestCase):
         self.assertContains(
             response, "<title>Administration | Life Tracker</title>", html=True
         )
-        self.assertContains(response, f'Life Tracker <code><a href="{self.COMMIT_URL}"')
+        self.assertContains(
+            response,
+            f'Life Tracker <code style="{_TEXT_STYLE}"><a href="{self.COMMIT_URL}"',
+        )
         self.assertNotContains(response, "Example Site")
 
 

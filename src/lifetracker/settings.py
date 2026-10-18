@@ -16,6 +16,7 @@ import socket
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
+from django.templatetags.static import static
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -264,6 +265,15 @@ GOOGLE_SSO_CLIENT_SECRET = os.environ.get(
 ).strip()
 GOOGLE_SSO_PROJECT_ID = os.environ.get("LIFETRACKER_GOOGLE_SSO_PROJECT_ID", "").strip()
 GOOGLE_SSO_ENABLED = bool(GOOGLE_SSO_CLIENT_ID and GOOGLE_SSO_CLIENT_SECRET)
+
+
+def _google_sso_logo_url(request):
+    # A callable, which the library calls per request, so static() builds the URL
+    # from STATIC_URL rather than this repeating it.
+    return static("core/google_g_logo.svg")
+
+
+GOOGLE_SSO_LOGO_URL = _google_sso_logo_url
 # The library also rejects any email whose domain isn't listed here, unless the
 # Google userinfo has a true "email_verified", which the userinfo endpoint it
 # calls never returns. So accept every domain here, and leave the gating (and
