@@ -20,6 +20,7 @@ _CODE_STYLE = (
     f"color: {_TEXT_COLOR}; background-color: rgba(17, 24, 39, 0.08); "
     "border-radius: 0.25rem; padding: 0 0.25em;"
 )
+_LINK_STYLE = f"color: {_TEXT_COLOR};"
 
 
 def _build_admin_site_header(
@@ -28,12 +29,12 @@ def _build_admin_site_header(
     if commit_id and link_commit:
         return format_html(
             '{} <code style="{}"><a href="{}" target="_blank" rel="noopener noreferrer"'
-            f' title="{{}}" style="color: {_TEXT_COLOR};">{{}}</a></code> '
-            '<code style="{}">{}</code>',
+            ' title="{}" style="{}">{}</a></code> <code style="{}">{}</code>',
             site_name,
             _CODE_STYLE,
             _commit_url(commit_url_base, commit_id),
             commit_id,
+            _LINK_STYLE,
             commit_id[:_SHORT_COMMIT_ID_LENGTH],
             _CODE_STYLE,
             instance_name,
