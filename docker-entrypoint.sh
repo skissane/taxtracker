@@ -40,7 +40,10 @@ if [ "$#" -gt 0 ]; then
   exec "$@"
 fi
 
+# lifetracker.gunicorn_conf starts the idle watchdog (see
+# lifetracker/core/idle_watchdog.py) if LIFETRACKER_IDLE_STOP turns it on.
 exec gunicorn \
+  --config python:lifetracker.gunicorn_conf \
   --access-logfile - \
   --error-logfile - \
   --timeout "${LIFETRACKER_GUNICORN_TIMEOUT:-120}" \

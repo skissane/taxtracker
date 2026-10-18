@@ -24,6 +24,19 @@ primary_region = "syd"
 [env]
   # Fly's proxy terminates TLS and always sets X-Forwarded-Proto.
   LIFETRACKER_TRUST_X_FORWARDED_PROTO = "1"
+  # The idle watchdog (lifetracker/core/idle_watchdog.py), which, unlike Fly
+  # Proxy's auto-stop below, counts SSH sessions as activity (issue #135). In
+  # "monitor" mode it only reports, in its status file and the logs, so we can
+  # check on the real Machine that SSH sessions show up on port 22. Once they
+  # do, set this to "stop" and auto_stop_machines below to "off".
+  LIFETRACKER_IDLE_STOP = "monitor"
+
+# The idle watchdog stops the Machine by making gunicorn exit 0. on-failure
+# (what `fly deploy` uses when none is set) restarts the Machine only after a
+# non-zero exit, so a clean exit leaves it stopped until Fly Proxy starts it.
+[[restart]]
+  policy = "on-failure"
+  retries = 10
 
 # The volume holds the SQLite database and secret key (LIFETRACKER_DATA_DIR is
 # /data in the image). A volume attaches to a single Machine, so the app must

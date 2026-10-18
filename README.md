@@ -231,10 +231,36 @@ passes `--pty` only when run from a terminal:
 ./flyssh.sh python manage.py showmigrations
 ```
 
+If the Machine is stopped, `./flyssh.sh` starts it first (this needs `jq`).
 The Machine auto-stops when idle, and Fly judges that by HTTP traffic through
-its proxy, not SSH sessions, so a long session or command may be cut off, and SSH
-fails while the Machine is stopped. Load the site first, or run
-`./flyctl.sh machine start`.
+its proxy, not SSH sessions, so a long session or command may still be cut off.
+
+The fix is the idle watchdog (`src/lifetracker/core/idle_watchdog.py`), which
+gunicorn starts as a separate process. It counts established connections to the
+app's port and SSH's (port 22) in `/proc/net/tcp` and `/proc/net/tcp6`, and once
+there have been none for a while it stops gunicorn gracefully. A clean exit
+leaves the Machine stopped until the next request starts it. It's off unless
+`LIFETRACKER_IDLE_STOP` is set:
+
+- `off` (the default): it doesn't run.
+- `monitor`: it checks and reports, but never stops anything.
+- `stop`: it stops gunicorn once idle.
+
+`LIFETRACKER_IDLE_STOP_MINUTES` sets the idle timeout (default 10). Other
+settings are `LIFETRACKER_IDLE_STOP_PORTS` (default `$PORT` or 8000, and 22),
+`LIFETRACKER_IDLE_STOP_INTERVAL_SECONDS` (default 30) and
+`LIFETRACKER_IDLE_STOP_STATUS_FILE`. Every check, it writes its status as JSON
+to that file (default `/tmp/lifetracker-idle-watchdog.json`). It logs to stderr,
+so on Fly its messages are in `./flyctl.sh logs`. It needs Linux, as it reads
+`/proc/net`; the Docker image is Linux even on a macOS host, so it works with
+`just docker-run` too. `./run.sh` uses Django's development server, not
+gunicorn, so it never starts it.
+
+`fly.toml` currently runs it in `monitor` mode alongside Fly's own auto-stop,
+to check that SSH sessions show up. While connected, run
+`./flyssh.sh cat /tmp/lifetracker-idle-watchdog.json` and check that port 22
+has a connection. Then set `LIFETRACKER_IDLE_STOP` to `stop` and
+`auto_stop_machines` to `"off"`.
 
 `./fly-machine-id.sh` prints the Machine's ID (it needs `jq`), for `flyctl`
 commands that take one:

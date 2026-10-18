@@ -2,7 +2,9 @@ import ast
 import datetime
 import importlib.util
 import io
+import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -25,6 +27,7 @@ from django.forms import inlineformset_factory
 from django.test import (
     Client,
     RequestFactory,
+    SimpleTestCase,
     TestCase,
     TransactionTestCase,
     override_settings,
@@ -33,13 +36,14 @@ from django.urls import reverse
 from django.utils import timezone
 from django_google_sso.main import GoogleAuth
 
-from lifetracker import google_sso
+from lifetracker import google_sso, gunicorn_conf
 from lifetracker.admin_site import (
     _TEXT_STYLE,
     LifetrackerAdminSite,
     _build_admin_site_header,
 )
 from lifetracker.asgi import application as asgi_application
+from lifetracker.core import idle_watchdog
 from lifetracker.core.admin import (
     DBStoredFileAdmin,
     MimeTypeFormSet,
@@ -1635,7 +1639,8 @@ class DockerEntrypointTests(TestCase):
             log_lines,
             [
                 *self.STARTUP,
-                "gunicorn --access-logfile - --error-logfile - --timeout 120"
+                "gunicorn --config python:lifetracker.gunicorn_conf"
+                " --access-logfile - --error-logfile - --timeout 120"
                 " --bind 0.0.0.0:8000 lifetracker.wsgi",
             ],
         )
@@ -1651,7 +1656,8 @@ class DockerEntrypointTests(TestCase):
 
         self.assertEqual(
             log_lines[-1],
-            "gunicorn --access-logfile - --error-logfile - --timeout 600"
+            "gunicorn --config python:lifetracker.gunicorn_conf"
+            " --access-logfile - --error-logfile - --timeout 600"
             " --bind 127.0.0.1:9000 lifetracker.wsgi",
         )
 
@@ -2462,3 +2468,385 @@ class PurgeOrphanedFilesTests(TestCase):
             self.call("--delete"), "Deleted 2 orphaned stored file(s), 8 bytes.\n"
         )
         self.assertFalse(DBStoredFile.objects.filter(pk__in=self.orphan_pks).exists())
+
+
+# /proc/net/tcp and tcp6 excerpts: a listener on 8000 (state 0A), established
+# connections to local ports 8000 (0x1F40) and 22 (0x0016), and an outgoing one
+# from ephemeral port 0xA2C4 to a remote port 22, which mustn't count.
+_PROC_NET_TCP = """\
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid
+   0: 00000000:1F40 00000000:0000 0A 00000000:00000000 00:00000000 00000000 10001
+   1: 0100007F:1F40 0100007F:D3B2 01 00000000:00000000 00:00000000 00000000 10001
+   2: 0100007F:A2C4 0200007F:0016 01 00000000:00000000 00:00000000 00000000 10001
+"""
+_PROC_NET_TCP6 = """\
+  sl  local_address                         remote_address                        st
+   0: 00000000000000000000000000000000:0016 00000000000000000000000000000000:0000 0A
+   1: 00AA00FD000000000000000000000002:0016 00AA00FD000000000000000000000001:C350 01
+   2: 00AA00FD000000000000000000000002:0016 00AA00FD000000000000000000000001:C351 01
+"""
+
+
+class IdleWatchdogConfigTests(SimpleTestCase):
+    def test_defaults(self):
+        config = idle_watchdog.config_from_env({})
+
+        self.assertEqual(
+            config,
+            idle_watchdog.Config(
+                mode="off",
+                idle_seconds=600,
+                interval_seconds=30,
+                ports=(8000, 22),
+                status_file=Path("/tmp/lifetracker-idle-watchdog.json"),
+            ),
+        )
+
+    def test_blank_values_use_defaults(self):
+        config = idle_watchdog.config_from_env(
+            {
+                "LIFETRACKER_IDLE_STOP": " ",
+                "LIFETRACKER_IDLE_STOP_MINUTES": "",
+                "LIFETRACKER_IDLE_STOP_PORTS": "",
+                "PORT": "",
+            }
+        )
+
+        self.assertEqual(config, idle_watchdog.config_from_env({}))
+
+    def test_default_ports_follow_gunicorn_port(self):
+        config = idle_watchdog.config_from_env({"PORT": "9000"})
+
+        self.assertEqual(config.ports, (9000, 22))
+
+    def test_settings_from_env(self):
+        config = idle_watchdog.config_from_env(
+            {
+                "LIFETRACKER_IDLE_STOP": "Stop",
+                "LIFETRACKER_IDLE_STOP_MINUTES": "2.5",
+                "LIFETRACKER_IDLE_STOP_INTERVAL_SECONDS": "5",
+                "LIFETRACKER_IDLE_STOP_PORTS": "8080, 2222,8080",
+                "LIFETRACKER_IDLE_STOP_STATUS_FILE": "/run/status.json",
+            }
+        )
+
+        self.assertEqual(
+            config,
+            idle_watchdog.Config(
+                mode="stop",
+                idle_seconds=150,
+                interval_seconds=5,
+                ports=(8080, 2222),
+                status_file=Path("/run/status.json"),
+            ),
+        )
+
+    def test_invalid_values_raise(self):
+        for name, value, message in [
+            ("LIFETRACKER_IDLE_STOP", "on", "must be one of off, monitor, stop"),
+            ("LIFETRACKER_IDLE_STOP_MINUTES", "0", "must be a positive number"),
+            ("LIFETRACKER_IDLE_STOP_MINUTES", "ten", "must be a positive number"),
+            ("LIFETRACKER_IDLE_STOP_INTERVAL_SECONDS", "-1", "positive number"),
+            ("LIFETRACKER_IDLE_STOP_PORTS", "80,ssh", "comma-separated port"),
+            ("LIFETRACKER_IDLE_STOP_PORTS", "0", "comma-separated port"),
+            ("LIFETRACKER_IDLE_STOP_PORTS", "65536", "comma-separated port"),
+        ]:
+            with self.subTest(name=name, value=value):
+                with self.assertRaisesMessage(ValueError, message):
+                    idle_watchdog.config_from_env({name: value})
+
+
+class IdleWatchdogConnectionTests(SimpleTestCase):
+    def test_established_local_ports(self):
+        self.assertEqual(
+            list(idle_watchdog.established_local_ports(_PROC_NET_TCP)),
+            [8000, 0xA2C4],
+        )
+        self.assertEqual(
+            list(idle_watchdog.established_local_ports(_PROC_NET_TCP6)), [22, 22]
+        )
+
+    def test_count_connections_reads_ipv4_and_ipv6(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            tcp = Path(tempdir) / "tcp"
+            tcp6 = Path(tempdir) / "tcp6"
+            tcp.write_text(_PROC_NET_TCP)
+            tcp6.write_text(_PROC_NET_TCP6)
+
+            counts = idle_watchdog.count_connections([8000, 22, 443], paths=[tcp, tcp6])
+
+        self.assertEqual(counts, {8000: 1, 22: 2, 443: 0})
+
+    def test_count_connections_skips_missing_table(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            tcp = Path(tempdir) / "tcp"
+            tcp.write_text(_PROC_NET_TCP)
+
+            counts = idle_watchdog.count_connections(
+                [8000, 22], paths=[tcp, Path(tempdir) / "tcp6"]
+            )
+
+        self.assertEqual(counts, {8000: 1, 22: 0})
+
+
+def _watchdog_config(mode="stop", status_file=Path("/nonexistent/status.json")):
+    return idle_watchdog.Config(
+        mode=mode,
+        idle_seconds=60,
+        interval_seconds=10,
+        ports=(8000, 22),
+        status_file=status_file,
+    )
+
+
+class IdleWatchdogStateTests(SimpleTestCase):
+    START = 1_800_000_000  # 2027-01-15T08:00:00Z
+
+    def test_idle_time_counts_from_startup(self):
+        watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1, self.START)
+
+        self.assertFalse(watchdog.check(self.START + 59, {8000: 0, 22: 0}))
+        self.assertTrue(watchdog.check(self.START + 60, {8000: 0, 22: 0}))
+
+    def test_connection_resets_idle_time(self):
+        watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1, self.START)
+
+        self.assertFalse(watchdog.check(self.START + 50, {8000: 0, 22: 1}))
+        self.assertFalse(watchdog.check(self.START + 100, {8000: 0, 22: 0}))
+        self.assertTrue(watchdog.check(self.START + 110, {8000: 0, 22: 0}))
+
+    def test_status(self):
+        watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1234, self.START)
+        watchdog.check(self.START + 10, {8000: 2, 22: 0})
+        watchdog.check(self.START + 20, {8000: 0, 22: 0})
+
+        self.assertEqual(
+            watchdog.status(),
+            {
+                "mode": "stop",
+                "state": "idle",
+                "pid": os.getpid(),
+                "master_pid": 1234,
+                "started_at": "2027-01-15T08:00:00+00:00",
+                "checked_at": "2027-01-15T08:00:20+00:00",
+                "check_interval_seconds": 10,
+                "idle_timeout_seconds": 60,
+                "idle_since": "2027-01-15T08:00:10+00:00",
+                "stop_due_at": "2027-01-15T08:01:10+00:00",
+                "ports": [
+                    {
+                        "port": 8000,
+                        "connections": 0,
+                        "last_connection_at": "2027-01-15T08:00:10+00:00",
+                    },
+                    {"port": 22, "connections": 0, "last_connection_at": None},
+                ],
+            },
+        )
+
+    def test_status_state(self):
+        watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1, self.START)
+        self.assertEqual(watchdog.status()["checked_at"], None)
+
+        watchdog.check(self.START + 1, {8000: 0, 22: 1})
+        self.assertEqual(watchdog.status()["state"], "active")
+
+        watchdog.stopping = True
+        self.assertEqual(watchdog.status()["state"], "stopping")
+
+    def test_write_status_replaces_file(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "status.json"
+            path.write_text("old")
+
+            idle_watchdog.write_status(path, {"state": "idle"})
+
+            self.assertEqual(json.loads(path.read_text()), {"state": "idle"})
+            self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+            self.assertEqual(os.listdir(tempdir), ["status.json"])
+
+    def test_write_status_removes_temp_file_on_failure(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "status.json"
+
+            with self.assertRaises(TypeError):
+                idle_watchdog.write_status(path, {"unserialisable": object()})
+
+            self.assertEqual(os.listdir(tempdir), [])
+
+
+class IdleWatchdogRunTests(SimpleTestCase):
+    MASTER_PID = 4321
+
+    def _run(self, mode, counts, *, getppid=None, status_file=None):
+        """Run the loop with a fake clock that advances 10s per sleep, and
+        fake connection counts taken from ``counts`` in turn."""
+        now = [1_800_000_000.0]
+        counts = iter(counts)
+        kill = mock.Mock()
+        with tempfile.TemporaryDirectory() as tempdir:
+            config = _watchdog_config(
+                mode, status_file or Path(tempdir) / "status.json"
+            )
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                result = idle_watchdog.run(
+                    config,
+                    self.MASTER_PID,
+                    clock=lambda: now[0],
+                    sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
+                    count=lambda ports: next(counts),
+                    getppid=getppid or (lambda: self.MASTER_PID),
+                    kill=kill,
+                )
+            status = (
+                json.loads(config.status_file.read_text())
+                if config.status_file.exists()
+                else None
+            )
+        return result, kill, stderr.getvalue(), status
+
+    def test_stop_mode_sends_sigterm_once_idle(self):
+        idle = {8000: 0, 22: 0}
+        busy = {8000: 0, 22: 1}
+
+        result, kill, stderr, status = self._run(
+            "stop", [busy, idle, idle, idle, idle, idle, idle, idle]
+        )
+
+        self.assertEqual(result, 0)
+        kill.assert_called_once_with(self.MASTER_PID, signal.SIGTERM)
+        self.assertIn("sending SIGTERM to gunicorn master 4321", stderr)
+        self.assertEqual(status["state"], "stopping")
+        self.assertEqual(status["checked_at"], "2027-01-15T08:01:00+00:00")
+
+    def test_monitor_mode_reports_but_never_stops(self):
+        idle = {8000: 0, 22: 0}
+        busy = {8000: 1, 22: 0}
+        ppids = iter([self.MASTER_PID] * 16 + [1])
+
+        result, kill, stderr, status = self._run(
+            "monitor", [idle] * 7 + [busy] + [idle] * 8, getppid=lambda: next(ppids)
+        )
+
+        self.assertEqual(result, 0)
+        kill.assert_not_called()
+        # Reported once per idle stretch: after startup, and after the busy check.
+        self.assertEqual(stderr.count("monitor mode: not stopping"), 2)
+        self.assertIn("gunicorn master 4321 has exited, exiting", stderr)
+        self.assertEqual(status["state"], "idle")
+
+    def test_status_write_failure_is_logged_and_ignored(self):
+        result, kill, stderr, status = self._run(
+            "stop",
+            [{8000: 0, 22: 0}] * 7,
+            status_file=Path("/nonexistent/status.json"),
+        )
+
+        self.assertEqual(result, 0)
+        kill.assert_called_once()
+        self.assertIn("couldn't write /nonexistent/status.json", stderr)
+        self.assertIsNone(status)
+
+
+class IdleWatchdogSpawnTests(SimpleTestCase):
+    def test_off_by_default(self):
+        with mock.patch("subprocess.Popen") as popen:
+            self.assertIsNone(idle_watchdog.spawn(99, {}))
+
+        popen.assert_not_called()
+
+    def test_invalid_config_is_logged_not_raised(self):
+        with (
+            mock.patch("subprocess.Popen") as popen,
+            mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
+        ):
+            self.assertIsNone(idle_watchdog.spawn(99, {"LIFETRACKER_IDLE_STOP": "yes"}))
+
+        popen.assert_not_called()
+        self.assertIn(
+            "idle-watchdog: not starting: LIFETRACKER_IDLE_STOP", stderr.getvalue()
+        )
+
+    def test_not_started_without_proc_net(self):
+        with (
+            mock.patch("subprocess.Popen") as popen,
+            mock.patch.object(
+                idle_watchdog, "PROC_NET_TCP_FILES", (Path("/nonexistent/tcp"),)
+            ),
+            mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
+        ):
+            self.assertIsNone(
+                idle_watchdog.spawn(99, {"LIFETRACKER_IDLE_STOP": "monitor"})
+            )
+
+        popen.assert_not_called()
+        self.assertIn("/nonexistent/tcp is missing", stderr.getvalue())
+
+    def test_starts_module_with_master_pid(self):
+        env = {"LIFETRACKER_IDLE_STOP": "stop"}
+        with (
+            mock.patch("subprocess.Popen") as popen,
+            mock.patch.object(Path, "exists", return_value=True),
+        ):
+            self.assertIs(idle_watchdog.spawn(99, env), popen.return_value)
+
+        popen.assert_called_once_with(
+            [sys.executable, "-m", "lifetracker.core.idle_watchdog", "99"], env=env
+        )
+
+    def test_gunicorn_when_ready_spawns_for_master(self):
+        server = mock.Mock(pid=1234)
+        with mock.patch.object(idle_watchdog, "spawn") as spawn:
+            gunicorn_conf.when_ready(server)
+
+        spawn.assert_called_once_with(1234)
+
+    def test_main_usage(self):
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            self.assertEqual(idle_watchdog.main([]), 2)
+
+        self.assertIn("usage:", stderr.getvalue())
+
+    def test_main_invalid_config(self):
+        with (
+            mock.patch.dict(os.environ, {"LIFETRACKER_IDLE_STOP_MINUTES": "x"}),
+            mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
+            mock.patch("signal.signal"),
+        ):
+            self.assertEqual(idle_watchdog.main(["99"]), 2)
+
+        self.assertIn("LIFETRACKER_IDLE_STOP_MINUTES", stderr.getvalue())
+
+    def test_real_process_stops_its_parent(self):
+        """End to end: a shell stands in for gunicorn's master, starts the
+        watchdog as its child, and is sent SIGTERM once it's been idle."""
+        with tempfile.TemporaryDirectory() as tempdir:
+            status_file = Path(tempdir) / "status.json"
+            result = subprocess.run(
+                [
+                    "sh",
+                    "-c",
+                    f'"{sys.executable}" -m lifetracker.core.idle_watchdog $$ & wait',
+                ],
+                env={
+                    **os.environ,
+                    "LIFETRACKER_IDLE_STOP": "stop",
+                    "LIFETRACKER_IDLE_STOP_MINUTES": "0.001",
+                    "LIFETRACKER_IDLE_STOP_INTERVAL_SECONDS": "0.05",
+                    # Port 1 (tcpmux): nothing will be connected to it.
+                    "LIFETRACKER_IDLE_STOP_PORTS": "1",
+                    "LIFETRACKER_IDLE_STOP_STATUS_FILE": str(status_file),
+                },
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            status = json.loads(status_file.read_text())
+
+        self.assertEqual(result.returncode, -signal.SIGTERM, result.stderr)
+        self.assertIn("sending SIGTERM", result.stderr)
+        self.assertEqual(status["state"], "stopping")
+        self.assertEqual(
+            status["ports"], [{"port": 1, "connections": 0, "last_connection_at": None}]
+        )

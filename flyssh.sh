@@ -8,8 +8,11 @@
 # and starts in the app directory. Arguments are run directly, not through a
 # shell, each quoted so one containing spaces or quotes arrives intact; use
 # `./flyssh.sh bash -c '...'` for shell syntax. Passes --pty only when stdin
-# and stdout are both terminals, so piped or redirected use works too.
+# and stdout are both terminals, so piped or redirected use works too. Starts
+# the Machine first if it's stopped, as SSH doesn't (needs jq).
 set -euo pipefail
+
+dir="$(dirname "$0")"
 
 # Quote $1 as a single POSIX shell word: wrap it in single quotes, with each
 # embedded ' written as '\''.
@@ -43,4 +46,18 @@ if [ -t 0 ] && [ -t 1 ]; then
   pty=(--pty)
 fi
 
-exec "$(dirname "$0")/flyctl.sh" ssh console ${pty[@]+"${pty[@]}"} --command="$command"
+# The app runs only one Machine (see README.md's Fly.io section), as in
+# fly-machine-id.sh. Progress messages go to stderr, keeping stdout for the
+# command's output.
+machine="$("$dir/flyctl.sh" machine list --json \
+  | jq -r '.[0] // error("the app has no Fly Machine") | "\(.id) \(.state)"')"
+id="${machine%% *}"
+state="${machine#* }"
+if [ "$state" != started ]; then
+  echo "flyssh.sh: starting Machine $id (it's $state)" >&2
+  "$dir/flyctl.sh" machine start "$id" >&2
+  "$dir/flyctl.sh" machine wait "$id" --state started >&2
+fi
+
+exec "$dir/flyctl.sh" ssh console --machine "$id" ${pty[@]+"${pty[@]}"} \
+  --command="$command"
