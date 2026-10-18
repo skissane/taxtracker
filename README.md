@@ -202,12 +202,19 @@ tested image to GHCR, then deploys that exact image to Fly.
 The app's name is deliberately kept out of this public repo. `fly.toml` has no
 `app` line; CI reads the name from the `FLY_APP` repository secret, and `flyctl`
 reads it from the `FLY_APP` environment variable. When you run `fly` commands
-yourself, export it first (or pass `-a <name>` to each command):
+yourself, use `./flyctl.sh`, which reads `FLY_APP` from `.env`, exports it and
+runs `flyctl` with its arguments (it fails if `.env` doesn't set `FLY_APP`):
+
+```bash
+./flyctl.sh status
+./flyctl.sh logs
+```
+
+Or export it yourself first (or pass `-a <name>` to each command):
 
 ```bash
 export FLY_APP=<app-name>
 fly status
-fly logs
 ```
 
 Don't commit the name anywhere, including in issues, PRs or pasted command output.
@@ -236,8 +243,8 @@ configuration.
 3. If `FLY_API_TOKEN` already existed (e.g. from an earlier app, which its token
    is scoped to), run `just fly-setup --replace-token`. That always creates a new
    deploy token and overwrites the secret with it, so also use it to rotate the
-   token. It doesn't revoke the old token: export `FLY_APP` (`fly` doesn't read
-   `.env`), then use `fly tokens list` and `fly tokens revoke`.
+   token. It doesn't revoke the old token; use `./flyctl.sh tokens list` and
+   `./flyctl.sh tokens revoke`.
 4. Push to `master` (e.g. merge a PR); CI's deploy creates the Machine. A volume
    attaches to only one Machine, so the app must never run more than one; CI
    passes `--ha=false`, which stops a deploy to an app with no Machine creating
