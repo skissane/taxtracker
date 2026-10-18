@@ -115,6 +115,8 @@
     <button type="submit"
             class="button default"
             {% if missing_required %} disabled{% endif %}>Run Backup Now</button>
+    <a class="button"
+       href="{% url 'admin:taxtracker_financialyear_cloud_backup_list' %}">View Backups in Bucket</a>
     <a class="button cancel"
        href="{% url 'admin:taxtracker_financialyear_changelist' %}">Back</a>
   </form>

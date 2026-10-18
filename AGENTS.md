@@ -63,7 +63,7 @@ uv run pytest tests/taxtracker/tests.py::ItemModelTests::test_str_root
 # Run tests under coverage, print a report, and write coverage.xml and junit.xml (no minimum enforced)
 just coverage
 
-# Screenshot the admin login and index pages, in light and dark mode, into screenshots/ (gitignored)
+# Screenshot the admin login, index and cloud backup list pages, in light and dark mode, into screenshots/ (gitignored)
 just screenshots
 
 # Post screenshots/ to PR 123 as a comment, or update it (as gh's logged-in user)
@@ -154,6 +154,7 @@ or installs the project, so a bumped dependency never runs with the tokens.
 - **Multi-year ZIP** (`download-multi-zip/`) — multiple FYs, each under a top-level `FY<year>/` prefix. Also supports "View Index (Markdown)" action.
 - **DB backup** (`download-db-backup/`) — superuser-only SQLite serialise download.
 - **Cloud backup** (`cloud-backup/`) — superuser-only status page with a "Run Backup Now" button that uploads the same serialised SQLite DB to an S3-compatible bucket (via `boto3`) as `<hostname>/db-backup.<YYYY-MM-DD.HH.MM.SS>.sqlite3`, where `<hostname>` is `LIFETRACKER_BACKUP_HOSTNAME` if set, else `socket.gethostname()` (`just docker-run` sets it to `docker.$(hostname)`, as the container's DB is separate from local dev's and its own hostname is a random ID); the status page shows it. Manual only; nothing schedules it. Configured by the `LIFETRACKER_BACKUP_S3_*` env vars read in `settings.py`: `BUCKET_NAME`, `ACCESS_KEY_ID` and `SECRET_ACCESS_KEY` are required (the button is disabled and the missing names are listed until they're set); `ENDPOINT_URL` (blank = AWS) and `REGION_NAME` are optional. Locally, these normally go in `.env` (see below).
+- **Cloud backup list** (`cloud-backup/list/`) — superuser-only, linked from the cloud backup status page: lists the bucket's objects (`list_objects_v2`, paginated) with key, size and last-modified time (shown in UTC), newest first. The `prefix` query parameter picks what to list: absent means this instance's `<hostname>/`, empty means the whole bucket; links to each top-level folder (one per hostname, from a `Delimiter="/"` listing) let you switch. Missing settings and S3 errors are shown on the page. Both cloud backup views get their client from `_cloud_backup_s3_client`.
 - **Copy to new year** (`copy-to-new-year/`) — clones the item tree (without notes/status/attachments) into `year+1`.
 
 `ItemAdmin` adds:
