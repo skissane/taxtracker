@@ -231,6 +231,11 @@ passes `--pty` only when run from a terminal:
 ./flyssh.sh python manage.py showmigrations
 ```
 
+The Machine auto-stops when idle, and Fly judges that by HTTP traffic through
+its proxy, not SSH sessions, so a long session or command may be cut off, and SSH
+fails while the Machine is stopped. Load the site first, or run
+`./flyctl.sh machine start`.
+
 Don't commit the name anywhere, including in issues, PRs or pasted command output.
 On the Machine, `LIFETRACKER_ALLOWED_HOSTS` and `LIFETRACKER_BACKUP_HOSTNAME`
 default from the name (via `FLY_APP_NAME`, which Fly sets), so they need no
