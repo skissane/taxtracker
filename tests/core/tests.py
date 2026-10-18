@@ -3128,7 +3128,7 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
 
 
 class IdleWatchdogAdminViewTests(TestCase):
-    URL = "/admin/core/idlewatchdogstatus/"
+    URL = "/admin/idle-watchdog/"
 
     def setUp(self):
         self.user = User.objects.create_superuser(
@@ -3149,10 +3149,11 @@ class IdleWatchdogAdminViewTests(TestCase):
         self.addCleanup(env.stop)
 
     def test_url(self):
-        self.assertEqual(reverse("admin:core_idlewatchdogstatus_changelist"), self.URL)
+        self.assertEqual(reverse("admin:idle_watchdog"), self.URL)
 
-    def test_admin_index_links_to_page_for_superusers_only(self):
-        self.assertContains(self.client.get(reverse("admin:index")), self.URL)
+    def test_top_bar_links_to_page_for_superusers_only(self):
+        link = f'<a href="{self.URL}">Idle Watchdog</a>'
+        self.assertContains(self.client.get(reverse("admin:index")), link, html=True)
 
         staff = User.objects.create_user("staff", "s@example.com", "pass")
         staff.is_staff = True
@@ -3161,6 +3162,15 @@ class IdleWatchdogAdminViewTests(TestCase):
         client.login(username="staff", password="pass")
         self.assertNotContains(client.get(reverse("admin:index")), self.URL)
         self.assertEqual(client.get(self.URL).status_code, 403)
+
+    def test_page_requires_login(self):
+        response = Client().get(self.URL)
+
+        self.assertRedirects(
+            response,
+            f"{reverse('admin:login')}?next={self.URL}",
+            fetch_redirect_response=False,
+        )
 
     def test_page_shows_status(self):
         idle_watchdog.write_status(

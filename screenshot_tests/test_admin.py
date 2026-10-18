@@ -139,5 +139,5 @@ def test_idle_watchdog(admin_user, page, monkeypatch, tmp_path):
     monkeypatch.setenv("LIFETRACKER_IDLE_STOP", "monitor")
     monkeypatch.setenv("LIFETRACKER_IDLE_STOP_STATUS_FILE", str(status_file))
     _log_in(page, admin_user)
-    page.goto("/admin/core/idlewatchdogstatus/")
+    page.goto("/admin/idle-watchdog/")
     _screenshot(page, "idle-watchdog")

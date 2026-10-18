@@ -257,7 +257,8 @@ settings are `LIFETRACKER_IDLE_STOP_PORTS` (default `$PORT` or 8000, and 22),
 to that file (default `/tmp/lifetracker-idle-watchdog.json`). It logs to stderr,
 so on Fly its messages are in `./flyctl.sh logs`.
 
-Superusers can see the status in the admin, under **Core > Idle Watchdog**:
+Superusers can see the status in the admin, from the **Idle Watchdog** link in
+the top bar:
 - the mode;
 - when the watchdog last checked, with a warning if it's gone quiet for more
   than three check intervals, which probably means it has stopped running;

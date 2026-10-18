@@ -30,7 +30,6 @@ from lifetracker.core.models import (
     DBStoredFile,
     FileExtension,
     FileType,
-    IdleWatchdogStatus,
     MimeType,
 )
 
@@ -482,44 +481,16 @@ def idle_watchdog_page_context(now=None):
     return context
 
 
-@admin.register(IdleWatchdogStatus)
-class IdleWatchdogStatusAdmin(admin.ModelAdmin):
-    """Hosts the superuser-only idle watchdog status page as the model's
-    changelist (the model has no table), so the admin index's "Idle Watchdog"
-    entry (under Core) leads there."""
+def idle_watchdog_view(request):
+    """The superuser-only idle watchdog status page. The admin site serves it
+    (wrapped in ``admin_view``) at ``idle-watchdog/`` and links it from the top
+    bar, as it belongs to no model."""
+    if not request.user.is_superuser:
+        raise PermissionDenied
 
-    def has_module_permission(self, request):
-        return request.user.is_active and request.user.is_superuser
-
-    def has_view_permission(self, request, obj=None):
-        return request.user.is_active and request.user.is_superuser
-
-    def has_add_permission(self, request):
-        return False
-
-    def has_change_permission(self, request, obj=None):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
-
-    def get_urls(self):
-        return [
-            path(
-                "",
-                self.admin_site.admin_view(self.status_view),
-                name="core_idlewatchdogstatus_changelist",
-            ),
-        ]
-
-    def status_view(self, request):
-        if not request.user.is_superuser:
-            raise PermissionDenied
-
-        context = {
-            **self.admin_site.each_context(request),
-            **idle_watchdog_page_context(),
-            "title": "Idle Watchdog",
-            "opts": self.model._meta,
-        }
-        return render(request, "admin/core/idlewatchdogstatus/status.html", context)
+    context = {
+        **admin.site.each_context(request),
+        **idle_watchdog_page_context(),
+        "title": "Idle Watchdog",
+    }
+    return render(request, "admin/core/idle_watchdog.html", context)
