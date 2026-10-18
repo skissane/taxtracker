@@ -25,7 +25,8 @@ Don't run `--job dependabot-fix`, `--job publish` or `--job deploy` locally: it 
 `scripts/check_whitespace.py`, stdlib-only) checks every file `git ls-files` lists, except ones
 Git's own detection calls binary (`git ls-files --eol` shows `w/-text`) and symlinks: no trailing
 whitespace on any line, no leading blank line, and exactly one newline at the end of a non-empty
-file (none in an empty one). It checks the working tree copy, so it also catches unstaged edits.
+file (none in an empty one). It checks the working tree copy, so it also catches unstaged edits. For a
+Markdown hard line break, end the line with a backslash rather than two trailing spaces.
 
 **Dependency minimums:** `pyproject.toml`'s dependency lower bounds (`>=`) are kept equal to the
 versions uv resolved, by `scripts/requirements_min_versions.py`: `just requirements-check` (part of
