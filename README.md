@@ -232,6 +232,10 @@ passes `--pty` only when run from a terminal:
 ./flyssh.sh python manage.py showmigrations
 ```
 
+To run as another user, put `--user=<name>` first, e.g. `./flyssh.sh --user=root`
+(`HOME` is then `/home/<name>`, or `/root` for root). Use `--` before a command
+that itself starts with `--`.
+
 If the Machine isn't running, `./flyssh.sh` starts it first, waiting for it to
 finish stopping if need be (this needs `jq`).
 The Machine auto-stops when idle, and Fly judges that by HTTP traffic through
