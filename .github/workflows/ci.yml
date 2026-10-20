@@ -45,6 +45,9 @@ jobs:
       - name: Check whitespace in text files
         run: just whitespace-check
 
+      - name: Check nothing is committed under screenshots/
+        run: just screenshots-dir-check
+
       - name: Lint with ruff
         run: just lint
 

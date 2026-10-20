@@ -7,7 +7,7 @@ This file provides guidance to AI coding assistants working with code in this re
 ## Commands
 
 CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run
-everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `lint`, `fmt-check`,
+everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `screenshots-dir-check`, `lint`, `fmt-check`,
 `lint-templates`, `fmt-check-templates`, `coverage`, `screenshots`, `screenshots-post`, `sync`, `lock-check`, `lock-os-arch-check`,
 `requirements-check`, `requirements-fix`). `just ci` drifts from
 `ci.yml` if the workflow changes without a matching justfile edit; `run_workflow_local.py`
@@ -27,6 +27,14 @@ Git's own detection calls binary (`git ls-files --eol` shows `w/-text`) and syml
 whitespace on any line, no leading blank line, and exactly one newline at the end of a non-empty
 file (none in an empty one). It checks the working tree copy, so it also catches unstaged edits. For a
 Markdown hard line break, end the line with a backslash rather than two trailing spaces.
+
+**Screenshots directory:** `just screenshots-dir-check` (part of `just check`, `just ci` and the
+`test` job; `scripts/check_screenshots_dir.py`, stdlib-only) fails unless `screenshots/.gitignore`
+is the only file `git ls-files` lists under `screenshots/`, and its staged and working tree copies
+both have the contents the script expects. Without it, `rm -rf screenshots` before a screenshot run,
+then `git add -A`, commits the PNGs and the `.gitignore`'s deletion (as happened on PR #137). There's
+deliberately no escape hatch: a change that really needs to alter `screenshots/.gitignore` updates
+the script's `EXPECTED` along with it.
 
 **Dependency minimums:** `pyproject.toml`'s dependency lower bounds (`>=`) are kept equal to the
 versions uv resolved, by `scripts/requirements_min_versions.py`: `just requirements-check` (part of
