@@ -3,6 +3,7 @@ import datetime
 import importlib.util
 import io
 import json
+import logging
 import os
 import re
 import signal
@@ -1454,6 +1455,38 @@ class SettingsGoogleSSOEnvTests(_SettingsSubprocessMixin, TestCase):
             ),
             (False, "", "", "", None, []),
         )
+
+
+class LoggingTests(TestCase):
+    """settings.LOGGING sends Django's and the app's logs to stderr whatever
+    DEBUG is (tests run with it off, as production does), so they reach the
+    Fly logs."""
+
+    def setUp(self):
+        # Both loggers share the one handler, which writes to stderr.
+        (handler,) = logging.getLogger("django").handlers
+        self.assertEqual(logging.getLogger("lifetracker").handlers, [handler])
+        self.assertIs(type(handler), logging.StreamHandler)
+        self.stream = io.StringIO()
+        self.addCleanup(handler.setStream, handler.setStream(self.stream))
+
+    def test_unhandled_exception_traceback_is_logged(self):
+        client = Client(raise_request_exception=False)
+        client.force_login(User.objects.create_superuser("admin", "", "pw"))
+        with mock.patch(
+            "lifetracker.core.admin.idle_watchdog_page_context",
+            side_effect=RuntimeError("boom"),
+        ):
+            response = client.get(reverse("admin:idle_watchdog"))
+        self.assertEqual(response.status_code, 500)
+        output = self.stream.getvalue()
+        self.assertIn("ERROR django.request: Internal Server Error", output)
+        self.assertIn("Traceback (most recent call last):", output)
+        self.assertIn("RuntimeError: boom", output)
+
+    def test_app_logger_logs_info(self):
+        logging.getLogger("lifetracker.core.admin").info("hello")
+        self.assertEqual(self.stream.getvalue(), "INFO lifetracker.core.admin: hello\n")
 
 
 class InitialAdminPasswordFileTests(TestCase):
