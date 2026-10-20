@@ -519,7 +519,7 @@ forwards to `just`). Run `just --list` to see them all. The main ones:
 | Command | What it does |
 |---|---|
 | `just test` | Runs the test suite (pytest, in parallel across CPU cores). |
-| `just check` | Runs the whitespace, ruff and djlint checks, without fixing anything. |
+| `just check` | Runs the whitespace, `screenshots/`, ruff and djlint checks, without fixing anything. |
 | `just fix` | Fixes lint issues and reformats code and templates. |
 | `just coverage` | Runs the tests and prints a coverage report. |
 | `just screenshots` | Saves light and dark mode screenshots of admin pages to `screenshots/`, using a headless Chromium it installs with Playwright. |

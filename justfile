@@ -26,6 +26,10 @@ lock-os-arch-check:
 whitespace-check:
     uv run --no-project python scripts/check_whitespace.py
 
+# Check that screenshots/ has nothing tracked but its unchanged .gitignore
+screenshots-dir-check:
+    uv run --no-project python scripts/check_screenshots_dir.py
+
 # Lint Python code with ruff
 lint:
     uv run --group dev ruff check .
@@ -136,8 +140,8 @@ docker-shell *args:
 fly-setup *args:
     ./fly-setup.sh "$@"
 
-# Run every whitespace, ruff and djlint check (no fixes, no tests)
-check: whitespace-check lint fmt-check lint-templates fmt-check-templates
+# Run every whitespace, screenshots/, ruff and djlint check (no fixes, no tests)
+check: whitespace-check screenshots-dir-check lint fmt-check lint-templates fmt-check-templates
 
 # Autofix lint issues and reformat code/templates
 fix: lint-fix fmt fmt-templates
