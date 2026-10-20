@@ -2,6 +2,9 @@
 # Run a command as the lifetracker user on the production Fly Machine, via
 # ./flyctl.sh (so FLY_APP comes from .env), e.g.
 # `./flyssh.sh python manage.py showmigrations` or `./flyssh.sh ls -l /data`.
+# A leading --user=<name> runs it as that user instead, e.g. --user=root; HOME
+# is /home/<name>, or /root for root. Use `--` before a command that itself
+# starts with `--`.
 # With no arguments, starts an interactive bash. Drops privileges with setpriv,
 # as docker-entrypoint.sh does, rather than `su -`, so the command keeps the
 # Machine's environment (LIFETRACKER_DATA_DIR, the venv on PATH, Fly secrets),
@@ -25,17 +28,48 @@ squote() {
   printf "'%s'" "$quoted$rest"
 }
 
+target_user="lifetracker"
+for arg in "$@"; do
+  case "$arg" in
+    --user=*)
+      shift
+      target_user="${arg#--user=}"
+      # It's interpolated into --command unquoted, so allow only plain names.
+      if [[ ! "$target_user" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+        echo "flyssh.sh: invalid user name: '$target_user'" >&2
+        exit 1
+      fi
+      ;;
+    --)
+      shift
+      break
+      ;;
+    --*)
+      echo "flyssh.sh: unknown option $arg" >&2
+      exit 1
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
 if [ "$#" -eq 0 ]; then
   # Not `bash -l`: Debian's /etc/profile resets PATH for non-root users,
   # dropping the venv.
   set -- bash
 fi
 
+home="/home/$target_user"
+if [ "$target_user" = root ]; then
+  home=/root
+fi
+
 # setpriv leaves HOME as /root, which lifetracker can't write to (see
 # docker-entrypoint.sh). The SSH session doesn't set USER or LOGNAME, so set
 # them too, for tools that expect them. sh only changes directory; the command
 # is then exec'd from its own arguments, not parsed by it.
-command='env HOME=/home/lifetracker USER=lifetracker LOGNAME=lifetracker setpriv --reuid=lifetracker --regid=lifetracker --init-groups'
+command="env HOME=$home USER=$target_user LOGNAME=$target_user setpriv --reuid=$target_user --regid=$target_user --init-groups"
 command+=' sh -c '"$(squote 'cd "${LIFETRACKER_APP_DIR:-/app}" && exec "$@"')"' sh'
 for arg in "$@"; do
   command+=" $(squote "$arg")"
