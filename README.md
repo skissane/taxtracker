@@ -174,6 +174,7 @@ The image defaults to `LIFETRACKER_DEBUG=0`, and then refuses to start unless
 | `LIFETRACKER_UNAUTHENTICATED_SITE_NAME` | Optional. Site name shown in the admin header and page titles to visitors who aren't logged in, e.g. on the login page, instead of `Life Tracker` (the default). `just fly-setup` copies it from `.env` to a Fly secret. |
 | `LIFETRACKER_COMMIT_ID` | Optional. Commit shown in the admin header. `just docker-build` and `./run.sh` set it automatically from `git rev-parse HEAD`. |
 | `LIFETRACKER_COMMIT_URL_BASE` | Optional. Base URL used for the commit link in the admin header, shown only to logged-in users. Defaults to `https://github.com/skissane/taxtracker/commit/`. |
+| `LIFETRACKER_LOG_TIMESTAMPS` | Optional. Set to `0` or `false` to leave the timestamp off the start of each log line, if whatever collects the logs adds its own. `fly.toml` sets it, as Fly does. |
 
 For example:
 
