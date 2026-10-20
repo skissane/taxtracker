@@ -354,6 +354,31 @@ STATIC_ROOT = os.environ.get("LIFETRACKER_STATIC_ROOT")
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# Logging
+# https://docs.djangoproject.com/en/6.0/topics/logging/
+#
+# Django's default config prints to the console only while DEBUG is on, and
+# otherwise mails request errors to ADMINS, which is unset here. So without
+# this, a production 500's traceback, and anything the app itself logs, would
+# go nowhere. Send them to stderr instead, where gunicorn's own output (and so
+# `fly logs`) is. Replacing the "django" logger's handlers also drops the
+# default's mail_admins.
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "stderr": {"format": "{levelname} {name}: {message}", "style": "{"},
+    },
+    "handlers": {
+        "stderr": {"class": "logging.StreamHandler", "formatter": "stderr"},
+    },
+    "loggers": {
+        "django": {"handlers": ["stderr"], "level": "INFO"},
+        "lifetracker": {"handlers": ["stderr"], "level": "INFO"},
+    },
+}
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/6.0/ref/settings/#default-auto-field
 
