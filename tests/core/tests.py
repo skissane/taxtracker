@@ -37,6 +37,7 @@ from django.test import (
 )
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.log import ServerFormatter
 from django_google_sso.main import GoogleAuth
 
 from lifetracker import google_sso, gunicorn_conf
@@ -1486,7 +1487,54 @@ class LoggingTests(TestCase):
 
     def test_app_logger_logs_info(self):
         logging.getLogger("lifetracker.core.admin").info("hello")
-        self.assertEqual(self.stream.getvalue(), "INFO lifetracker.core.admin: hello\n")
+        self.assertRegex(
+            self.stream.getvalue(),
+            r"\A\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} "
+            r"INFO lifetracker\.core\.admin: hello\n\Z",
+        )
+
+    def test_runserver_request_log_keeps_its_own_handler(self):
+        # Configuring "django" resets its children, so without its own entry
+        # runserver's request log would propagate to the plain handler and lose
+        # the colours ServerFormatter gives it.
+        server_logger = logging.getLogger("django.server")
+        self.assertFalse(server_logger.propagate)
+        # pytest adds its capture handlers to non-propagating loggers too.
+        (handler,) = (
+            h for h in server_logger.handlers if type(h).__module__ != "_pytest.logging"
+        )
+        self.assertIs(type(handler), logging.StreamHandler)
+        self.assertIsInstance(handler.formatter, ServerFormatter)
+
+
+class SettingsLogTimestampsTests(_SettingsSubprocessMixin, TestCase):
+    """LIFETRACKER_LOG_TIMESTAMPS turns off the timestamp at the start of each
+    log line, for Fly, which stamps every line itself."""
+
+    EXPR = "s.LOGGING['formatters']['stderr']['format']"
+
+    def _format(self, **env):
+        with tempfile.TemporaryDirectory() as home:
+            proc = self._run(home, extra_env=env, expr=self.EXPR)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc.stdout.strip()
+
+    def test_on_by_default(self):
+        self.assertEqual(self._format(), "{asctime} {levelname} {name}: {message}")
+
+    def test_off(self):
+        self.assertEqual(
+            self._format(LIFETRACKER_LOG_TIMESTAMPS="0"),
+            "{levelname} {name}: {message}",
+        )
+
+    def test_invalid(self):
+        with tempfile.TemporaryDirectory() as home:
+            proc = self._run(
+                home, extra_env={"LIFETRACKER_LOG_TIMESTAMPS": "no"}, expr=self.EXPR
+            )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("LIFETRACKER_LOG_TIMESTAMPS must be", proc.stderr)
 
 
 class InitialAdminPasswordFileTests(TestCase):

@@ -30,6 +30,8 @@ primary_region = "syd"
   # check on the real Machine that SSH sessions show up on port 22. Once they
   # do, set this to "stop" and auto_stop_machines below to "off".
   LIFETRACKER_IDLE_STOP = "monitor"
+  # Fly timestamps every log line itself, so don't add a second one.
+  LIFETRACKER_LOG_TIMESTAMPS = "0"
 
 # The idle watchdog stops the Machine by making gunicorn exit 0. on-failure
 # (what `fly deploy` uses when none is set) restarts the Machine only after a

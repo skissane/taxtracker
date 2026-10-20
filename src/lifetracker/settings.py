@@ -363,18 +363,44 @@ MEDIA_ROOT = BASE_DIR / "media"
 # go nowhere. Send them to stderr instead, where gunicorn's own output (and so
 # `fly logs`) is. Replacing the "django" logger's handlers also drops the
 # default's mail_admins.
+#
+# Each line starts with a timestamp unless LIFETRACKER_LOG_TIMESTAMPS is off,
+# as fly.toml sets it, since Fly already stamps every line it collects.
+#
+# Configuring "django" also resets the default config's "django.server" logger
+# (runserver's request log), which would then propagate to the plain stderr
+# handler and lose its colours, so it's configured here as Django's default
+# config does.
+
+_log_format = "{levelname} {name}: {message}"
+if _env_bool("LIFETRACKER_LOG_TIMESTAMPS", True):
+    _log_format = "{asctime} " + _log_format
 
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        "stderr": {"format": "{levelname} {name}: {message}", "style": "{"},
+        "stderr": {"format": _log_format, "style": "{"},
+        "django.server": {
+            "()": "django.utils.log.ServerFormatter",
+            "format": "[{server_time}] {message}",
+            "style": "{",
+        },
     },
     "handlers": {
         "stderr": {"class": "logging.StreamHandler", "formatter": "stderr"},
+        "django.server": {
+            "class": "logging.StreamHandler",
+            "formatter": "django.server",
+        },
     },
     "loggers": {
         "django": {"handlers": ["stderr"], "level": "INFO"},
+        "django.server": {
+            "handlers": ["django.server"],
+            "level": "INFO",
+            "propagate": False,
+        },
         "lifetracker": {"handlers": ["stderr"], "level": "INFO"},
     },
 }
