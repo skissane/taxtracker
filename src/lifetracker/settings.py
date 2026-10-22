@@ -275,15 +275,22 @@ LIFETRACKER_BACKUP_HOSTNAME = (
     or socket.gethostname()
 )
 
-# The Machine's page in Fly's dashboard, linked from the admin's top bar for
-# superusers; empty (no link) unless Fly's FLY_APP_NAME and FLY_MACHINE_ID, which
-# it sets on its Machines, are both non-blank.
-_fly_machine_id = os.environ.get("FLY_MACHINE_ID", "").strip()
-LIFETRACKER_FLY_MACHINE_URL = (
-    f"https://fly.io/apps/{quote(_fly_app_name, safe='')}"
-    f"/machines/{quote(_fly_machine_id, safe='')}"
-    if _fly_app_name and _fly_machine_id
-    else ""
+
+def fly_machine_url(app_name, machine_id):
+    """The Machine's page in Fly's dashboard, linked from the admin's top bar for
+    superusers; empty (no link) unless both are non-blank."""
+    app_name, machine_id = app_name.strip(), machine_id.strip()
+    if not (app_name and machine_id):
+        return ""
+    return (
+        f"https://fly.io/apps/{quote(app_name, safe='')}"
+        f"/machines/{quote(machine_id, safe='')}"
+    )
+
+
+# Fly sets both on its Machines.
+LIFETRACKER_FLY_MACHINE_URL = fly_machine_url(
+    _fly_app_name, os.environ.get("FLY_MACHINE_ID", "")
 )
 
 # Google SSO: disabled by default unless credentials are configured. When enabled,

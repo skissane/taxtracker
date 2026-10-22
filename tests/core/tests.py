@@ -84,6 +84,7 @@ from lifetracker.core.models import (
     MimeType,
 )
 from lifetracker.core.timing import REQUEST_START_ATTR
+from lifetracker.settings import fly_machine_url
 from lifetracker.tasktracker.models import Task, TaskAttachment
 from lifetracker.taxtracker.models import Attachment, FinancialYear, Item
 from lifetracker.wsgi import application as wsgi_application
@@ -1440,6 +1441,30 @@ class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
         )
 
 
+class FlyMachineUrlTests(SimpleTestCase):
+    def test_built_from_app_name_and_machine_id(self):
+        self.assertEqual(
+            fly_machine_url(" example-app ", "0123456789abcd "),
+            "https://fly.io/apps/example-app/machines/0123456789abcd",
+        )
+
+    def test_values_are_url_quoted(self):
+        self.assertEqual(
+            fly_machine_url("a/b", "c?d"), "https://fly.io/apps/a%2Fb/machines/c%3Fd"
+        )
+
+    def test_empty_unless_both_are_set(self):
+        for app_name, machine_id in [
+            ("", ""),
+            ("example-app", ""),
+            ("", "0123456789abcd"),
+            ("example-app", "  "),
+            (" ", "0123456789abcd"),
+        ]:
+            with self.subTest(app_name=app_name, machine_id=machine_id):
+                self.assertEqual(fly_machine_url(app_name, machine_id), "")
+
+
 class SettingsFlyMachineUrlTests(_SettingsSubprocessMixin, TestCase):
     def _url(self, **env):
         with tempfile.TemporaryDirectory() as home:
@@ -1449,28 +1474,11 @@ class SettingsFlyMachineUrlTests(_SettingsSubprocessMixin, TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return ast.literal_eval(proc.stdout.strip())
 
-    def test_built_from_fly_app_name_and_machine_id(self):
+    def test_read_from_fly_environment_variables(self):
         self.assertEqual(
-            self._url(FLY_APP_NAME=" example-app ", FLY_MACHINE_ID="0123456789abcd"),
+            self._url(FLY_APP_NAME="example-app", FLY_MACHINE_ID="0123456789abcd"),
             "https://fly.io/apps/example-app/machines/0123456789abcd",
         )
-
-    def test_values_are_url_quoted(self):
-        self.assertEqual(
-            self._url(FLY_APP_NAME="a/b", FLY_MACHINE_ID="c?d"),
-            "https://fly.io/apps/a%2Fb/machines/c%3Fd",
-        )
-
-    def test_empty_unless_both_are_set(self):
-        for env in [
-            {},
-            {"FLY_APP_NAME": "example-app"},
-            {"FLY_MACHINE_ID": "0123456789abcd"},
-            {"FLY_APP_NAME": "example-app", "FLY_MACHINE_ID": "  "},
-            {"FLY_APP_NAME": " ", "FLY_MACHINE_ID": "0123456789abcd"},
-        ]:
-            with self.subTest(env=env):
-                self.assertEqual(self._url(**env), "")
 
 
 class SettingsGoogleSSOEnvTests(_SettingsSubprocessMixin, TestCase):
