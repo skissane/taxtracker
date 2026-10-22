@@ -219,6 +219,12 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": Path(os.environ.get("LIFETRACKER_DB_PATH", _default_db_path)),
+        # gunicorn's threads can write concurrently. IMMEDIATE takes the write
+        # lock when a transaction starts, so a transaction that read first and
+        # then writes waits for another writer (up to the timeout) rather than
+        # failing at once with "database is locked", as DEFERRED's lock upgrade
+        # does. The timeout allows for a long write, e.g. an archive import.
+        "OPTIONS": {"transaction_mode": "IMMEDIATE", "timeout": 30},
     }
 }
 
