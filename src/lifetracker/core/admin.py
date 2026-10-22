@@ -7,7 +7,7 @@ from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.forms import BaseInlineFormSet
-from django.http import HttpResponse
+from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils import timezone
@@ -17,12 +17,12 @@ from lifetracker.core import idle_watchdog
 from lifetracker.core.backup import (
     CLOUD_BACKUP_ERRORS,
     CloudBackupStatusUpdateError,
+    backup_database,
     backup_timestamp,
     check_sqlite,
     list_cloud_backups,
     missing_cloud_backup_settings,
     run_cloud_backup,
-    serialize_database,
 )
 from lifetracker.core.models import (
     CLOUD_BACKUP_STATUS_PK,
@@ -366,11 +366,14 @@ class CloudBackupStatusAdmin(admin.ModelAdmin):
             messages.error(request, str(exc))
             return redirect(reverse("admin:core_cloudbackupstatus_changelist"))
 
-        backup_bytes = serialize_database()
         filename = f"db-backup.{backup_timestamp(timezone.now())}.sqlite3"
-        response = HttpResponse(backup_bytes, content_type="application/x-sqlite3")
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
-        return response
+        # FileResponse streams the file and closes it once it's sent.
+        return FileResponse(
+            backup_database(),
+            as_attachment=True,
+            filename=filename,
+            content_type="application/x-sqlite3",
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -65,8 +65,8 @@ from lifetracker.core.attachments import (
 )
 from lifetracker.core.backup import (
     CLOUD_BACKUP_S3_CONFIG,
+    backup_database,
     run_cloud_backup,
-    serialize_database,
 )
 from lifetracker.core.forms import FlexibleDateField
 from lifetracker.core.management.commands.ensure_superuser import (
@@ -661,6 +661,10 @@ class DatabaseStorageTests(TestCase):
     def test_size(self):
         name = self.storage.save("sized.txt", ContentFile(b"0123456789"))
         self.assertEqual(self.storage.size(name), 10)
+
+    def test_size_missing_pk_raises(self):
+        with self.assertRaises(DBStoredFile.DoesNotExist):
+            self.storage.size("db/999999/missing.txt")
 
     def test_delete_removes_stored_file(self):
         name = self.storage.save("deleteme.txt", ContentFile(b"bye"))
@@ -1838,7 +1842,7 @@ class SQLiteFileDatabaseTests(TestCase):
             cursor.execute("PRAGMA journal_mode")
             self.assertEqual(cursor.fetchone(), ("wal",))
 
-    def test_serialize_database_includes_uncheckpointed_wal(self):
+    def test_backup_database_includes_uncheckpointed_wal(self):
         with self.connection.cursor() as cursor:
             # Stop SQLite copying the WAL back into the main file on commit,
             # so the row exists only in db.sqlite3-wal.
@@ -1848,12 +1852,32 @@ class SQLiteFileDatabaseTests(TestCase):
         with mock.patch(
             "lifetracker.core.backup.connections", {"default": self.connection}
         ):
-            data = serialize_database()
+            with backup_database() as backup_file:
+                data = backup_file.read()
         copy_path = self.db_path.with_name("copy.sqlite3")
         copy_path.write_bytes(data)
         copy = sqlite3.connect(copy_path)
         self.addCleanup(copy.close)
         self.assertEqual(copy.execute("SELECT v FROM t").fetchall(), [("in the wal",)])
+
+    def test_backup_database_refuses_inside_transaction(self):
+        with mock.patch(
+            "lifetracker.core.backup.connections", {"default": self.connection}
+        ):
+            with mock.patch.object(self.connection, "in_atomic_block", True):
+                with self.assertRaisesMessage(
+                    RuntimeError, "Can't back up the database inside a transaction."
+                ):
+                    backup_database()
+
+    def test_backup_database_leaves_no_file_behind(self):
+        with mock.patch(
+            "lifetracker.core.backup.connections", {"default": self.connection}
+        ):
+            backup_file = backup_database()
+        with backup_file:
+            self.assertFalse(os.path.exists(backup_file.name))
+            self.assertTrue(backup_file.read(16).startswith(b"SQLite format 3\x00"))
 
 
 class CloudBackupStatusModelTests(TestCase):
@@ -1875,7 +1899,31 @@ class CloudBackupStatusModelTests(TestCase):
             CloudBackupStatus.objects.create(pk=CLOUD_BACKUP_STATUS_PK + 1)
 
 
-class BackupAdminViewTests(TestCase):
+def _record_uploads(mock_client):
+    """Make *mock_client*'s ``upload_fileobj`` read each file it's given.
+
+    Returns a list it appends each upload to, as a dict of its arguments with
+    the file's content as ``Body``, since the file is closed after the upload.
+    """
+    uploads = []
+
+    def upload_fileobj(fileobj, bucket, key, ExtraArgs=None):
+        uploads.append(
+            {
+                "Body": fileobj.read(),
+                "Bucket": bucket,
+                "Key": key,
+                "ExtraArgs": ExtraArgs,
+            }
+        )
+
+    mock_client.return_value.upload_fileobj.side_effect = upload_fileobj
+    return uploads
+
+
+class BackupAdminViewTests(TransactionTestCase):
+    # Not TestCase: backup_database() refuses to run inside a transaction.
+
     def setUp(self):
         self.user = User.objects.create_superuser(
             "admin", "admin@example.com", "password"
@@ -1916,7 +1964,9 @@ class BackupAdminViewTests(TestCase):
             r"db-backup\.\d{4}-\d{2}-\d{2}\.\d{2}\.\d{2}\.\d{2}\.sqlite3",
         )
         # Content should be a valid SQLite database (starts with the magic header)
-        self.assertTrue(response.content[:16].startswith(b"SQLite format 3\x00"))
+        content = response.getvalue()
+        self.assertTrue(content.startswith(b"SQLite format 3\x00"))
+        self.assertEqual(int(response["Content-Length"]), len(content))
 
     def test_download_db_backup_requires_superuser(self):
         non_super = User.objects.create_user("regular", "r@example.com", "pass")
@@ -1996,6 +2046,7 @@ class BackupAdminViewTests(TestCase):
     )
     @mock.patch("lifetracker.core.backup.boto3.client")
     def test_cloud_backup_status_view_run_backup_updates_status(self, mock_client):
+        uploads = _record_uploads(mock_client)
         url = reverse("admin:core_cloudbackupstatus_changelist")
         response = self.client.post(url, follow=True)
         self.assertEqual(response.status_code, 200)
@@ -2008,29 +2059,20 @@ class BackupAdminViewTests(TestCase):
             aws_secret_access_key="secret-key",
             config=CLOUD_BACKUP_S3_CONFIG,
         )
-        put_object = mock_client.return_value.put_object
-        put_object.assert_called_once()
-        self.assertEqual(put_object.call_args.kwargs["Bucket"], "test-bucket")
-        self.assertEqual(
-            put_object.call_args.kwargs["ContentType"], "application/x-sqlite3"
-        )
+        [upload] = uploads
+        self.assertEqual(upload["Bucket"], "test-bucket")
+        self.assertEqual(upload["ExtraArgs"], {"ContentType": "application/x-sqlite3"})
         self.assertRegex(
-            put_object.call_args.kwargs["Key"],
+            upload["Key"],
             r"^test-host\.local/db-backup\."
             r"\d{4}-\d{2}-\d{2}\.\d{2}\.\d{2}\.\d{2}\.sqlite3$",
         )
-        self.assertTrue(
-            put_object.call_args.kwargs["Body"].startswith(b"SQLite format 3\x00")
-        )
+        self.assertTrue(upload["Body"].startswith(b"SQLite format 3\x00"))
 
         status = CloudBackupStatus.objects.get(pk=CLOUD_BACKUP_STATUS_PK)
         self.assertIsNotNone(status.last_backup_at)
-        self.assertEqual(
-            status.last_backup_object_key, put_object.call_args.kwargs["Key"]
-        )
-        self.assertEqual(
-            status.last_backup_size, len(put_object.call_args.kwargs["Body"])
-        )
+        self.assertEqual(status.last_backup_object_key, upload["Key"])
+        self.assertEqual(status.last_backup_size, len(upload["Body"]))
 
     @override_settings(
         LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
@@ -2131,7 +2173,7 @@ class BackupAdminViewTests(TestCase):
     )
     @mock.patch("lifetracker.core.backup.boto3.client")
     def test_cloud_backup_upload_error_shows_error(self, mock_client):
-        mock_client.return_value.put_object.side_effect = ClientError(
+        mock_client.return_value.upload_fileobj.side_effect = ClientError(
             {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
             "PutObject",
         )
@@ -2159,8 +2201,8 @@ class BackupAdminViewTests(TestCase):
             with self.assertLogs("lifetracker.core.admin", "ERROR") as logs:
                 response = self.client.post(url)
         self.assertIn("IntegrityError: boom", logs.output[0])
-        mock_client.return_value.put_object.assert_called_once()
-        key = mock_client.return_value.put_object.call_args.kwargs["Key"]
+        mock_client.return_value.upload_fileobj.assert_called_once()
+        key = mock_client.return_value.upload_fileobj.call_args.args[2]
         self.assertContains(
             response,
             f"Cloud backup uploaded successfully as {key}, but failed to record "
@@ -2362,7 +2404,9 @@ class BackupAdminViewTests(TestCase):
     LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
     LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
 )
-class CloudBackupCommandTests(TestCase):
+class CloudBackupCommandTests(TransactionTestCase):
+    # Not TestCase: backup_database() refuses to run inside a transaction.
+
     """Tests for the cloud_backup management command."""
 
     def call(self):
@@ -2373,15 +2417,13 @@ class CloudBackupCommandTests(TestCase):
 
     @mock.patch("lifetracker.core.backup.boto3.client")
     def test_uploads_and_records_status(self, mock_client):
+        uploads = _record_uploads(mock_client)
         output = self.call()
-        put_object = mock_client.return_value.put_object
-        put_object.assert_called_once()
-        key = put_object.call_args.kwargs["Key"]
-        self.assertEqual(put_object.call_args.kwargs["Bucket"], "test-bucket")
+        [upload] = uploads
+        key = upload["Key"]
+        self.assertEqual(upload["Bucket"], "test-bucket")
         self.assertRegex(key, r"^test-host\.local/db-backup\.")
-        self.assertTrue(
-            put_object.call_args.kwargs["Body"].startswith(b"SQLite format 3\x00")
-        )
+        self.assertTrue(upload["Body"].startswith(b"SQLite format 3\x00"))
         self.assertEqual(output, f"Cloud backup uploaded successfully as {key}.\n")
         status = CloudBackupStatus.objects.get(pk=CLOUD_BACKUP_STATUS_PK)
         self.assertEqual(status.last_backup_object_key, key)
@@ -2403,7 +2445,7 @@ class CloudBackupCommandTests(TestCase):
 
     @mock.patch("lifetracker.core.backup.boto3.client")
     def test_upload_error_fails(self, mock_client):
-        mock_client.return_value.put_object.side_effect = ClientError(
+        mock_client.return_value.upload_fileobj.side_effect = ClientError(
             {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
             "PutObject",
         )
@@ -2420,7 +2462,7 @@ class CloudBackupCommandTests(TestCase):
         ):
             with self.assertRaises(CommandError) as cm:
                 self.call()
-        key = mock_client.return_value.put_object.call_args.kwargs["Key"]
+        key = mock_client.return_value.upload_fileobj.call_args.args[2]
         self.assertEqual(
             str(cm.exception),
             f"Cloud backup uploaded successfully as {key}, "

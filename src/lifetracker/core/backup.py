@@ -7,6 +7,10 @@ admin views that use them are on ``CloudBackupStatusAdmin`` in
 backup; callers must enforce authorization themselves.
 """
 
+import os
+import sqlite3
+import tempfile
+
 import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
@@ -46,15 +50,38 @@ def check_sqlite(feature):
         raise RuntimeError(f"{feature} is only available for SQLite databases.")
 
 
-def serialize_database():
-    """Return the whole default (SQLite) database as bytes.
+def backup_database():
+    """Copy the whole default (SQLite) database into a temporary file.
 
-    This reads pages through SQLite, so it includes transactions still in the
-    write-ahead log that haven't been checkpointed into the main file yet. The
-    copy's header keeps WAL mode, which SQLite resumes when it opens the file.
+    Returns the copy as a binary file open for reading from the start; the
+    caller must close it. The file has no name left on disk, so it goes away
+    once closed. Unlike ``Connection.serialize()``, this never holds the whole
+    database in memory, as the database (which stores every attachment) can be
+    bigger than the Machine's RAM.
+
+    The online backup API reads pages through SQLite, so it includes
+    transactions still in the write-ahead log that haven't been checkpointed
+    into the main file yet. The copy's header keeps WAL mode, which SQLite
+    resumes when it opens the file.
+
+    Raises ``RuntimeError`` inside a transaction: the backup has to read through
+    this connection to see its uncommitted writes, and SQLite refuses to back up
+    from a connection that's writing, which ``backup()`` retries forever.
     """
-    with connections["default"].cursor() as cursor:
-        return cursor.connection.serialize()
+    connection = connections["default"]
+    if connection.in_atomic_block:
+        raise RuntimeError("Can't back up the database inside a transaction.")
+    with tempfile.TemporaryDirectory(prefix="lifetracker-backup-") as tmp_dir:
+        path = os.path.join(tmp_dir, "backup.sqlite3")
+        dest = sqlite3.connect(path)
+        try:
+            with connection.cursor() as cursor:
+                cursor.connection.backup(dest)
+        finally:
+            dest.close()
+        # Removing the directory unlinks the file, but this handle keeps its
+        # content readable until it's closed.
+        return open(path, "rb")
 
 
 def backup_timestamp(when):
@@ -111,26 +138,28 @@ def run_cloud_backup():
             f"{', '.join(missing_required)}."
         )
 
-    backup_bytes = serialize_database()
-    backup_time = timezone.now()
-    object_key = (
-        f"{settings.LIFETRACKER_BACKUP_HOSTNAME}/"
-        f"db-backup.{backup_timestamp(backup_time)}.sqlite3"
-    )
-    s3_client = cloud_backup_s3_client()
-    s3_client.put_object(
-        Bucket=settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
-        Key=object_key,
-        Body=backup_bytes,
-        ContentType="application/x-sqlite3",
-    )
+    with backup_database() as backup_file:
+        backup_size = os.fstat(backup_file.fileno()).st_size
+        backup_time = timezone.now()
+        object_key = (
+            f"{settings.LIFETRACKER_BACKUP_HOSTNAME}/"
+            f"db-backup.{backup_timestamp(backup_time)}.sqlite3"
+        )
+        s3_client = cloud_backup_s3_client()
+        # Streams the file, in parts (a multipart upload) once it's big enough.
+        s3_client.upload_fileobj(
+            backup_file,
+            settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
+            object_key,
+            ExtraArgs={"ContentType": "application/x-sqlite3"},
+        )
     try:
         CloudBackupStatus.objects.update_or_create(
             pk=CLOUD_BACKUP_STATUS_PK,
             defaults={
                 "last_backup_at": backup_time,
                 "last_backup_object_key": object_key,
-                "last_backup_size": len(backup_bytes),
+                "last_backup_size": backup_size,
             },
         )
     except Exception as exc:
