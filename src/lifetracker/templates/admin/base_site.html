@@ -25,7 +25,9 @@
     <a href="{% url 'admin:idle_watchdog' %}">Idle Watchdog</a> /
     <a href="{% url 'admin:uptime_report' %}">Uptime</a> /
     {% if fly_machine_url %}
-      <a href="{{ fly_machine_url }}" target="_blank" rel="noopener noreferrer">Fly Machine</a> /
+      <a href="{{ fly_machine_url }}"
+         target="_blank"
+         rel="noopener noreferrer">Fly Machine</a> /
     {% endif %}
   {% endif %}
   {{ block.super }}
