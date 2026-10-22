@@ -153,17 +153,21 @@ With no commit ID, only the instance name is shown.
 
 `CloudBackupStatusAdmin` (core) hosts the backup pages, which cover the whole database rather than one module.
 It replaces the model's usual admin URLs with these, all superuser-only (`has_module_permission`/`has_view_permission` are superuser-only too, so only superusers see its **Backups** entry under Core on the admin index).
-The logic lives in `core/backup.py` as plain functions (`run_cloud_backup`, `list_cloud_backups`, `serialize_database`, etc.), not admin methods, so e.g. scheduled backups can reuse it:
-- **Backups** (`/admin/core/cloudbackupstatus/`, the changelist URL) — cloud backup status page with a "Run Backup Now" button that uploads the serialised SQLite DB to an S3-compatible bucket (via `boto3`) as `<hostname>/db-backup.<YYYY-MM-DD.HH.MM.SS>.sqlite3`, where `<hostname>` is `LIFETRACKER_BACKUP_HOSTNAME` if set, else `socket.gethostname()` (`just docker-run` sets it to `docker.$(hostname)`, as the container's DB is separate from local dev's and its own hostname is a random ID); the page shows it.
+The logic lives in `core/backup.py` as plain functions (`run_cloud_backup`, `list_cloud_backups`, `backup_database`, etc.), not admin methods, so e.g. scheduled backups can reuse it:
+- **Backups** (`/admin/core/cloudbackupstatus/`, the changelist URL) — cloud backup status page with a "Run Backup Now" button that uploads a copy of the SQLite DB to an S3-compatible bucket (via `boto3`'s `upload_fileobj`, which streams it, in parts once it's big enough) as `<hostname>/db-backup.<YYYY-MM-DD.HH.MM.SS>.sqlite3`, where `<hostname>` is `LIFETRACKER_BACKUP_HOSTNAME` if set, else `socket.gethostname()` (`just docker-run` sets it to `docker.$(hostname)`, as the container's DB is separate from local dev's and its own hostname is a random ID); the page shows it.
   The `cloud_backup` management command (core) does the same from the command line via the same `run_cloud_backup`, printing the object key, and raises `CommandError` on the same failures (`CLOUD_BACKUP_ERRORS`, shared with the admin views), including when the upload succeeded but recording `CloudBackupStatus` didn't.
   Manual only; nothing schedules it.
   Configured by the `LIFETRACKER_BACKUP_S3_*` env vars read in `settings.py`: `BUCKET_NAME`, `ACCESS_KEY_ID` and `SECRET_ACCESS_KEY` are required (the button is disabled and the missing names are listed until they're set); `ENDPOINT_URL` (blank = AWS) and `REGION_NAME` are optional.
   Locally, these normally go in `.env` (see below).
-- **DB backup** (`download-db-backup/`) — SQLite serialise download, linked from the backups page.
+- **DB backup** (`download-db-backup/`) — download of the same copy (a `FileResponse`), linked from the backups page.
 - **Cloud backup list** (`list/`) — linked from the backups page: lists the bucket's objects (`list_objects_v2`, paginated) with key, size and last-modified time (shown in UTC), newest first.
   The `prefix` query parameter picks what to list: absent means this instance's `<hostname>/`, empty means the whole bucket; links to each top-level folder (one per hostname, from a `Delimiter="/"` listing) let you switch.
   Missing settings and S3 errors are shown on the page.
   Both cloud backup pages get their client from `cloud_backup_s3_client`.
+
+The cloud backup and the DB backup download both get their copy from `backup_database()`, which uses SQLite's online backup API (`sqlite3.Connection.backup()`) to write it to a temporary file and returns that file open, already unlinked, rather than `serialize()`, which would hold the whole database (every attachment included) in memory on a Machine with 512 MB.
+The temporary directory (`/tmp`, or `$TMPDIR`; on Fly, the Machine's root filesystem, not the `/data` volume) needs room for one full copy of the database while a backup runs; if it fills, SQLite's `sqlite3.OperationalError` (in `CLOUD_BACKUP_ERRORS`, with `OSError`) is reported as a failed backup, not a 500.
+It raises `RuntimeError` inside a transaction (`in_atomic_block`), since SQLite won't back up from a connection that's writing and `backup()` would retry forever; so tests that run a backup are `TransactionTestCase`s, not `TestCase`s.
 
 The superuser-only **Idle Watchdog** page (`/admin/idle-watchdog/`, URL name `admin:idle_watchdog`) belongs to no model, so it has no admin index entry; instead `LifetrackerAdminSite.get_urls` serves `core.admin.idle_watchdog_view` there, and `src/lifetracker/templates/admin/base_site.html` (in `TEMPLATES`' `DIRS`, so ahead of the admin's own templates, which it extends) links it from the top bar for superusers, before "View site".
 Add any further model-less pages the same way, rather than giving them a tableless model; if the links grow numerous, make them a menu.
@@ -189,6 +193,8 @@ Custom admin pages in any module link `core/admin_pages.css` (static), which siz
 - **Multi-year ZIP** (`download-multi-zip/`) — multiple FYs, each under a top-level `FY<year>/` prefix.
   Also supports "View Index (Markdown)" action.
 - **Copy to new year** (`copy-to-new-year/`) — clones the item tree (without notes/status/attachments) into `year+1`.
+
+Both ZIPs are built in a `SpooledTemporaryFile` (in memory up to `_ZIP_SPOOL_MAX_SIZE`, 10 MB, then on disk), copying in one attachment at a time, and returned as a `FileResponse`, so they never hold every attachment in memory at once.
 
 `ItemAdmin` adds:
 - **Import archive** (`<pk>/import-archive/`) — uploads a `.har` (Fidelity) or `.zip` file and creates `Attachment` records for each extracted PDF.
@@ -248,7 +254,7 @@ Fly Proxy's auto-stop only sees traffic through the proxy, not SSH (which goes o
 The replacement is the idle watchdog, `core/idle_watchdog.py`.
 `docker-entrypoint.sh` runs gunicorn with gthread workers (`--threads ${LIFETRACKER_GUNICORN_THREADS:-8}`), not its default single sync worker, which blocks on a browser's idle spare connection and leaves other requests queued (issue #172); gthread holds a thread up to 5 seconds on a new idle connection, hence several threads.
 As requests can now write concurrently, `DATABASES` sets SQLite's `transaction_mode` to `IMMEDIATE` (so a transaction that reads and then writes waits for the lock instead of failing with "database is locked") and a 30-second `timeout`, and its `init_command` puts the database in WAL mode (issue #152), so readers, including management commands run over SSH such as `cloud_backup`, don't wait for a writer.
-The mode persists in the file, which then has `-wal` and `-shm` files beside it (gitignored and dockerignored); `serialize_database()` reads through SQLite, so backups include changes not yet checkpointed from the `-wal` file, but copying `db.sqlite3` alone while the app runs may miss them.
+The mode persists in the file, which then has `-wal` and `-shm` files beside it (gitignored and dockerignored); `backup_database()` reads through SQLite, so backups include changes not yet checkpointed from the `-wal` file, but copying `db.sqlite3` alone while the app runs may miss them.
 The tests' in-memory database stays in `memory` mode.
 Under gthread, `--timeout` only restarts a worker whose main loop hangs; it never aborts a slow request.
 `lifetracker/gunicorn_conf.py` (which `docker-entrypoint.sh` passes as `--config python:lifetracker.gunicorn_conf`) starts it from gunicorn's `when_ready` hook, which runs only in the master.
