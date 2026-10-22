@@ -103,6 +103,17 @@ if not _stored:
 
 SECRET_KEY = _stored
 
+# The key pair for the JWT cookie for the authenticating front proxy (see
+# lifetracker/core/jwt_auth.py): the private key, created on first use, and
+# the public key as a JWKS, for the proxy.
+LIFETRACKER_JWT_PRIVATE_KEY_FILE = (
+    _env_path("LIFETRACKER_JWT_PRIVATE_KEY_FILE")
+    or LIFETRACKER_CONFIG_DIR / "jwt_private_key.pem"
+)
+LIFETRACKER_JWT_JWKS_FILE = (
+    _env_path("LIFETRACKER_JWT_JWKS_FILE") or LIFETRACKER_CONFIG_DIR / "jwt_jwks.json"
+)
+
 
 def _env_bool(name, default):
     value = os.environ.get(name)
@@ -183,6 +194,9 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # After auth, and before messages, which can change the session (see its
+    # docstring).
+    "lifetracker.core.jwt_auth.JWTCookieMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
