@@ -606,11 +606,14 @@ def uptime_day_page_context(date_param, days_param, now=None):
         "date": date,
         "directory": uptime_log.uptime_dir_from_env(),
         "report_query": (f"?days={days}" if days_param and days is not None else ""),
-        "previous_date": uptime_log.day_date(day - 1),
+        "previous_date": None,
         "next_date": None,
         "day": None,
         "periods": None,
     }
+    # No day before date.min, nor any date for it to be.
+    if date > datetime.date.min:
+        context["previous_date"] = uptime_log.day_date(day - 1)
     if day < uptime_log.day_of(now):
         context["next_date"] = uptime_log.day_date(day + 1)
     if context["directory"] is None:

@@ -22,9 +22,12 @@
 {% endblock breadcrumbs %}
 {% block content %}
   <p>
-    <a href="{% url 'admin:uptime_day' previous_date|date:'Y-m-d' %}{{ report_query }}">← {{ previous_date|date:"Y-m-d D" }}</a>
+    {% if previous_date %}
+      <a href="{% url 'admin:uptime_day' previous_date|date:'Y-m-d' %}{{ report_query }}">← {{ previous_date|date:"Y-m-d D" }}</a>
+    {% endif %}
+    {% if previous_date and next_date %}|{% endif %}
     {% if next_date %}
-      | <a href="{% url 'admin:uptime_day' next_date|date:'Y-m-d' %}{{ report_query }}">{{ next_date|date:"Y-m-d D" }} →</a>
+      <a href="{% url 'admin:uptime_day' next_date|date:'Y-m-d' %}{{ report_query }}">{{ next_date|date:"Y-m-d D" }} →</a>
     {% endif %}
   </p>
   {% if directory is None %}

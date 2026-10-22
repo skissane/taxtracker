@@ -193,12 +193,15 @@ def day_periods(directory: Path, day: int, now: float) -> DayPeriods:
     )
     into_next = bool(periods) and periods[-1].end == last_second
     into_next = into_next and _second_is_up(read_day(directory, day + 1), 0)
-    # The watchdog records each second as it passes, and fills in gaps of up to
-    # MAX_FILLED_GAP_SECONDS, so a period that recent may still be going.
+    # The latest second the watchdog can have recorded is the one before now's,
+    # as it records each second once it's begun, and it fills in gaps of up to
+    # MAX_FILLED_GAP_SECONDS after that, so a period ending that recently may
+    # still be going.
+    latest_recorded = int(now) % SECONDS_PER_DAY - 1
     ongoing = (
         day == today
         and bool(periods)
-        and periods[-1].end >= int(now) % SECONDS_PER_DAY - 1 - MAX_FILLED_GAP_SECONDS
+        and periods[-1].end >= latest_recorded - MAX_FILLED_GAP_SECONDS
     )
     return DayPeriods(
         day_date(day), periods, from_previous, into_next, ongoing, day == today

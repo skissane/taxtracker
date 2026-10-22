@@ -3844,6 +3844,13 @@ class UptimeDayAdminViewTests(TestCase):
                     self.client.get(f"/admin/uptime/{date}/").status_code, 404
                 )
 
+    def test_first_possible_date(self):
+        response = self.client.get("/admin/uptime/0001-01-01/")
+
+        self.assertContains(response, "No data: 0001-01-01")
+        self.assertContains(response, 'href="/admin/uptime/0001-01-02/"')
+        self.assertNotContains(response, "←")
+
     def test_bad_days_dropped(self):
         response = self.client.get(self.URL, {"days": "0"})
 
