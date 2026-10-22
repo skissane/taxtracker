@@ -299,6 +299,9 @@ e.g. a throttled CPU, also counts as a stop and start):
 ./flyssh.sh python manage.py uptime_report
 ```
 
+Superusers can also see it in the admin, from the **Uptime** link in the top
+bar, with a bar per day; its Days box does what `--days` does.
+
 The files aren't in the cloud backup, which only has the database.
 
 `fly.toml` currently runs it in `monitor` mode alongside Fly's own auto-stop,

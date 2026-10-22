@@ -22,6 +22,7 @@ Doesn't import Django, as the watchdog doesn't.
 import datetime
 import os
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 SECONDS_PER_DAY = 86_400
@@ -96,6 +97,45 @@ def start_count(data: bytes) -> int:
     bits = int.from_bytes(data, "big")
     # Shifting right moves each second's bit onto the next second's.
     return (bits & ~(bits >> 1)).bit_count()
+
+
+@dataclass(frozen=True)
+class DayUptime:
+    """One day's line of the uptime report. ``up_seconds`` and ``starts`` are
+    None if there's no data: the day is before the first file."""
+
+    date: datetime.date
+    up_seconds: int | None
+    elapsed_seconds: int
+    starts: int | None
+    today: bool
+
+    @property
+    def share(self) -> float | None:
+        """The share of the day (so far, for today) the app was up."""
+        if self.up_seconds is None:
+            return None
+        return self.up_seconds / self.elapsed_seconds
+
+
+def daily_report(directory: Path, days: int, now: float) -> list[DayUptime]:
+    """The last ``days`` UTC days up to the one ``now`` falls on, oldest first.
+    Today's share is of the day so far. A day with no file counts as never up,
+    unless it's before the first file."""
+    today = day_of(now)
+    first_recorded = first_recorded_day(directory)
+    report = []
+    for day in range(today - days + 1, today + 1):
+        elapsed = SECONDS_PER_DAY
+        if day == today:
+            elapsed = int(now) % SECONDS_PER_DAY + 1
+        if first_recorded is None or day < first_recorded:
+            up = starts = None
+        else:
+            data = read_day(directory, day) or bytes(DAY_FILE_SIZE)
+            up, starts = active_seconds(data), start_count(data)
+        report.append(DayUptime(day_date(day), up, elapsed, starts, day == today))
+    return report
 
 
 class UptimeLog:

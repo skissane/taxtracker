@@ -68,7 +68,10 @@ class LifetrackerAdminSite(admin.AdminSite):
     def get_urls(self):
         # Imported here: core.admin registers its models on admin.site, an
         # instance of this class, so a top-level import would be circular.
-        from lifetracker.core.admin import idle_watchdog_view  # noqa: PLC0415
+        from lifetracker.core.admin import (  # noqa: PLC0415
+            idle_watchdog_view,
+            uptime_report_view,
+        )
 
         # Pages that belong to no model, so get no admin index entry; the top
         # bar links them instead (templates/admin/base_site.html).
@@ -77,6 +80,11 @@ class LifetrackerAdminSite(admin.AdminSite):
                 "idle-watchdog/",
                 self.admin_view(idle_watchdog_view),
                 name="idle_watchdog",
+            ),
+            path(
+                "uptime/",
+                self.admin_view(uptime_report_view),
+                name="uptime_report",
             ),
             *super().get_urls(),
         ]
