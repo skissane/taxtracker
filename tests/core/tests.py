@@ -1040,6 +1040,32 @@ class AdminSitePerRequestHeaderTests(TestCase):
         self.assertNotContains(response, "Example Site")
 
 
+class AdminSiteFlyMachineLinkTests(TestCase):
+    URL = "https://fly.io/apps/example-app/machines/0123456789abcd"
+    LINK = f'<a href="{URL}" target="_blank" rel="noopener noreferrer">Fly Machine</a>'
+
+    def _index(self, user):
+        client = Client()
+        client.force_login(user)
+        return client.get(reverse("admin:index"))
+
+    @override_settings(LIFETRACKER_FLY_MACHINE_URL=URL)
+    def test_top_bar_links_to_fly_machine_for_superusers(self):
+        response = self._index(User.objects.create_superuser("admin", "", "pw"))
+        self.assertContains(response, self.LINK, html=True)
+
+    @override_settings(LIFETRACKER_FLY_MACHINE_URL=URL)
+    def test_no_link_for_staff_or_logged_out(self):
+        staff = User.objects.create_user("staff", "", "pw", is_staff=True)
+        self.assertNotContains(self._index(staff), self.URL)
+        self.assertNotContains(Client().get(reverse("admin:login")), self.URL)
+
+    @override_settings(LIFETRACKER_FLY_MACHINE_URL="")
+    def test_no_link_when_not_on_fly(self):
+        response = self._index(User.objects.create_superuser("admin", "", "pw"))
+        self.assertNotContains(response, "Fly Machine")
+
+
 class _SettingsSubprocessMixin:
     """settings.py computes its values at import time, from files under $HOME
     and from environment variables, before Django is even configured. They can
@@ -1412,6 +1438,39 @@ class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
             )[2],
             "test-instance",
         )
+
+
+class SettingsFlyMachineUrlTests(_SettingsSubprocessMixin, TestCase):
+    def _url(self, **env):
+        with tempfile.TemporaryDirectory() as home:
+            proc = self._run(
+                home, extra_env=env, expr="repr(s.LIFETRACKER_FLY_MACHINE_URL)"
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return ast.literal_eval(proc.stdout.strip())
+
+    def test_built_from_fly_app_name_and_machine_id(self):
+        self.assertEqual(
+            self._url(FLY_APP_NAME=" example-app ", FLY_MACHINE_ID="0123456789abcd"),
+            "https://fly.io/apps/example-app/machines/0123456789abcd",
+        )
+
+    def test_values_are_url_quoted(self):
+        self.assertEqual(
+            self._url(FLY_APP_NAME="a/b", FLY_MACHINE_ID="c?d"),
+            "https://fly.io/apps/a%2Fb/machines/c%3Fd",
+        )
+
+    def test_empty_unless_both_are_set(self):
+        for env in [
+            {},
+            {"FLY_APP_NAME": "example-app"},
+            {"FLY_MACHINE_ID": "0123456789abcd"},
+            {"FLY_APP_NAME": "example-app", "FLY_MACHINE_ID": "  "},
+            {"FLY_APP_NAME": " ", "FLY_MACHINE_ID": "0123456789abcd"},
+        ]:
+            with self.subTest(env=env):
+                self.assertEqual(self._url(**env), "")
 
 
 class SettingsGoogleSSOEnvTests(_SettingsSubprocessMixin, TestCase):

@@ -240,6 +240,7 @@ Then set `LIFETRACKER_IDLE_STOP` to `stop` and `auto_stop_machines` to `"off"`.
 
 Don't commit the name anywhere, including in issues, PRs or pasted command output.
 On the Machine, `LIFETRACKER_ALLOWED_HOSTS` and `LIFETRACKER_BACKUP_HOSTNAME` default from the name (via `FLY_APP_NAME`, which Fly sets), so they need no configuration.
+Superusers also get a **Fly Machine** link in the admin's top bar, to the Machine's page in Fly's dashboard (`https://fly.io/apps/<app>/machines/<machine id>`), shown only when Fly's `FLY_APP_NAME` and `FLY_MACHINE_ID` are both set.
 
 #### One-time setup
 

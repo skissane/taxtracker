@@ -5,7 +5,8 @@
 {% comment %}
   Extends the admin's own base_site.html (Django skips this file when resolving
   the same name), adding top bar links to admin pages that belong to no model,
-  so have no admin index entry. If these grow numerous, make them a menu. Also
+  so have no admin index entry, and (on Fly) to the Machine's page in Fly's
+  dashboard. If these grow numerous, make them a menu. Also
   adds the page generation time (see core/timing.py) to every page's footer.
 {% endcomment %}
 {% block extrastyle %}
@@ -23,6 +24,9 @@
   {% if user.is_active and user.is_superuser %}
     <a href="{% url 'admin:idle_watchdog' %}">Idle Watchdog</a> /
     <a href="{% url 'admin:uptime_report' %}">Uptime</a> /
+    {% if fly_machine_url %}
+      <a href="{{ fly_machine_url }}" target="_blank" rel="noopener noreferrer">Fly Machine</a> /
+    {% endif %}
   {% endif %}
   {{ block.super }}
 {% endblock userlinks %}
