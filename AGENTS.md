@@ -48,7 +48,7 @@ uv run pytest tests/taxtracker/tests.py::ItemModelTests::test_str_root
 # Run tests under coverage, print a report, and write coverage.xml and junit.xml (no minimum enforced)
 just coverage
 
-# Screenshot the admin login, index, backups, cloud backup list, idle watchdog and uptime pages, in light and dark mode, into screenshots/ (gitignored)
+# Screenshot the admin login, index, backups, cloud backup list, idle watchdog, uptime and uptime day pages, in light and dark mode, into screenshots/ (gitignored)
 just screenshots
 
 # Post screenshots/ to PR 123 as a comment, or update it (as gh's logged-in user)
@@ -183,6 +183,9 @@ Times are in the site's time zone.
 The superuser-only **Uptime** page (`/admin/uptime/`, URL name `admin:uptime_report`) is served and linked the same way, by `core.admin.uptime_report_view`.
 It shows the same report as the `uptime_report` command, newest day first, as both get it from `uptime_log.daily_report` (a list of `DayUptime`); its `days` query parameter (default 7, at most 366) is the command's `--days`, and an invalid one is reported on the page and the default used.
 Dates are UTC days, as the files are.
+Each day's Starts count (unless it's "No data") links to that day's drill-down page (`/admin/uptime/<YYYY-MM-DD>/`, URL name `admin:uptime_day`, `core.admin.uptime_day_view`; not in the top bar).
+It lists the day's up periods (`uptime_log.day_periods`, from `up_periods`, one `UpPeriod` per start) with start, last second up and duration (all `HH:MM:SS`), noting a period that began the day before (up at midnight, and the previous day's last second up), continued into the next day, or may still be going (today's, if it ended within `MAX_FILLED_GAP_SECONDS` of now).
+An invalid date or one after today is a 404; the page keeps the report's `days` for its links back and to the days either side.
 
 Every admin page's footer shows how long the page took to generate ("Page generated in 0.042 seconds").
 `core/timing.py`'s `RequestTimingMiddleware`, first in `MIDDLEWARE` so it covers the others, records when Django started on the request; `base_site.html`'s `footer` block shows the time so far via the `page_generation_time` tag (`core/templatetags/page_timing.py`, empty without the middleware or a request in the context), styled by its `extrastyle` block.

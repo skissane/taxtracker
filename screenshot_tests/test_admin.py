@@ -162,3 +162,7 @@ def test_uptime(admin_user, page, monkeypatch, tmp_path):
     _log_in(page, admin_user)
     page.goto("/admin/uptime/?days=8")
     _screenshot(page, "uptime")
+    # Drill into yesterday's starts (newest first): its two up periods.
+    page.get_by_role("link", name="2", exact=True).first.click()
+    page.wait_for_url("**/admin/uptime/*/?days=8")
+    _screenshot(page, "uptime-day")

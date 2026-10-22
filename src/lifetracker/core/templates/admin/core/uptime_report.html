@@ -83,14 +83,16 @@
                 </meter>
               </td>
               <td>{{ line.up }} of {{ line.elapsed }}</td>
-              <td class="lt-num">{{ line.row.starts }}</td>
+              <td class="lt-num">
+                <a href="{% url 'admin:uptime_day' line.row.date|date:'Y-m-d' %}?days={{ days }}">{{ line.row.starts }}</a>
+              </td>
             {% endif %}
           </tr>
         {% endfor %}
       </tbody>
     </table>
     <p>
-      A start is a second the app was up after one it wasn't, so running at midnight counts as one, and so does a stall of over 5 seconds. A day with no file counts as never up, unless it's before the first file ("No data").
+      A start is a second the app was up after one it wasn't, so running at midnight counts as one, and so does a stall of over 5 seconds. A day with no file counts as never up, unless it's before the first file ("No data"). Click a day's starts to see when each up period began and how long it lasted.
     </p>
   {% endif %}
 {% endblock content %}
