@@ -396,7 +396,7 @@ Sessions from before this, which have no token yet, just get one.
 
 The token is signed with a key the app creates on first start, `jwt_private_key.pem` in the config directory (`/data` in Docker and on Fly.io, `~/.config/lifetracker` locally), and the public key is written beside it as `jwt_jwks.json`, for the proxy.
 Set `LIFETRACKER_JWT_PRIVATE_KEY_FILE` or `LIFETRACKER_JWT_JWKS_FILE` to put either somewhere else.
-Deleting the private key makes the app create a new one on its next start, and each session gets a token signed with it on its next request.
+Nothing replaces the key automatically; deleting it makes the app create a new one on its next start, which logs everyone out once, so it's the way to revoke every token.
 The requests that need no login are listed by:
 
 ```bash

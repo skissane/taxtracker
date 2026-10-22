@@ -24,6 +24,7 @@ import pytest
 from botocore.exceptions import ClientError
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.models import User
@@ -265,11 +266,11 @@ class GoogleSSOLoginFlowTests(TestCase):
     def test_login_issues_jwt_cookie(self):
         response = self._callback()
         token = response.cookies[jwt_auth.JWT_COOKIE_NAME].value
-        self.assertEqual(_decode_jwt(token)["sub"], str(self.user.pk))
-        self.assertEqual(
-            self.client.session[jwt_auth.SESSION_KEY]["hashes"],
-            [jwt_auth.token_hash(token)],
-        )
+        claims = _decode_jwt(token)
+        self.assertEqual(claims["sub"], str(self.user.pk))
+        session = self.client.session
+        self.assertEqual(claims["sid"], jwt_auth.session_id_claim(session.session_key))
+        self.assertEqual(session[jwt_auth.SESSION_KEY], {"sub": str(self.user.pk)})
 
     @override_settings(SESSION_COOKIE_AGE=12345)
     def test_session_expiry_matches_password_login(self):
@@ -4503,14 +4504,9 @@ class JWTCookieMiddlewareTests(TestCase):
         )
         self.assertAlmostEqual(claims["iat"], time.time(), delta=5)
         self.assertTrue(claims["jti"])
-        self.assertEqual(
-            self._stored(),
-            {
-                "sub": str(self.user.pk),
-                "kid": jwt_auth.signing_key()[1],
-                "hashes": [jwt_auth.token_hash(cookie.value)],
-            },
-        )
+        self.assertEqual(claims["sid"], jwt_auth.session_id_claim(session.session_key))
+        self.assertNotIn(session.session_key, cookie.value)
+        self.assertEqual(self._stored(), {"sub": str(self.user.pk)})
 
     @override_settings(SESSION_COOKIE_SECURE=True)
     def test_cookie_secure_like_session_cookie(self):
@@ -4547,10 +4543,7 @@ class JWTCookieMiddlewareTests(TestCase):
         second = response.cookies[jwt_auth.JWT_COOKIE_NAME].value
         self.assertNotEqual(second, first)
         self.assertGreaterEqual(_decode_jwt(second)["exp"], _decode_jwt(first)["exp"])
-        self.assertEqual(
-            self._stored()["hashes"],
-            [jwt_auth.token_hash(second), jwt_auth.token_hash(first)],
-        )
+        self.assertEqual(self._stored(), {"sub": str(self.user.pk)})
 
     def test_reissued_on_password_change(self):
         # update_session_auth_hash() cycles the session key, so it's saved.
@@ -4579,29 +4572,29 @@ class JWTCookieMiddlewareTests(TestCase):
         session.save()
         response = self.client.get(reverse("admin:index"))
         self.assertEqual(response.status_code, 200)
-        token = response.cookies[jwt_auth.JWT_COOKIE_NAME].value
-        self.assertEqual(self._stored()["sub"], str(self.user.pk))
-        self.assertEqual(self._stored()["hashes"], [jwt_auth.token_hash(token)])
+        self.assertIn(jwt_auth.JWT_COOKIE_NAME, response.cookies)
+        self.assertEqual(self._stored(), {"sub": str(self.user.pk)})
 
-    def test_reissued_when_signing_key_changes(self):
-        # As the front proxy would reject a token signed with the old key.
+    def test_concurrently_issued_tokens_all_accepted(self):
+        # Two overlapping requests that both re-issue: whichever token the
+        # browser keeps, the session (which records neither) accepts it.
         self._login()
-        first = self._token()
         session = self.client.session
-        session[jwt_auth.SESSION_KEY] = {**self._stored(), "kid": "old key"}
-        session.save()
-        response = self.client.get(reverse("admin:login"))
-        self.assertRedirects(
-            response, reverse("admin:index"), fetch_redirect_response=False
-        )
-        token = response.cookies[jwt_auth.JWT_COOKIE_NAME].value
-        self.assertEqual(self._stored()["kid"], jwt_auth.signing_key()[1])
-        self.assertEqual(
-            self._stored()["hashes"],
-            [jwt_auth.token_hash(token), jwt_auth.token_hash(first)],
-        )
+        tokens = [
+            jwt_auth.issue_token(
+                self.user, session.session_key, session.get_expiry_date()
+            )
+            for _ in range(2)
+        ]
+        self.assertNotEqual(*tokens)
+        for token in tokens:
+            with self.subTest(token=token):
+                self.client.cookies[jwt_auth.JWT_COOKIE_NAME] = token
+                self.assertEqual(
+                    self.client.get(reverse("admin:index")).status_code, 200
+                )
 
-    def test_previous_token_still_accepted(self):
+    def test_earlier_token_for_session_still_accepted(self):
         self._login()
         first = self._token()
         with override_settings(SESSION_SAVE_EVERY_REQUEST=True):
@@ -4645,15 +4638,65 @@ class JWTCookieMiddlewareTests(TestCase):
                 if cookie is not None:
                     self.assertCookieDeleted(response)
 
+    def _assert_rejected(self, token, reason):
+        self.client.cookies[jwt_auth.JWT_COOKIE_NAME] = token
+        with self.assertLogs("lifetracker.core.jwt_auth", "WARNING") as logs:
+            response = self.client.get(reverse("admin:index"))
+        self.assertIn(reason, logs.output[0])
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNone(self._logged_in_user_id())
+
+    def test_expired_token_rejected(self):
+        self._login()
+        token = jwt_auth.issue_token(
+            self.user,
+            self.client.session.session_key,
+            timezone.now() - datetime.timedelta(seconds=1),
+        )
+        self._assert_rejected(token, "expired")
+
+    def test_token_for_another_user_rejected(self):
+        other = User.objects.create_superuser("other", "", self.PASSWORD)
+        self._login()
+        token = jwt_auth.issue_token(
+            other,
+            self.client.session.session_key,
+            timezone.now() + datetime.timedelta(hours=1),
+        )
+        self._assert_rejected(token, "another user")
+
+    def test_token_signed_with_another_key_rejected(self):
+        self._login()
+        claims = _decode_jwt(self._token())
+        token = jwt.encode(claims, Ed25519PrivateKey.generate(), algorithm="EdDSA")
+        self._assert_rejected(token, "Signature verification failed")
+
+    def test_token_without_sid_rejected(self):
+        self._login()
+        claims = _decode_jwt(self._token())
+        del claims["sid"]
+        token = jwt.encode(claims, jwt_auth.signing_key()[0], algorithm="EdDSA")
+        self._assert_rejected(token, "sid")
+
+    def test_new_signing_key_logs_out_once(self):
+        # Nothing rotates the key; a new one only appears if the old file goes.
+        self._login()
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        with override_settings(
+            LIFETRACKER_JWT_PRIVATE_KEY_FILE=Path(temp_dir.name) / "key.pem",
+            LIFETRACKER_JWT_JWKS_FILE=Path(temp_dir.name) / "jwks.json",
+        ):
+            self._assert_rejected(self._token(), "Signature verification failed")
+            self._login()
+            self.assertEqual(self.client.get(reverse("admin:index")).status_code, 200)
+
     def test_token_from_another_session_rejected(self):
         self._login()
         other_token = self._token()
         self.client.logout()
         self._login()
-        self.client.cookies[jwt_auth.JWT_COOKIE_NAME] = other_token
-        with self.assertLogs("lifetracker.core.jwt_auth", "WARNING"):
-            self.client.get(reverse("admin:index"))
-        self.assertIsNone(self._logged_in_user_id())
+        self._assert_rejected(other_token, "another session")
 
     def test_whitelisted_paths_need_no_token(self):
         self.assertEqual(self.client.get(reverse("admin:login")).status_code, 200)
