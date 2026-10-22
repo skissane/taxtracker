@@ -100,9 +100,10 @@ docker-build:
 # relative -v source as a named volume.
 #
 # docker-run first imports settings on the host (`manage.py check`), which
-# creates this directory and the secret key as the current user if missing.
+# creates this directory and the secret key as the current user if missing,
+# then runs `manage.py ensure_jwt_key` there, which creates the JWT key pair.
 # Otherwise the Docker daemon would create a missing directory as root on
-# Linux, and the container couldn't generate the key in a read-only mount.
+# Linux, and the container couldn't generate the keys in a read-only mount.
 #
 # The container runs as your host UID/GID (LIFETRACKER_UID/LIFETRACKER_GID),
 # since the secret key is only readable by its owner (mode 0600).
@@ -123,6 +124,7 @@ config_dir := absolute_path(env("LIFETRACKER_CONFIG_DIR", env("HOME") / ".config
 [positional-arguments]
 docker-run *args:
     LIFETRACKER_CONFIG_DIR="{{ config_dir }}" uv run python manage.py check
+    LIFETRACKER_CONFIG_DIR="{{ config_dir }}" uv run python manage.py ensure_jwt_key
     docker run -i $([ -t 0 ] && echo -t) --rm --name=lifetracker -p 127.0.0.1:${LIFETRACKER_DOCKER_PORT:-8000}:8000 $([ -f .env ] && echo --env-file .env) -e LIFETRACKER_DEBUG=1 -e LIFETRACKER_BACKUP_HOSTNAME="docker.$(hostname)" -v lifetracker-data:/data -v "{{ config_dir }}:/config:ro" -e LIFETRACKER_CONFIG_DIR=/config -e LIFETRACKER_UID="$(id -u)" -e LIFETRACKER_GID="$(id -g)" lifetracker "$@"
 
 # docker-shell's arguments replace bash with a command run in the running

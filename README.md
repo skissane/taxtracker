@@ -80,10 +80,10 @@ Don't publish a `DEBUG` container on other interfaces.
 To use a host port other than 8000, set `LIFETRACKER_DOCKER_PORT` (e.g. `LIFETRACKER_DOCKER_PORT=8080 just docker-run`, then open <http://localhost:8080/admin/>).
 
 It also mounts your host config directory (`~/.config/lifetracker`, or `$LIFETRACKER_CONFIG_DIR` if set) read-only at `/config`, so the container uses the same secret key and `initial_admin_password` as `./run.sh`.
-Before starting the container it runs `manage.py check` on the host, which creates the directory and secret key as you if they don't exist yet; that way Docker never creates them as root.
+Before starting the container it runs `manage.py check` and `manage.py ensure_jwt_key` on the host, which create the directory, the secret key and the JWT key pair as you if they don't exist yet; that way Docker never creates them as root.
 The database is still separate: the container's lives in the `lifetracker-data` volume, not in the repo.
 
-The container startup path runs `upgrade_legacy_db`, then `migrate`, then `ensure_superuser`, then starts the Gunicorn WSGI server on `0.0.0.0:${PORT:-8000}`.
+The container startup path runs `upgrade_legacy_db`, then `migrate`, then `ensure_superuser`, then `ensure_jwt_key` (see [Front proxy JWT](#front-proxy-jwt)), then starts the Gunicorn WSGI server on `0.0.0.0:${PORT:-8000}`.
 Gunicorn's worker timeout is 120 seconds rather than its default 30, since ZIP exports, DB backups and archive imports run in the request and can be slow for a large database.
 Change it with `LIFETRACKER_GUNICORN_TIMEOUT` (in seconds).
 It uses gthread workers with 8 threads (`LIFETRACKER_GUNICORN_THREADS`) rather than a single sync worker, which a browser's idle spare connection can tie up, leaving other requests waiting.
@@ -111,7 +111,7 @@ Pass `-u lifetracker` to `docker exec` (as above, and as `just docker-shell` doe
 
 To keep config separate from data, for example with the secret key and initial admin password coming from a read-only secrets mount, set `LIFETRACKER_CONFIG_DIR`.
 The secret key and initial password file are then read from there, while the database stays in `/data`.
-A read-only config directory must already contain `secret_key`, since it can't be generated there.
+A read-only config directory must already contain `secret_key`, `jwt_private_key.pem` and `jwt_jwks.json`, since they can't be generated there (`manage.py ensure_jwt_key` creates the last two).
 
 Static files (the admin's CSS/JS) are collected into the image at build time and served by WhiteNoise.
 
@@ -384,6 +384,23 @@ To turn Google sign-in off, run `fly secrets unset LIFETRACKER_GOOGLE_SSO_CLIENT
 
 For another host, pass the same variables to the container with `-e` or `--env-file`, as in [Production deployment](#production-deployment).
 Serve it over HTTPS through a proxy that sets `X-Forwarded-Proto: https`, so the callback URL is `https`; the callback URL takes the scheme from that header regardless of `LIFETRACKER_TRUST_X_FORWARDED_PROTO`.
+
+## Front proxy JWT
+
+An authenticating proxy in front of the app is planned ([#176](https://github.com/skissane/taxtracker/issues/176)): it will turn away any request that doesn't carry a valid token from the app, apart from the few that logging in needs, so even a page accidentally left open without login couldn't be reached.
+The app already issues that token.
+Whenever you're logged in (with a password or with Google), it sets a `lifetracker_jwt` cookie holding a signed token that expires when your session does, and renews it whenever the session's expiry moves forward; logging out deletes it.
+The app also checks the cookie itself: a logged-in session that comes back without its own token is logged out, so a stolen session cookie alone isn't enough.
+Sessions from before this, which have no token yet, just get one.
+
+The token is signed with a key the app creates on first start, `jwt_private_key.pem` in the config directory (`/data` in Docker and on Fly.io, `~/.config/lifetracker` locally), and the public key is written beside it as `jwt_jwks.json`, for the proxy.
+Set `LIFETRACKER_JWT_PRIVATE_KEY_FILE` or `LIFETRACKER_JWT_JWKS_FILE` to put either somewhere else.
+Deleting the private key makes the app create a new one on its next start, and each session gets a token signed with it on its next request.
+The requests that need no login are listed by:
+
+```bash
+uv run python manage.py auth_whitelist
+```
 
 ## Command-line utilities
 

@@ -12,25 +12,31 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from unittest import mock
 
 import coverage
 import gunicorn.config
 import gunicorn.glogging
+import jwt
 import pytest
 from botocore.exceptions import ClientError
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.models import User
+from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.staticfiles import finders
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.files.base import ContentFile
 from django.core.management import CommandError, call_command
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.db.utils import ConnectionHandler
 from django.forms import inlineformset_factory
+from django.http import HttpResponse
 from django.template import Context, Template
 from django.test import (
     Client,
@@ -52,7 +58,7 @@ from lifetracker.admin_site import (
     _build_admin_site_header,
 )
 from lifetracker.asgi import application as asgi_application
-from lifetracker.core import idle_watchdog, uptime_log
+from lifetracker.core import idle_watchdog, jwt_auth, uptime_log
 from lifetracker.core.admin import (
     DBStoredFileAdmin,
     MimeTypeFormSet,
@@ -65,6 +71,7 @@ from lifetracker.core.attachments import (
     file_type_for_filename,
     orphaned_stored_file_pks,
 )
+from lifetracker.core.auth_whitelist import auth_whitelist, is_whitelisted
 from lifetracker.core.backup import (
     CLOUD_BACKUP_S3_CONFIG,
     backup_database,
@@ -253,6 +260,15 @@ class GoogleSSOLoginFlowTests(TestCase):
         response = self._callback()
         self.assertRedirects(response, reverse("admin:index"))
         self.assertEqual(self._logged_in_user_id(), str(self.user.pk))
+
+    def test_login_issues_jwt_cookie(self):
+        response = self._callback()
+        token = response.cookies[jwt_auth.JWT_COOKIE_NAME].value
+        self.assertEqual(_decode_jwt(token)["sub"], str(self.user.pk))
+        self.assertEqual(
+            self.client.session[jwt_auth.SESSION_KEY]["hashes"],
+            [jwt_auth.token_hash(token)],
+        )
 
     @override_settings(SESSION_COOKIE_AGE=12345)
     def test_session_expiry_matches_password_login(self):
@@ -1718,6 +1734,7 @@ class DockerEntrypointTests(TestCase):
         "python manage.py upgrade_legacy_db",
         "python manage.py migrate",
         "python manage.py ensure_superuser",
+        "python manage.py ensure_jwt_key",
     ]
 
     ENTRYPOINT_ENV = {
@@ -4183,3 +4200,397 @@ class IdleWatchdogAdminViewTests(TestCase):
         response = self.client.get(self.URL)
 
         self.assertContains(response, "Couldn&#x27;t read")
+
+
+def _jwks_key(path=None):
+    """The public key from the JWKS file, as PyJWT's ``PyJWK``."""
+    path = path or settings.LIFETRACKER_JWT_JWKS_FILE
+    (key,) = jwt.PyJWKSet.from_json(Path(path).read_text(encoding="utf-8")).keys
+    return key
+
+
+def _decode_jwt(token):
+    """``token``'s claims, checked as the front proxy is to check them."""
+    key = _jwks_key()
+    header = jwt.get_unverified_header(token)
+    assert header["kid"] == key.key_id
+    return jwt.decode(
+        token,
+        key,
+        algorithms=[jwt_auth.JWT_ALGORITHM],
+        audience=jwt_auth.JWT_AUDIENCE,
+        issuer=jwt_auth.JWT_ISSUER,
+    )
+
+
+class JWTKeyTests(SimpleTestCase):
+    """The JWT signing key and the JWKS written for the front proxy."""
+
+    def setUp(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        self.dir = Path(temp_dir.name) / "config"
+        self.private_path = self.dir / "jwt_private_key.pem"
+        self.jwks_path = self.dir / "jwt_jwks.json"
+        override = override_settings(
+            LIFETRACKER_JWT_PRIVATE_KEY_FILE=self.private_path,
+            LIFETRACKER_JWT_JWKS_FILE=self.jwks_path,
+        )
+        override.enable()
+        self.addCleanup(override.disable)
+
+    def _forget_cached_key(self):
+        jwt_auth._keys.pop((self.private_path, self.jwks_path), None)
+
+    def test_creates_private_key_and_jwks(self):
+        key, kid = jwt_auth.signing_key()
+        self.assertEqual(self.private_path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.jwks_path.stat().st_mode & 0o777, 0o644)
+        (jwk,) = json.loads(self.jwks_path.read_text(encoding="utf-8"))["keys"]
+        self.assertEqual(
+            {name: jwk[name] for name in ("kty", "crv", "kid", "use", "alg")},
+            {"kty": "OKP", "crv": "Ed25519", "kid": kid, "use": "sig", "alg": "EdDSA"},
+        )
+        self.assertNotIn("d", jwk)
+        # No temporary files left behind.
+        self.assertEqual(
+            sorted(p.name for p in self.dir.iterdir()),
+            ["jwt_jwks.json", "jwt_private_key.pem"],
+        )
+        token = jwt.encode({"a": 1}, key, algorithm="EdDSA")
+        self.assertEqual(
+            jwt.decode(token, _jwks_key(self.jwks_path), algorithms=["EdDSA"]),
+            {"a": 1},
+        )
+
+    def test_kid_is_rfc_7638_thumbprint(self):
+        # RFC 8037 appendix A.3's example key and thumbprint.
+        jwk = {
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+        }
+        self.assertEqual(
+            jwt_auth._jwk_thumbprint(jwk),
+            "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k",
+        )
+
+    def test_reuses_existing_key_and_rewrites_jwks(self):
+        _, kid = jwt_auth.signing_key()
+        pem = self.private_path.read_bytes()
+        self.jwks_path.unlink()
+        self._forget_cached_key()
+        _, kid_again = jwt_auth.signing_key()
+        self.assertEqual(kid_again, kid)
+        self.assertEqual(self.private_path.read_bytes(), pem)
+        self.assertEqual(_jwks_key(self.jwks_path).key_id, kid)
+
+    def test_key_cached_per_process(self):
+        first = jwt_auth.signing_key()
+        self.private_path.unlink()
+        self.assertEqual(jwt_auth.signing_key(), first)
+        self.assertFalse(self.private_path.exists())
+
+    def test_create_keeps_key_another_process_wrote_first(self):
+        self.dir.mkdir()
+        self.private_path.write_bytes(b"theirs")
+        self.assertEqual(
+            jwt_auth._create_private_key_file(self.private_path), b"theirs"
+        )
+        self.assertEqual(self.private_path.read_bytes(), b"theirs")
+        self.assertEqual(list(self.dir.iterdir()), [self.private_path])
+
+    def test_rejects_key_of_another_type(self):
+        self.dir.mkdir()
+        rsa_pem = rsa.generate_private_key(
+            public_exponent=65537, key_size=2048
+        ).private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        self.private_path.write_bytes(rsa_pem)
+        with self.assertRaisesRegex(ImproperlyConfigured, "isn't an Ed25519"):
+            jwt_auth.signing_key()
+
+    def test_ensure_jwt_key_command(self):
+        out = io.StringIO()
+        call_command("ensure_jwt_key", stdout=out)
+        self.assertEqual(out.getvalue(), f"JWKS: {self.jwks_path}\n")
+        self.assertTrue(self.private_path.exists())
+        self.assertEqual(_jwks_key(self.jwks_path).key_id, jwt_auth.signing_key()[1])
+
+
+class AuthWhitelistTests(SimpleTestCase):
+    """The requests that need no login, shared with the front proxy."""
+
+    def test_matches_exact_paths_and_methods(self):
+        login = reverse("admin:login")
+        logout = reverse("admin:logout")
+        for method, path, expected in [
+            ("GET", login, True),
+            ("HEAD", login, True),
+            ("POST", login, True),
+            ("PUT", login, False),
+            ("GET", login + "x", False),
+            ("GET", login.rstrip("/"), False),
+            ("POST", logout, True),
+            ("GET", logout, False),
+            ("GET", reverse("django_google_sso:oauth_start_login"), True),
+            ("GET", reverse("django_google_sso:oauth_callback"), True),
+            ("POST", reverse("django_google_sso:oauth_callback"), False),
+            ("GET", "/static/admin/css/login.css", True),
+            ("POST", "/static/admin/css/login.css", False),
+            ("GET", reverse("admin:index"), False),
+            ("GET", "/", False),
+        ]:
+            with self.subTest(method=method, path=path):
+                self.assertIs(is_whitelisted(method, path), expected)
+
+    def test_command_prints_json(self):
+        out = io.StringIO()
+        call_command("auth_whitelist", stdout=out)
+        entries = json.loads(out.getvalue())
+        self.assertIn(
+            {
+                "path": "/admin/login/",
+                "methods": ["GET", "HEAD", "POST"],
+                "prefix": False,
+            },
+            entries,
+        )
+        self.assertIn(
+            {"path": "/static/", "methods": ["GET", "HEAD"], "prefix": True}, entries
+        )
+        self.assertEqual(len(entries), len(auth_whitelist()))
+
+
+class JWTCookieMiddlewareTests(TestCase):
+    """Issuing, re-issuing, clearing and checking the JWT cookie."""
+
+    PASSWORD = "correct horse battery staple"
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin", "", self.PASSWORD)
+
+    def _login(self):
+        response = self.client.post(
+            reverse("admin:login"),
+            {
+                "username": "admin",
+                "password": self.PASSWORD,
+                "next": reverse("admin:index"),
+            },
+        )
+        self.assertRedirects(response, reverse("admin:index"))
+        return response
+
+    def _logged_in_user_id(self):
+        return self.client.session.get("_auth_user_id")
+
+    def _token(self):
+        return self.client.cookies[jwt_auth.JWT_COOKIE_NAME].value
+
+    def _stored(self):
+        return self.client.session[jwt_auth.SESSION_KEY]
+
+    def assertCookieDeleted(self, response):
+        cookie = response.cookies[jwt_auth.JWT_COOKIE_NAME]
+        self.assertEqual(cookie.value, "")
+        self.assertEqual(cookie["max-age"], 0)
+
+    def test_login_issues_cookie(self):
+        response = self._login()
+        cookie = response.cookies[jwt_auth.JWT_COOKIE_NAME]
+        self.assertTrue(cookie["httponly"])
+        self.assertEqual(cookie["samesite"], "Lax")
+        self.assertEqual(cookie["path"], "/")
+        # DEBUG is off in tests, but SESSION_COOKIE_SECURE was set from it at
+        # import, when it was on.
+        self.assertEqual(bool(cookie["secure"]), settings.SESSION_COOKIE_SECURE)
+        session = self.client.session
+        self.assertEqual(cookie["max-age"], session.get_expiry_age())
+        claims = _decode_jwt(cookie.value)
+        self.assertEqual(claims["sub"], str(self.user.pk))
+        self.assertAlmostEqual(
+            claims["exp"], session.get_expiry_date().timestamp(), delta=5
+        )
+        self.assertAlmostEqual(claims["iat"], time.time(), delta=5)
+        self.assertTrue(claims["jti"])
+        self.assertEqual(
+            self._stored(),
+            {
+                "sub": str(self.user.pk),
+                "kid": jwt_auth.signing_key()[1],
+                "hashes": [jwt_auth.token_hash(cookie.value)],
+            },
+        )
+
+    @override_settings(SESSION_COOKIE_SECURE=True)
+    def test_cookie_secure_like_session_cookie(self):
+        response = self._login()
+        self.assertTrue(response.cookies[jwt_auth.JWT_COOKIE_NAME]["secure"])
+
+    @override_settings(SESSION_EXPIRE_AT_BROWSER_CLOSE=True)
+    def test_browser_session_cookie_when_session_is(self):
+        response = self._login()
+        self.assertEqual(response.cookies[jwt_auth.JWT_COOKIE_NAME]["max-age"], "")
+
+    def test_session_without_token_gets_one(self):
+        # As for a session from before the middleware existed.
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("admin:index"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            _decode_jwt(response.cookies[jwt_auth.JWT_COOKIE_NAME].value)["sub"],
+            str(self.user.pk),
+        )
+
+    def test_not_reissued_while_session_unchanged(self):
+        self._login()
+        response = self.client.get(reverse("admin:index"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(jwt_auth.JWT_COOKIE_NAME, response.cookies)
+
+    def test_reissued_when_session_saved(self):
+        self._login()
+        first = self._token()
+        with override_settings(SESSION_SAVE_EVERY_REQUEST=True):
+            response = self.client.get(reverse("admin:index"))
+        self.assertEqual(response.status_code, 200)
+        second = response.cookies[jwt_auth.JWT_COOKIE_NAME].value
+        self.assertNotEqual(second, first)
+        self.assertGreaterEqual(_decode_jwt(second)["exp"], _decode_jwt(first)["exp"])
+        self.assertEqual(
+            self._stored()["hashes"],
+            [jwt_auth.token_hash(second), jwt_auth.token_hash(first)],
+        )
+
+    def test_reissued_on_password_change(self):
+        # update_session_auth_hash() cycles the session key, so it's saved.
+        self._login()
+        first = self._token()
+        response = self.client.post(
+            reverse("admin:password_change"),
+            {
+                "old_password": self.PASSWORD,
+                "new_password1": "another horse battery staple",
+                "new_password2": "another horse battery staple",
+            },
+        )
+        self.assertRedirects(response, reverse("admin:password_change_done"))
+        self.assertNotEqual(self._token(), first)
+        self.assertEqual(
+            self.client.get(reverse("admin:index")).status_code,
+            200,
+        )
+        self.assertEqual(self._logged_in_user_id(), str(self.user.pk))
+
+    def test_reissued_when_user_differs(self):
+        self._login()
+        session = self.client.session
+        session[jwt_auth.SESSION_KEY] = {**self._stored(), "sub": "someone else"}
+        session.save()
+        response = self.client.get(reverse("admin:index"))
+        self.assertEqual(response.status_code, 200)
+        token = response.cookies[jwt_auth.JWT_COOKIE_NAME].value
+        self.assertEqual(self._stored()["sub"], str(self.user.pk))
+        self.assertEqual(self._stored()["hashes"], [jwt_auth.token_hash(token)])
+
+    def test_reissued_when_signing_key_changes(self):
+        # As the front proxy would reject a token signed with the old key.
+        self._login()
+        first = self._token()
+        session = self.client.session
+        session[jwt_auth.SESSION_KEY] = {**self._stored(), "kid": "old key"}
+        session.save()
+        response = self.client.get(reverse("admin:login"))
+        self.assertRedirects(
+            response, reverse("admin:index"), fetch_redirect_response=False
+        )
+        token = response.cookies[jwt_auth.JWT_COOKIE_NAME].value
+        self.assertEqual(self._stored()["kid"], jwt_auth.signing_key()[1])
+        self.assertEqual(
+            self._stored()["hashes"],
+            [jwt_auth.token_hash(token), jwt_auth.token_hash(first)],
+        )
+
+    def test_previous_token_still_accepted(self):
+        self._login()
+        first = self._token()
+        with override_settings(SESSION_SAVE_EVERY_REQUEST=True):
+            self.client.get(reverse("admin:index"))
+        self.client.cookies[jwt_auth.JWT_COOKIE_NAME] = first
+        self.assertEqual(self.client.get(reverse("admin:index")).status_code, 200)
+        self.assertEqual(self._logged_in_user_id(), str(self.user.pk))
+
+    def test_logout_clears_cookie(self):
+        self._login()
+        response = self.client.post(reverse("admin:logout"))
+        self.assertEqual(response.status_code, 200)
+        self.assertCookieDeleted(response)
+        self.assertIsNone(self._logged_in_user_id())
+
+    def test_cookie_without_session_cleared(self):
+        self.client.cookies[jwt_auth.JWT_COOKIE_NAME] = "leftover"
+        response = self.client.get(reverse("admin:login"))
+        self.assertEqual(response.status_code, 200)
+        self.assertCookieDeleted(response)
+
+    def test_no_cookie_set_without_session(self):
+        response = self.client.get(reverse("admin:login"))
+        self.assertNotIn(jwt_auth.JWT_COOKIE_NAME, response.cookies)
+
+    def test_mismatched_or_missing_cookie_logs_out(self):
+        for cookie in ("tampered", "", None):
+            with self.subTest(cookie=cookie):
+                self._login()
+                if cookie is None:
+                    del self.client.cookies[jwt_auth.JWT_COOKIE_NAME]
+                else:
+                    self.client.cookies[jwt_auth.JWT_COOKIE_NAME] = cookie
+                with self.assertLogs("lifetracker.core.jwt_auth", "WARNING"):
+                    response = self.client.get(reverse("admin:index"))
+                self.assertRedirects(
+                    response,
+                    reverse("admin:login") + "?next=" + reverse("admin:index"),
+                )
+                self.assertIsNone(self._logged_in_user_id())
+                if cookie is not None:
+                    self.assertCookieDeleted(response)
+
+    def test_token_from_another_session_rejected(self):
+        self._login()
+        other_token = self._token()
+        self.client.logout()
+        self._login()
+        self.client.cookies[jwt_auth.JWT_COOKIE_NAME] = other_token
+        with self.assertLogs("lifetracker.core.jwt_auth", "WARNING"):
+            self.client.get(reverse("admin:index"))
+        self.assertIsNone(self._logged_in_user_id())
+
+    def test_whitelisted_paths_need_no_token(self):
+        self.assertEqual(self.client.get(reverse("admin:login")).status_code, 200)
+        response = self._login()
+        self.assertIn(jwt_auth.JWT_COOKIE_NAME, response.cookies)
+
+    def test_mismatched_cookie_logs_out_on_whitelisted_paths_too(self):
+        # Otherwise the admin would send it from the login page to the index,
+        # which the front proxy would send back to the login page.
+        self._login()
+        self.client.cookies[jwt_auth.JWT_COOKIE_NAME] = "tampered"
+        with self.assertLogs("lifetracker.core.jwt_auth", "WARNING"):
+            response = self.client.get(reverse("admin:login"))
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(self._logged_in_user_id())
+        self.assertCookieDeleted(response)
+
+    def test_not_issued_on_server_error(self):
+        # SessionMiddleware doesn't save the session after a 500.
+        request = RequestFactory().get("/")
+        request.session = SessionStore()
+        request.user = self.user
+        middleware = jwt_auth.JWTCookieMiddleware(lambda r: HttpResponse(status=500))
+        response = middleware(request)
+        self.assertNotIn(jwt_auth.JWT_COOKIE_NAME, response.cookies)
+        self.assertNotIn(jwt_auth.SESSION_KEY, request.session)
