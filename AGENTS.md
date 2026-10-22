@@ -115,6 +115,9 @@ Django's default config prints only while `DEBUG` is on and otherwise mails `ADM
 Get module loggers with `logging.getLogger(__name__)`, so they fall under `lifetracker`.
 Lines are `<asctime> <LEVEL> <logger>: <message>`; `LIFETRACKER_LOG_TIMESTAMPS=0` (set in `fly.toml`, as Fly stamps each line itself) drops the timestamp.
 Configuring `django` resets Django's default `django.server` logger (`runserver`'s coloured request log), so `LOGGING` also re-declares it as Django's defaults do, with its own `ServerFormatter` handler and `propagate: False`.
+Gunicorn's access log (`--access-logfile -` in `docker-entrypoint.sh`) is separate: `lifetracker/gunicorn_conf.py` sets `access_log_format` to gunicorn's default with `%({fly-client-ip}i)s` in front, the client's IP as Fly Proxy sets it in the `Fly-Client-IP` header (`-` without it, e.g. locally).
+The default's own `%(h)s` is the connection's peer, which on Fly is always the proxy; gunicorn never takes it from `X-Forwarded-For`, and `forwarded_allow_ips` only affects the scheme.
+Django's `REMOTE_ADDR` is the proxy too; nothing reads it yet, so nothing rewrites it from `Fly-Client-IP`.
 
 **Legacy database upgrade:** databases created before the `lifetracker`/`core`/`taxtracker` split still have the old `tracker_*` tables and `django_migrations`/`django_content_type` rows under app label `tracker`.
 `taxtracker`'s `upgrade_legacy_db` management command renames those tables and re-labels the content types in place; it is idempotent (no-op on fresh or already-upgraded databases) and `run.sh` runs it unconditionally before `migrate`.
