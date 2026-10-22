@@ -3,6 +3,7 @@ import datetime
 import io
 import json
 import zipfile
+from unittest import mock
 
 from django.contrib.auth.models import Permission, User
 from django.core.exceptions import ValidationError
@@ -383,15 +384,29 @@ class AdminViewTests(TestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/zip")
-        buf = io.BytesIO(
-            b"".join(
-                response.streaming_content
-                if hasattr(response, "streaming_content")
-                else [response.content]
-            )
-        )
+        buf = io.BytesIO(response.getvalue())
         with zipfile.ZipFile(buf) as zf:
             self.assertIn("index.md", zf.namelist())
+        self.assertEqual(
+            response["Content-Disposition"],
+            'attachment; filename="FY2024_attachments.zip"',
+        )
+
+    def test_download_zip_spooled_to_disk(self):
+        """A ZIP bigger than the spool limit is built on disk and still complete."""
+        item = Item.objects.create(year=self.fy, title="Big", order=1)
+        Attachment.objects.create(
+            item=item,
+            title="big.pdf",
+            file=ContentFile(b"x" * 1000, name="big.pdf"),
+        )
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        with mock.patch("lifetracker.taxtracker.admin._ZIP_SPOOL_MAX_SIZE", 1):
+            response = self.client.get(url)
+        content = response.getvalue()
+        self.assertEqual(int(response["Content-Length"]), len(content))
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            self.assertEqual(zf.read("Big/big.pdf"), b"x" * 1000)
 
     def test_download_zip_spaces_replaced_with_underscores(self):
         """Spaces in item titles/filenames must become underscores in ZIP paths."""
@@ -403,13 +418,7 @@ class AdminViewTests(TestCase):
         )
         url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
         response = self.client.get(url)
-        buf = io.BytesIO(
-            b"".join(
-                response.streaming_content
-                if hasattr(response, "streaming_content")
-                else [response.content]
-            )
-        )
+        buf = io.BytesIO(response.getvalue())
         with zipfile.ZipFile(buf) as zf:
             names = zf.namelist()
             # No path component should contain a space.
@@ -436,7 +445,7 @@ class AdminViewTests(TestCase):
         )
         url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
         response = self.client.get(url)
-        buf = io.BytesIO(response.content)
+        buf = io.BytesIO(response.getvalue())
         with zipfile.ZipFile(buf) as zf:
             index_content = zf.read("index.md").decode()
         self.assertIn("Notes_Only_Item", index_content)
@@ -469,7 +478,7 @@ class AdminViewTests(TestCase):
 
         url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
         response = self.client.get(url)
-        buf = io.BytesIO(response.content)
+        buf = io.BytesIO(response.getvalue())
         with zipfile.ZipFile(buf) as zf:
             index_content = zf.read("index.md").decode()
 
@@ -540,13 +549,7 @@ class AdminViewTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/zip")
-        buf = io.BytesIO(
-            b"".join(
-                response.streaming_content
-                if hasattr(response, "streaming_content")
-                else [response.content]
-            )
-        )
+        buf = io.BytesIO(response.getvalue())
         with zipfile.ZipFile(buf) as zf:
             names = zf.namelist()
             # Each FY should have its own top-level prefix.
@@ -1451,7 +1454,7 @@ class ZipIndexHeadingAdjustmentTests(TestCase):
     def _get_index(self):
         url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
         response = self.client.get(url)
-        buf = io.BytesIO(response.content)
+        buf = io.BytesIO(response.getvalue())
         with zipfile.ZipFile(buf) as zf:
             return zf.read("index.md").decode()
 
