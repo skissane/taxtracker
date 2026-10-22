@@ -361,6 +361,8 @@ def run(
             since = started_at - booted
     uptime_failing = False
     next_check = started_at
+    # Uptime is fsynced every check interval, even when not checking.
+    next_sync = started_at + config.interval_seconds
     reported_due = False
     while True:
         # Exiting with the master (when it's replaced, the watchdog is
@@ -374,8 +376,9 @@ def run(
         if uptime_recorder is not None:
             try:
                 uptime_recorder.record(now, since=since)
-                if check_due:
+                if now >= next_sync:
                     uptime_recorder.sync()
+                    next_sync = max(next_sync + config.interval_seconds, now)
             except OSError as exc:
                 # Logged once per failing stretch, not every second.
                 if not uptime_failing:

@@ -3272,6 +3272,17 @@ class IdleWatchdogUptimeRunTests(SimpleTestCase):
         self.assertEqual(count.call_count, 3)
         self.assertEqual(status["checked_at"], "2027-01-15T08:00:20+00:00")
 
+    def test_uptime_alone_still_syncs_every_interval(self):
+        with (
+            tempfile.TemporaryDirectory() as tempdir,
+            mock.patch.object(uptime_log.UptimeLog, "sync") as sync,
+        ):
+            self._run("off", ticks=25, uptime_dir=Path(tempdir))
+
+        # Once on taking up the first day (when there's nothing to sync), then
+        # every 10s interval: the wakes 11 and 21 seconds in, of 25.
+        self.assertEqual(sync.call_count, 3)
+
     def test_short_gaps_are_filled_long_ones_not(self):
         # The 2nd sleep oversleeps by 2s, the 4th by 10s.
         with tempfile.TemporaryDirectory() as tempdir:
@@ -3339,6 +3350,15 @@ class UptimeLogTests(SimpleTestCase):
         self.assertEqual(data[:2], b"\x80\x40")
         self.assertEqual(data[-1], 0x01)
         self.assertEqual(uptime_log.active_seconds(data), 3)
+
+    def test_leaving_a_day_syncs_it(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            log = uptime_log.UptimeLog(Path(tempdir))
+            log.record(self.MIDNIGHT - 1)
+            with mock.patch("os.fsync") as fsync:
+                log.record(self.MIDNIGHT)
+
+        fsync.assert_called_once()
 
     def test_reopening_keeps_earlier_seconds(self):
         with tempfile.TemporaryDirectory() as tempdir:

@@ -13,8 +13,8 @@ The idle watchdog's process (``idle_watchdog.run``) calls ``UptimeLog.record``
 every second. Each call writes the changed byte straight to the file with
 ``os.pwrite``, without holding the file open in between: once that returns the
 byte is in the kernel's page cache, so it survives the process being killed,
-and ``sync`` (called every watchdog check) bounds what a crash of the whole
-Machine can lose.
+and ``sync`` (called every watchdog check interval, and when a day ends) bounds
+what a crash of the whole Machine can lose.
 
 Doesn't import Django, as the watchdog doesn't.
 """
@@ -141,6 +141,8 @@ class UptimeLog:
     def _mark(self, day: int, start: int, end: int) -> None:
         """Mark seconds ``start`` to ``end`` (inclusive) of ``day``."""
         if day != self.day:
+            # Flush the day being left, which sync() won't see again.
+            self.sync()
             self.data = bytearray(read_day(self.directory, day) or bytes(DAY_FILE_SIZE))
             self.day = day
         for second in range(start, end + 1):
@@ -150,10 +152,12 @@ class UptimeLog:
 
     def _write(self, data: bytes, offset: int, *, sync: bool = False) -> None:
         assert self.day is not None
-        self.directory.mkdir(parents=True, exist_ok=True)
-        fd = os.open(
-            day_file(self.directory, self.day), os.O_WRONLY | os.O_CREAT, 0o644
-        )
+        path = day_file(self.directory, self.day)
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT, 0o644)
+        except FileNotFoundError:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT, 0o644)
         try:
             if os.fstat(fd).st_size != DAY_FILE_SIZE:
                 # A new file: write the whole day, so the earlier bytes are

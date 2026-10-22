@@ -291,7 +291,9 @@ per second, most significant bit first, set while the app was up. A day the app
 never ran has no file. The files go in `LIFETRACKER_UPTIME_DIR`, which defaults
 to `$LIFETRACKER_DATA_DIR/uptime` (`/data/uptime` in the Docker image, so on the
 Fly volume), and `off` turns it off. It records even with
-`LIFETRACKER_IDLE_STOP` off. To see the last week (`--days` for more):
+`LIFETRACKER_IDLE_STOP` off. To see the last week (`--days` for more), with each
+day's share up and how many times the app started (a stall of over 5 seconds,
+e.g. a throttled CPU, also counts as a stop and start):
 
 ```bash
 ./flyssh.sh python manage.py uptime_report
