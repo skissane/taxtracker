@@ -16,6 +16,8 @@ from pathlib import Path
 from unittest import mock
 
 import coverage
+import gunicorn.config
+import gunicorn.glogging
 import pytest
 from botocore.exceptions import ClientError
 from django.conf import settings
@@ -3180,6 +3182,35 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
             gunicorn_conf.post_request(mock.Mock(), mock.Mock(), {}, mock.Mock())
 
         record_request.assert_called_once_with(path)
+
+    def test_gunicorn_access_log_shows_fly_client_ip(self):
+        # Gunicorn takes any module-level name in its config module that's a
+        # setting's name as that setting.
+        cfg = gunicorn.config.Config()
+        cfg.set("access_log_format", gunicorn_conf.access_log_format)
+        cfg.set("accesslog", "-")
+        logger = gunicorn.glogging.Logger(cfg)
+        environ = {
+            "REMOTE_ADDR": "172.16.1.2",
+            "REQUEST_METHOD": "GET",
+            "RAW_URI": "/admin/",
+            "SERVER_PROTOCOL": "HTTP/1.1",
+        }
+        resp = mock.Mock(status="200 OK", sent=42, headers=[])
+
+        def logged(headers):
+            req = mock.Mock(headers=headers)
+            with mock.patch.object(logger.access_log, "info") as info:
+                logger.access(resp, req, environ, datetime.timedelta(0))
+            fmt, atoms = info.call_args.args
+            return fmt % atoms
+
+        line = logged([("FLY-CLIENT-IP", "203.0.113.7")])
+        self.assertRegex(
+            line,
+            r'^203\.0\.113\.7 172\.16\.1\.2 - - \[.*\] "GET /admin/ HTTP/1\.1" 200',
+        )
+        self.assertRegex(logged([]), r"^- 172\.16\.1\.2 ")
 
     def test_gunicorn_when_ready_spawns_for_master(self):
         server = mock.Mock(pid=1234)
