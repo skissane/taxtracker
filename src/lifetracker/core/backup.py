@@ -30,9 +30,11 @@ CLOUD_BACKUP_S3_CONFIG = Config(
 )
 
 
-# What a cloud backup or listing raises for an expected failure (bad settings, S3
-# errors), as opposed to a bug. Callers report these and carry on.
-CLOUD_BACKUP_ERRORS = (BotoCoreError, ClientError, RuntimeError)
+# What a backup or listing raises for an expected failure (bad settings, S3
+# errors, or the temporary copy filling the disk, which SQLite reports as
+# sqlite3.OperationalError), as opposed to a bug. Callers report these and carry
+# on.
+CLOUD_BACKUP_ERRORS = (BotoCoreError, ClientError, RuntimeError, OSError, sqlite3.Error)
 
 
 class CloudBackupStatusUpdateError(RuntimeError):

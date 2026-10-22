@@ -367,10 +367,16 @@ class CloudBackupStatusAdmin(admin.ModelAdmin):
             messages.error(request, str(exc))
             return redirect(reverse("admin:core_cloudbackupstatus_changelist"))
 
+        try:
+            backup_file = backup_database()
+        except CLOUD_BACKUP_ERRORS as exc:
+            messages.error(request, f"DB backup failed: {exc}")
+            return redirect(reverse("admin:core_cloudbackupstatus_changelist"))
+
         filename = f"db-backup.{backup_timestamp(timezone.now())}.sqlite3"
         # FileResponse streams the file and closes it once it's sent.
         return FileResponse(
-            backup_database(),
+            backup_file,
             as_attachment=True,
             filename=filename,
             content_type="application/x-sqlite3",

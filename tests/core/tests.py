@@ -1997,6 +1997,18 @@ class BackupAdminViewTests(TransactionTestCase):
             response, "DB backup is only available for SQLite databases."
         )
 
+    def test_download_db_backup_failure_shows_error(self):
+        url = reverse("admin:core_cloudbackupstatus_download_db_backup")
+        with mock.patch(
+            "lifetracker.core.admin.backup_database",
+            side_effect=sqlite3.OperationalError("database or disk is full"),
+        ):
+            response = self.client.get(url, follow=True)
+        self.assertRedirects(
+            response, reverse("admin:core_cloudbackupstatus_changelist")
+        )
+        self.assertContains(response, "DB backup failed: database or disk is full")
+
     @override_settings(
         LIFETRACKER_BACKUP_S3_ENDPOINT_URL="https://example.invalid",
         LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
@@ -2451,6 +2463,39 @@ class CloudBackupCommandTests(TransactionTestCase):
         )
         with self.assertRaisesMessage(CommandError, "Cloud backup failed: "):
             self.call()
+        self.assertFalse(CloudBackupStatus.objects.exists())
+
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_upload_error_closes_backup_file(self, mock_client):
+        mock_client.return_value.upload_fileobj.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
+            "PutObject",
+        )
+        backup_files = []
+
+        def backup_database_spy():
+            backup_files.append(backup_database())
+            return backup_files[-1]
+
+        with mock.patch(
+            "lifetracker.core.backup.backup_database", side_effect=backup_database_spy
+        ):
+            with self.assertRaises(CommandError):
+                self.call()
+        [backup_file] = backup_files
+        self.assertTrue(backup_file.closed)
+
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_backup_copy_error_fails(self, mock_client):
+        with mock.patch(
+            "lifetracker.core.backup.backup_database",
+            side_effect=sqlite3.OperationalError("database or disk is full"),
+        ):
+            with self.assertRaisesMessage(
+                CommandError, "Cloud backup failed: database or disk is full"
+            ):
+                self.call()
+        mock_client.return_value.upload_fileobj.assert_not_called()
         self.assertFalse(CloudBackupStatus.objects.exists())
 
     @mock.patch("lifetracker.core.backup.boto3.client")
