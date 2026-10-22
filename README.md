@@ -42,7 +42,9 @@ prints a random password, unless you've set one in the
 
 The database is `db.sqlite3` in the repo root (gitignored), and the generated secret
 key is `~/.config/lifetracker/secret_key`. Set `LIFETRACKER_DB_PATH` or
-`LIFETRACKER_CONFIG_DIR` to put them elsewhere.
+`LIFETRACKER_CONFIG_DIR` to put them elsewhere. The database runs in SQLite's WAL
+mode, so recent changes may still be in `db.sqlite3-wal` beside it: to copy the
+database by hand, stop the app first and copy both, or use the admin's DB backup.
 
 ### The `.env` file
 

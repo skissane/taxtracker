@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,7 @@ from django.core.files.base import ContentFile
 from django.core.management import CommandError, call_command
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
+from django.db.utils import ConnectionHandler
 from django.forms import inlineformset_factory
 from django.template import Context, Template
 from django.test import (
@@ -60,7 +62,11 @@ from lifetracker.core.attachments import (
     file_type_for_filename,
     orphaned_stored_file_pks,
 )
-from lifetracker.core.backup import CLOUD_BACKUP_S3_CONFIG, run_cloud_backup
+from lifetracker.core.backup import (
+    CLOUD_BACKUP_S3_CONFIG,
+    run_cloud_backup,
+    serialize_database,
+)
 from lifetracker.core.forms import FlexibleDateField
 from lifetracker.core.management.commands.ensure_superuser import (
     _initial_admin_password_file,
@@ -1807,6 +1813,46 @@ class DockerEntrypointTests(TestCase):
             " --access-logfile - --error-logfile - --timeout 600"
             " --bind 127.0.0.1:9000 lifetracker.wsgi",
         )
+
+
+class SQLiteFileDatabaseTests(TestCase):
+    """The production DATABASES settings, applied to a file-backed database.
+
+    The test database is in memory, where WAL mode doesn't apply, so these
+    open a separate connection to a temporary file with the same settings.
+    """
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.db_path = Path(tmp.name) / "db.sqlite3"
+        handler = ConnectionHandler(
+            {"default": {**settings.DATABASES["default"], "NAME": self.db_path}}
+        )
+        self.addCleanup(handler.close_all)
+        self.connection = handler["default"]
+
+    def test_journal_mode_is_wal(self):
+        with self.connection.cursor() as cursor:
+            cursor.execute("PRAGMA journal_mode")
+            self.assertEqual(cursor.fetchone(), ("wal",))
+
+    def test_serialize_database_includes_uncheckpointed_wal(self):
+        with self.connection.cursor() as cursor:
+            # Stop SQLite copying the WAL back into the main file on commit,
+            # so the row exists only in db.sqlite3-wal.
+            cursor.execute("PRAGMA wal_autocheckpoint=0")
+            cursor.execute("CREATE TABLE t (v TEXT)")
+            cursor.execute("INSERT INTO t VALUES ('in the wal')")
+        with mock.patch(
+            "lifetracker.core.backup.connections", {"default": self.connection}
+        ):
+            data = serialize_database()
+        copy_path = self.db_path.with_name("copy.sqlite3")
+        copy_path.write_bytes(data)
+        copy = sqlite3.connect(copy_path)
+        self.addCleanup(copy.close)
+        self.assertEqual(copy.execute("SELECT v FROM t").fetchall(), [("in the wal",)])
 
 
 class CloudBackupStatusModelTests(TestCase):

@@ -47,7 +47,12 @@ def check_sqlite(feature):
 
 
 def serialize_database():
-    """Return the whole default (SQLite) database as bytes."""
+    """Return the whole default (SQLite) database as bytes.
+
+    This reads pages through SQLite, so it includes transactions still in the
+    write-ahead log that haven't been checkpointed into the main file yet. The
+    copy's header keeps WAL mode, which SQLite resumes when it opens the file.
+    """
     with connections["default"].cursor() as cursor:
         return cursor.connection.serialize()
 
