@@ -437,7 +437,6 @@ def idle_watchdog_page_context(now=None):
             "checked_at": checked_at,
             "idle_timeout": _format_duration(raw["idle_timeout_seconds"]),
             "check_interval": _format_duration(interval),
-            "last_request_at": _parse_status_time(raw.get("last_request_at")),
             "idle_since": _parse_status_time(raw["idle_since"]),
             "stop_due_at": stop_due_at,
             "ports": [
@@ -456,6 +455,15 @@ def idle_watchdog_page_context(now=None):
             f"Unexpected contents in {config.status_file}: {exc!r}"
         )
         return context
+    # Read the request file directly rather than the status file's copy of its
+    # time, which is only as fresh as the last check (issue #172). It's touched
+    # after each response, so it never includes this page's own request.
+    last_request = idle_watchdog.last_request_time(config.request_file)
+    status["last_request_at"] = (
+        datetime.datetime.fromtimestamp(last_request, datetime.UTC)
+        if last_request is not None
+        else None
+    )
     status["checked_ago"] = (
         _format_duration((now - checked_at).total_seconds()) if checked_at else None
     )

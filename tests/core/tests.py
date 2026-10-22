@@ -1707,7 +1707,12 @@ class DockerEntrypointTests(TestCase):
         "python manage.py ensure_superuser",
     ]
 
-    ENTRYPOINT_ENV = {"LIFETRACKER_GUNICORN_TIMEOUT", "LIFETRACKER_HOST", "PORT"}
+    ENTRYPOINT_ENV = {
+        "LIFETRACKER_GUNICORN_THREADS",
+        "LIFETRACKER_GUNICORN_TIMEOUT",
+        "LIFETRACKER_HOST",
+        "PORT",
+    }
 
     def _run_entrypoint(self, *args, env=None):
         """Run the entrypoint with fake `python` and `gunicorn` on PATH.
@@ -1779,6 +1784,7 @@ class DockerEntrypointTests(TestCase):
             [
                 *self.STARTUP,
                 "gunicorn --config python:lifetracker.gunicorn_conf"
+                " --worker-class gthread --threads 8"
                 " --access-logfile - --error-logfile - --timeout 120"
                 " --bind 0.0.0.0:8000 lifetracker.wsgi",
             ],
@@ -1787,6 +1793,7 @@ class DockerEntrypointTests(TestCase):
     def test_entrypoint_gunicorn_settings_come_from_env(self):
         _, log_lines = self._run_entrypoint(
             env={
+                "LIFETRACKER_GUNICORN_THREADS": "2",
                 "LIFETRACKER_GUNICORN_TIMEOUT": "600",
                 "LIFETRACKER_HOST": "127.0.0.1",
                 "PORT": "9000",
@@ -1796,6 +1803,7 @@ class DockerEntrypointTests(TestCase):
         self.assertEqual(
             log_lines[-1],
             "gunicorn --config python:lifetracker.gunicorn_conf"
+            " --worker-class gthread --threads 2"
             " --access-logfile - --error-logfile - --timeout 600"
             " --bind 127.0.0.1:9000 lifetracker.wsgi",
         )
@@ -3154,9 +3162,13 @@ class IdleWatchdogReadTests(SimpleTestCase):
 class IdleWatchdogPageContextTests(SimpleTestCase):
     NOW = datetime.datetime(2027, 1, 15, 8, 0, tzinfo=datetime.UTC)
 
-    def _context(self, status=None, env=None, raw=None):
+    def _context(self, status=None, env=None, raw=None, last_request=None):
         with tempfile.TemporaryDirectory() as tempdir:
             status_file = Path(tempdir) / "status.json"
+            request_file = Path(tempdir) / "last-request"
+            if last_request is not None:
+                request_file.touch()
+                os.utime(request_file, (last_request, last_request))
             if status is not None:
                 idle_watchdog.write_status(status_file, status)
             if raw is not None:
@@ -3167,6 +3179,7 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
                     {
                         "LIFETRACKER_IDLE_STOP": "monitor",
                         "LIFETRACKER_IDLE_STOP_STATUS_FILE": str(status_file),
+                        "LIFETRACKER_IDLE_STOP_REQUEST_FILE": str(request_file),
                         **(env or {}),
                     },
                 ),
@@ -3186,7 +3199,12 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
                 self.assertEqual(_format_duration(seconds), expected)
 
     def test_status(self):
-        context = self._context(_watchdog_status(self.NOW))
+        # The request file is newer than the status file's copy of its time
+        # (as just after a request, before the next check), and wins.
+        context = self._context(
+            _watchdog_status(self.NOW),
+            last_request=(self.NOW - datetime.timedelta(seconds=7)).timestamp(),
+        )
 
         self.assertIsNone(context["config_error"])
         self.assertIsNone(context["status_error"])
@@ -3197,7 +3215,10 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
         self.assertEqual(status["check_interval"], "30 seconds")
         self.assertEqual(status["idle_timeout"], "10\xa0minutes")
         self.assertEqual(status["uptime"], "1\xa0hour")
-        self.assertEqual(status["last_request_at_ago"], "5\xa0minutes")
+        self.assertEqual(
+            status["last_request_at"], self.NOW - datetime.timedelta(seconds=7)
+        )
+        self.assertEqual(status["last_request_at_ago"], "7 seconds")
         self.assertEqual(status["idle_since_ago"], "20 seconds")
         self.assertFalse(status["stale"])
         self.assertFalse(status["stop_overdue"])
@@ -3209,6 +3230,12 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
             ],
             [(8000, 0, None), (22, 1, "20 seconds")],
         )
+
+    def test_no_request_file(self):
+        # The status file's copy of the time is ignored, even without a file.
+        status = self._context(_watchdog_status(self.NOW))["status"]
+        self.assertIsNone(status["last_request_at"])
+        self.assertIsNone(status["last_request_at_ago"])
 
     def test_stale_and_overdue(self):
         context = self._context(

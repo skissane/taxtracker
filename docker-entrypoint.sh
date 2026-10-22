@@ -42,8 +42,15 @@ fi
 
 # lifetracker.gunicorn_conf starts the idle watchdog (see
 # lifetracker/core/idle_watchdog.py) if LIFETRACKER_IDLE_STOP turns it on.
+# gthread, not the default single sync worker: browsers open spare connections
+# and leave them idle, and a sync worker that accepts one blocks on it, leaving
+# real requests queued until it gets a request or times out (issue #172).
+# gthread also holds a thread for up to 5 seconds on a new connection before
+# parking it, so there are enough threads for a few idle ones at once.
 exec gunicorn \
   --config python:lifetracker.gunicorn_conf \
+  --worker-class gthread \
+  --threads "${LIFETRACKER_GUNICORN_THREADS:-8}" \
   --access-logfile - \
   --error-logfile - \
   --timeout "${LIFETRACKER_GUNICORN_TIMEOUT:-120}" \

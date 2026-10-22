@@ -105,6 +105,10 @@ The container startup path runs `upgrade_legacy_db`, then `migrate`, then
 Gunicorn's worker timeout is 120 seconds rather than its default 30, since ZIP
 exports, DB backups and archive imports run in the request and can be slow for a
 large database. Change it with `LIFETRACKER_GUNICORN_TIMEOUT` (in seconds).
+It uses gthread workers with 8 threads (`LIFETRACKER_GUNICORN_THREADS`) rather than
+a single sync worker, which a browser's idle spare connection can tie up, leaving
+other requests waiting. With gthread, the timeout only restarts a worker whose main
+loop stops responding; it doesn't cut off a slow request in one of its threads.
 On first start, `ensure_superuser` creates an `admin` user with a random password and
 prints it to the container log (`docker logs lifetracker`); on later starts it leaves
 the existing user's password alone, but turns its active, staff and superuser flags
