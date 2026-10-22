@@ -2,8 +2,7 @@
 
 Prints, for each of the last few UTC days, what share of it the app was up and
 how many times it started, from the files ``uptime_log`` records (see that
-module). Today's share is of the day so far. A day with no file counts as never
-up, unless it's before the first file.
+module), via ``uptime_log.daily_report``, as the admin's Uptime page does.
 """
 
 import time
@@ -33,23 +32,13 @@ class Command(BaseCommand):
                 "Uptime isn't recorded: set LIFETRACKER_UPTIME_DIR or"
                 " LIFETRACKER_DATA_DIR."
             )
-        now = time.time()
-        today = uptime_log.day_of(now)
-        first_recorded = uptime_log.first_recorded_day(directory)
-        for day in range(today - days + 1, today + 1):
-            date = uptime_log.day_date(day).isoformat()
-            if first_recorded is None or day < first_recorded:
+        for row in uptime_log.daily_report(directory, days, time.time()):
+            date = row.date.isoformat()
+            if row.up_seconds is None:
                 self.stdout.write(f"{date}  no data")
                 continue
-            data = uptime_log.read_day(directory, day) or bytes(
-                uptime_log.DAY_FILE_SIZE
-            )
-            up = uptime_log.active_seconds(data)
-            elapsed = uptime_log.SECONDS_PER_DAY
-            if day == today:
-                elapsed = int(now) % uptime_log.SECONDS_PER_DAY + 1
             self.stdout.write(
-                f"{date}  {up / elapsed:7.2%}  up {up} of {elapsed} s,"
-                f" {uptime_log.start_count(data)} starts"
-                + ("  (so far)" if day == today else "")
+                f"{date}  {row.share:7.2%}  up {row.up_seconds} of"
+                f" {row.elapsed_seconds} s, {row.starts} starts"
+                + ("  (so far)" if row.today else "")
             )

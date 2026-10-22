@@ -1,0 +1,96 @@
+{% extends "admin/base_site.html" %}
+
+{% load i18n static %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'core/admin_pages.css' %}">
+  <style>
+  .lt-uptime {
+    width: 100%;
+  }
+
+  .lt-uptime .lt-num {
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .lt-uptime .lt-bar-cell {
+    width: 40%;
+    vertical-align: middle;
+  }
+
+  .lt-uptime meter {
+    width: 100%;
+  }
+  </style>
+{% endblock extrastyle %}
+{% block breadcrumbs %}
+  <ol class="breadcrumbs">
+    <li><a href="{% url 'admin:index' %}">{% trans "Home" %}</a></li>
+    <li aria-current="page">Uptime</li>
+  </ol>
+{% endblock breadcrumbs %}
+{% block content %}
+  {% if days_error %}<p class="errornote">{{ days_error }}</p>{% endif %}
+  {% if directory is None %}
+    <p class="errornote">
+      Uptime isn't recorded: set <code>LIFETRACKER_UPTIME_DIR</code> or <code>LIFETRACKER_DATA_DIR</code>.
+    </p>
+  {% else %}
+    <form method="get">
+      <p>
+        What share of each UTC day the app was up, from the files in <code>{{ directory }}</code>.
+        <label for="id_days">Days:</label>
+        <input type="number"
+               name="days"
+               id="id_days"
+               min="1"
+               max="{{ max_days }}"
+               value="{{ days }}">
+        <input type="submit" value="Show">
+      </p>
+    </form>
+    <table class="lt-uptime">
+      <thead>
+        <tr>
+          <th scope="col">Date (UTC)</th>
+          <th scope="col" class="lt-num">Up</th>
+          <th scope="col">
+            <span class="visually-hidden">Share up</span>
+          </th>
+          <th scope="col">Time Up</th>
+          <th scope="col" class="lt-num">Starts</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in report %}
+          <tr>
+            <td>
+              {{ line.row.date|date:"Y-m-d D" }}
+              {% if line.row.today %}(so far){% endif %}
+            </td>
+            {% if line.percent is None %}
+              <td class="lt-num">No data</td>
+              <td class="lt-bar-cell"></td>
+              <td></td>
+              <td class="lt-num"></td>
+            {% else %}
+              <td class="lt-num">{{ line.percent|floatformat:"2u" }}%</td>
+              <td class="lt-bar-cell">
+                <meter min="0" max="100" value="{{ line.percent|floatformat:'2u' }}">
+                  {{ line.percent|floatformat:"2u" }}%
+                </meter>
+              </td>
+              <td>{{ line.up }} of {{ line.elapsed }}</td>
+              <td class="lt-num">{{ line.row.starts }}</td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p>
+      A start is a second the app was up after one it wasn't, so running at midnight counts as one, and so does a stall of over 5 seconds. A day with no file counts as never up, unless it's before the first file ("No data").
+    </p>
+  {% endif %}
+{% endblock content %}

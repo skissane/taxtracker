@@ -22,6 +22,7 @@
 {% block userlinks %}
   {% if user.is_active and user.is_superuser %}
     <a href="{% url 'admin:idle_watchdog' %}">Idle Watchdog</a> /
+    <a href="{% url 'admin:uptime_report' %}">Uptime</a> /
   {% endif %}
   {{ block.super }}
 {% endblock userlinks %}
