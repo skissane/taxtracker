@@ -1,4 +1,5 @@
 import ast
+import dataclasses
 import datetime
 import importlib.util
 import io
@@ -49,7 +50,7 @@ from lifetracker.admin_site import (
     _build_admin_site_header,
 )
 from lifetracker.asgi import application as asgi_application
-from lifetracker.core import idle_watchdog
+from lifetracker.core import idle_watchdog, uptime_log
 from lifetracker.core.admin import (
     DBStoredFileAdmin,
     MimeTypeFormSet,
@@ -2737,6 +2738,25 @@ class IdleWatchdogConfigTests(SimpleTestCase):
             ),
         )
 
+    def test_uptime_dir(self):
+        for env, expected in [
+            ({}, None),
+            ({"LIFETRACKER_DATA_DIR": "/data"}, Path("/data/uptime")),
+            ({"LIFETRACKER_DATA_DIR": " "}, None),
+            (
+                {"LIFETRACKER_DATA_DIR": "/data", "LIFETRACKER_UPTIME_DIR": "/up"},
+                Path("/up"),
+            ),
+            (
+                {"LIFETRACKER_DATA_DIR": "/data", "LIFETRACKER_UPTIME_DIR": "Off"},
+                None,
+            ),
+        ]:
+            with self.subTest(env=env):
+                self.assertEqual(
+                    idle_watchdog.config_from_env(env).uptime_dir, expected
+                )
+
     def test_invalid_values_raise(self):
         for name, value, message in [
             ("LIFETRACKER_IDLE_STOP", "on", "must be one of off, monitor, stop"),
@@ -3008,6 +3028,14 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
         popen.assert_not_called()
         self.assertIn("/nonexistent/tcp is missing", stderr.getvalue())
 
+    def test_starts_for_uptime_alone(self):
+        env = {"LIFETRACKER_DATA_DIR": "/data"}
+        with (
+            mock.patch("subprocess.Popen") as popen,
+            mock.patch.object(Path, "exists", return_value=True),
+        ):
+            self.assertIs(idle_watchdog.spawn(99, env), popen.return_value)
+
     def test_starts_module_with_master_pid(self):
         env = {"LIFETRACKER_IDLE_STOP": "stop"}
         with (
@@ -3132,6 +3160,7 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
                     # Port 1 (tcpmux): nothing will be connected to it.
                     "LIFETRACKER_IDLE_STOP_PORTS": "1",
                     "LIFETRACKER_IDLE_STOP_STATUS_FILE": str(status_file),
+                    "LIFETRACKER_UPTIME_DIR": str(Path(tempdir) / "uptime"),
                 },
                 capture_output=True,
                 text=True,
@@ -3139,13 +3168,281 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
                 check=False,
             )
             status = json.loads(status_file.read_text())
+            uptime_files = list((Path(tempdir) / "uptime").glob("*.bin"))
+            up = uptime_log.active_seconds(uptime_files[0].read_bytes())
 
         self.assertEqual(result.returncode, -signal.SIGTERM, result.stderr)
+        self.assertGreaterEqual(up, 1)
         self.assertIn("sending SIGTERM", result.stderr)
         self.assertEqual(status["state"], "stopping")
         self.assertEqual(
             status["ports"], [{"port": 1, "connections": 0, "last_connection_at": None}]
         )
+
+
+class IdleWatchdogUptimeRunTests(SimpleTestCase):
+    MASTER_PID = 4321
+    START = 1_800_000_000.25  # 2027-01-15T08:00:00.25Z
+
+    def _run(self, mode, *, ticks, uptime_dir, booted=None, clock_step=None):
+        """Run the loop for ``ticks`` wakes (then the master "exits"), with a
+        fake clock that each sleep advances by what was asked plus
+        ``clock_step`` (a function of the wake number), if given."""
+        now = [self.START]
+        ppids = iter([self.MASTER_PID] * ticks + [1])
+        sleeps = []
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += seconds + (clock_step(len(sleeps)) if clock_step else 0)
+
+        config = dataclasses.replace(_watchdog_config(mode), uptime_dir=uptime_dir)
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            result = idle_watchdog.run(
+                config,
+                self.MASTER_PID,
+                clock=lambda: now[0],
+                sleep=sleep,
+                count=lambda ports: {8000: 1, 22: 0},
+                request_time=lambda path: None,
+                getppid=lambda: next(ppids),
+                kill=mock.Mock(),
+                uptime=lambda: booted,
+            )
+        return result, sleeps, stderr.getvalue()
+
+    def _up_seconds(self, uptime_dir):
+        data = uptime_log.read_day(uptime_dir, uptime_log.day_of(self.START))
+        bits = int.from_bytes(data, "big")
+        return [
+            second
+            for second in range(uptime_log.SECONDS_PER_DAY)
+            if bits >> (uptime_log.SECONDS_PER_DAY - 1 - second) & 1
+        ]
+
+    def test_records_every_second(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            result, sleeps, stderr = self._run("off", ticks=5, uptime_dir=Path(tempdir))
+            up = self._up_seconds(Path(tempdir))
+
+        self.assertEqual(result, 0)
+        # First to the next whole second, then a second at a time.
+        self.assertEqual(sleeps, [0.75, 1, 1, 1, 1])
+        self.assertEqual(up, [28800, 28801, 28802, 28803, 28804])
+        self.assertIn(f"recording uptime in {tempdir}", stderr)
+        self.assertNotIn("started in", stderr)
+
+    def test_nothing_to_do_exits_at_once(self):
+        # e.g. run by hand with both off: without the early return the loop
+        # would have nothing to wake for, and time.sleep(inf) raises.
+        sleep = mock.Mock()
+
+        result = idle_watchdog.run(
+            _watchdog_config("off"), self.MASTER_PID, sleep=sleep
+        )
+
+        self.assertEqual(result, 0)
+        sleep.assert_not_called()
+
+    def test_checks_still_every_interval(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            status_file = Path(tempdir) / "status.json"
+            config = dataclasses.replace(
+                _watchdog_config("monitor", status_file),
+                uptime_dir=Path(tempdir) / "uptime",
+            )
+            now = [self.START]
+            ppids = iter([self.MASTER_PID] * 25 + [1])
+            count = mock.Mock(return_value={8000: 0, 22: 1})
+            with mock.patch("sys.stderr", new_callable=io.StringIO):
+                idle_watchdog.run(
+                    config,
+                    self.MASTER_PID,
+                    clock=lambda: now[0],
+                    sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
+                    count=count,
+                    request_time=lambda path: None,
+                    getppid=lambda: next(ppids),
+                    kill=mock.Mock(),
+                    uptime=lambda: None,
+                )
+            status = json.loads(status_file.read_text())
+
+        # Checks at 0, 10 and 20 seconds, of 25 wakes.
+        self.assertEqual(count.call_count, 3)
+        self.assertEqual(status["checked_at"], "2027-01-15T08:00:20+00:00")
+
+    def test_uptime_alone_still_syncs_every_interval(self):
+        with (
+            tempfile.TemporaryDirectory() as tempdir,
+            mock.patch.object(uptime_log.UptimeLog, "sync") as sync,
+        ):
+            self._run("off", ticks=25, uptime_dir=Path(tempdir))
+
+        # Once on taking up the first day (when there's nothing to sync), then
+        # every 10s interval: the wakes 11 and 21 seconds in, of 25.
+        self.assertEqual(sync.call_count, 3)
+
+    def test_short_gaps_are_filled_long_ones_not(self):
+        # The 2nd sleep oversleeps by 2s, the 4th by 10s.
+        with tempfile.TemporaryDirectory() as tempdir:
+            self._run(
+                "off",
+                ticks=6,
+                uptime_dir=Path(tempdir),
+                clock_step=lambda n: {2: 2, 4: 10}.get(n, 0),
+            )
+            up = self._up_seconds(Path(tempdir))
+
+        self.assertEqual(up, [28800, 28801, 28802, 28803, 28804, 28805, 28816, 28817])
+
+    def test_fresh_boot_is_backfilled(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            self._run("off", ticks=1, uptime_dir=Path(tempdir), booted=3.5)
+            up = self._up_seconds(Path(tempdir))
+
+        self.assertEqual(up, [28796, 28797, 28798, 28799, 28800])
+
+    def test_long_uptime_is_not_backfilled(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            self._run("off", ticks=1, uptime_dir=Path(tempdir), booted=3600)
+            up = self._up_seconds(Path(tempdir))
+
+        self.assertEqual(up, [28800])
+
+    def test_write_failure_is_logged_once_and_retried(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            blocker = Path(tempdir) / "uptime"
+            blocker.write_text("not a directory")
+
+            def unblock(n):
+                if n == 3:
+                    blocker.unlink()
+                return 0
+
+            result, sleeps, stderr = self._run(
+                "off", ticks=5, uptime_dir=blocker, clock_step=unblock
+            )
+            up = self._up_seconds(blocker)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(stderr.count("couldn't record uptime"), 1)
+        self.assertIn("recording uptime again", stderr)
+        # The seconds that failed are recorded once it works again.
+        self.assertEqual(up, [28800, 28801, 28802, 28803, 28804])
+
+
+class UptimeLogTests(SimpleTestCase):
+    DAY = 20_748  # 2026-10-22
+    MIDNIGHT = DAY * uptime_log.SECONDS_PER_DAY
+
+    def test_file_layout(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            log = uptime_log.UptimeLog(Path(tempdir))
+            log.record(self.MIDNIGHT + 0.9)
+            log.record(self.MIDNIGHT + 9)
+            log.record(self.MIDNIGHT + 86_399)
+            path = Path(tempdir) / "2026-10-22.bin"
+            data = path.read_bytes()
+
+        self.assertEqual(len(data), 10_800)
+        # Most significant bit first: second 0 is 0x80 of byte 0.
+        self.assertEqual(data[:2], b"\x80\x40")
+        self.assertEqual(data[-1], 0x01)
+        self.assertEqual(uptime_log.active_seconds(data), 3)
+
+    def test_leaving_a_day_syncs_it(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            log = uptime_log.UptimeLog(Path(tempdir))
+            log.record(self.MIDNIGHT - 1)
+            with mock.patch("os.fsync") as fsync:
+                log.record(self.MIDNIGHT)
+
+        fsync.assert_called_once()
+
+    def test_reopening_keeps_earlier_seconds(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            uptime_log.UptimeLog(Path(tempdir)).record(self.MIDNIGHT + 1)
+            uptime_log.UptimeLog(Path(tempdir)).record(self.MIDNIGHT + 2)
+            data = uptime_log.read_day(Path(tempdir), self.DAY)
+
+        self.assertEqual(data[0], 0x60)
+
+    def test_range_across_midnight(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            log = uptime_log.UptimeLog(Path(tempdir))
+            log.record(self.MIDNIGHT + 1, since=self.MIDNIGHT - 2)
+            log.sync()
+            before = uptime_log.read_day(Path(tempdir), self.DAY - 1)
+            after = uptime_log.read_day(Path(tempdir), self.DAY)
+            first = uptime_log.first_recorded_day(Path(tempdir))
+
+        self.assertEqual(before[-1], 0x03)
+        self.assertEqual(after[0], 0xC0)
+        self.assertEqual(first, self.DAY - 1)
+
+    def test_missing_and_short_files(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            self.assertIsNone(uptime_log.read_day(Path(tempdir), self.DAY))
+            self.assertIsNone(uptime_log.first_recorded_day(Path(tempdir)))
+            (Path(tempdir) / "2026-10-22.bin").write_bytes(b"\xff")
+            (Path(tempdir) / "notes.bin").write_bytes(b"")
+            data = uptime_log.read_day(Path(tempdir), self.DAY)
+            first = uptime_log.first_recorded_day(Path(tempdir))
+
+        self.assertEqual(len(data), 10_800)
+        self.assertEqual(uptime_log.active_seconds(data), 8)
+        self.assertEqual(first, self.DAY)
+
+    def test_start_count(self):
+        data = bytearray(10_800)
+        data[0] = 0b1100_1000  # up at midnight, then a start at second 4
+        data[1] = 0b0000_0001  # ... and at second 15
+        data[2] = 0b1000_0000  # still up at 16
+
+        self.assertEqual(uptime_log.start_count(bytes(data)), 3)
+        self.assertEqual(uptime_log.start_count(bytes(10_800)), 0)
+
+
+class UptimeReportCommandTests(SimpleTestCase):
+    NOW = 20_748 * 86_400 + 43_199.5  # 2026-10-22T11:59:59.5Z
+
+    def _report(self, env, days=None):
+        out = io.StringIO()
+        kwargs = {} if days is None else {"days": days}
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch("time.time", return_value=self.NOW),
+        ):
+            call_command("uptime_report", stdout=out, **kwargs)
+        return out.getvalue()
+
+    def test_report(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            log = uptime_log.UptimeLog(Path(tempdir))
+            # Half of 2026-10-20, none of the 21st, a quarter of today so far.
+            log.record(20_746 * 86_400 + 43_199, since=20_746 * 86_400)
+            log.record(self.NOW, since=self.NOW - 10_799.5)
+            report = self._report({"LIFETRACKER_UPTIME_DIR": tempdir}, days=4)
+
+        self.assertEqual(
+            report.splitlines(),
+            [
+                "2026-10-19  no data",
+                "2026-10-20   50.00%  up 43200 of 86400 s, 1 starts",
+                "2026-10-21    0.00%  up 0 of 86400 s, 0 starts",
+                "2026-10-22   25.00%  up 10800 of 43200 s, 1 starts  (so far)",
+            ],
+        )
+
+    def test_errors(self):
+        with (
+            mock.patch.dict(os.environ, {"LIFETRACKER_UPTIME_DIR": "off"}),
+            self.assertRaisesMessage(CommandError, "Uptime isn't recorded"),
+        ):
+            call_command("uptime_report")
+        with self.assertRaisesMessage(CommandError, "--days must be at least 1"):
+            self._report({"LIFETRACKER_UPTIME_DIR": "/nonexistent"}, days=0)
 
 
 def _watchdog_status(now, **overrides):

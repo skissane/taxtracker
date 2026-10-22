@@ -284,6 +284,23 @@ The watchdog needs Linux, as it reads
 `just docker-run` too. `./run.sh` uses Django's development server, not
 gunicorn, so it never starts it.
 
+The same process also records which seconds the app was up, so you can see
+what share of each day the Machine ran without piecing it together from the
+logs. Each UTC day gets a 10,800-byte file, `<YYYY-MM-DD>.bin`, with one bit
+per second, most significant bit first, set while the app was up. A day the app
+never ran has no file. The files go in `LIFETRACKER_UPTIME_DIR`, which defaults
+to `$LIFETRACKER_DATA_DIR/uptime` (`/data/uptime` in the Docker image, so on the
+Fly volume), and `off` turns it off. It records even with
+`LIFETRACKER_IDLE_STOP` off. To see the last week (`--days` for more), with each
+day's share up and how many times the app started (a stall of over 5 seconds,
+e.g. a throttled CPU, also counts as a stop and start):
+
+```bash
+./flyssh.sh python manage.py uptime_report
+```
+
+The files aren't in the cloud backup, which only has the database.
+
 `fly.toml` currently runs it in `monitor` mode alongside Fly's own auto-stop,
 to check that SSH sessions show up. While connected, check that port 22 has a
 connection, on the admin page or with

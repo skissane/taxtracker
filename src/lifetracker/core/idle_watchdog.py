@@ -25,11 +25,17 @@ Configured by environment variables (see ``config_from_env``); off unless
 ``stop``. Linux only, as it reads ``/proc/net``; the Docker image is Linux
 whatever the host. Every check rewrites a JSON status file (``Watchdog.status``),
 which the admin's Idle Watchdog page shows (``read_status``).
+
+The same process also records which seconds the app was up, one bit per second
+in a file per UTC day (``uptime_log``), if there's an uptime directory
+(``uptime_log.uptime_dir_from_env``), even with ``LIFETRACKER_IDLE_STOP`` off.
+So it wakes every second, and checks for idleness every check interval.
 """
 
 import dataclasses
 import datetime
 import json
+import math
 import os
 import signal
 import subprocess
@@ -38,6 +44,8 @@ import tempfile
 import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
+
+from lifetracker.core import uptime_log
 
 MODES = ("off", "monitor", "stop")
 DEFAULT_IDLE_MINUTES = 10
@@ -59,6 +67,8 @@ class Config:
     ports: tuple[int, ...]
     status_file: Path
     request_file: Path
+    # Where to record uptime (see ``uptime_log``), or None not to.
+    uptime_dir: Path | None = None
 
 
 def _positive_number(environ: Mapping[str, str], name: str, default: float) -> float:
@@ -88,6 +98,7 @@ def config_from_env(environ: Mapping[str, str] = os.environ) -> Config:
       (default ``/tmp/lifetracker-idle-watchdog.json``).
     - ``LIFETRACKER_IDLE_STOP_REQUEST_FILE``: the file gunicorn's workers touch
       after each request (default ``/tmp/lifetracker-last-request``).
+    - ``LIFETRACKER_UPTIME_DIR``: see ``uptime_log.uptime_dir_from_env``.
     """
     mode = environ.get("LIFETRACKER_IDLE_STOP", "").strip().lower() or "off"
     if mode not in MODES:
@@ -127,6 +138,7 @@ def config_from_env(environ: Mapping[str, str] = os.environ) -> Config:
         ports=ports,
         status_file=status_file,
         request_file=request_file,
+        uptime_dir=uptime_log.uptime_dir_from_env(environ),
     )
 
 
@@ -321,60 +333,110 @@ def run(
     request_time=last_request_time,
     getppid=os.getppid,
     kill=os.kill,
+    uptime=system_uptime,
 ) -> int:
-    """Check every ``config.interval_seconds`` until it's time to stop (in
-    ``stop`` mode) or gunicorn's master has gone; returns the exit status."""
-    watchdog = Watchdog(config, master_pid, started_at=clock())
-    log(
-        f"started in {config.mode} mode, watching ports"
-        f" {', '.join(map(str, config.ports))}, idle timeout"
-        f" {config.idle_seconds / 60:g} minutes, status in {config.status_file}"
-    )
+    """Record uptime every second (if there's an uptime directory) and check
+    for idleness every ``config.interval_seconds`` (unless the mode is
+    ``off``), until it's time to stop (in ``stop`` mode) or gunicorn's master
+    has gone; returns the exit status."""
+    if config.mode == "off" and config.uptime_dir is None:
+        return 0
+    started_at = clock()
+    watchdog = Watchdog(config, master_pid, started_at=started_at)
+    checking = config.mode != "off"
+    if checking:
+        log(
+            f"started in {config.mode} mode, watching ports"
+            f" {', '.join(map(str, config.ports))}, idle timeout"
+            f" {config.idle_seconds / 60:g} minutes, status in {config.status_file}"
+        )
+    uptime_recorder = None
+    since = None
+    if config.uptime_dir is not None:
+        uptime_recorder = uptime_log.UptimeLog(config.uptime_dir)
+        log(f"recording uptime in {config.uptime_dir}")
+        # Count the seconds since a fresh boot, before gunicorn was ready.
+        booted = uptime()
+        if booted is not None and booted <= uptime_log.MAX_BOOT_BACKFILL_SECONDS:
+            since = started_at - booted
+    uptime_failing = False
+    next_check = started_at
+    # Uptime is fsynced every check interval, even when not checking.
+    next_sync = started_at + config.interval_seconds
     reported_due = False
     while True:
         # Exiting with the master (when it's replaced, the watchdog is
-        # reparented) keeps a watchdog from outliving its gunicorn.
+        # reparented) keeps a watchdog from outliving its gunicorn, and from
+        # recording uptime after it.
         if getppid() != master_pid:
             log(f"gunicorn master {master_pid} has exited, exiting")
             return 0
-        due = watchdog.check(
-            clock(), count(config.ports), request_time(config.request_file)
-        )
-        if due and config.mode == "stop":
-            watchdog.stopping = True
-        try:
-            write_status(config.status_file, watchdog.status())
-        except OSError as exc:
-            log(f"couldn't write {config.status_file}: {exc}")
-        idle_minutes = config.idle_seconds / 60
-        if watchdog.stopping:
-            log(
-                f"no activity for {idle_minutes:g} minutes, sending SIGTERM to"
-                f" gunicorn master {master_pid}"
+        now = clock()
+        check_due = checking and now >= next_check
+        if uptime_recorder is not None:
+            try:
+                uptime_recorder.record(now, since=since)
+                if now >= next_sync:
+                    uptime_recorder.sync()
+                    next_sync = max(next_sync + config.interval_seconds, now)
+            except OSError as exc:
+                # Logged once per failing stretch, not every second.
+                if not uptime_failing:
+                    log(f"couldn't record uptime: {exc}")
+                uptime_failing = True
+            else:
+                if uptime_failing:
+                    log("recording uptime again")
+                uptime_failing = False
+                since = None
+        if check_due:
+            due = watchdog.check(
+                now, count(config.ports), request_time(config.request_file)
             )
-            kill(master_pid, signal.SIGTERM)
-            return 0
-        if due and not reported_due:
-            log(
-                f"no activity for {idle_minutes:g} minutes (monitor mode: not stopping)"
-            )
-        reported_due = due
-        sleep(config.interval_seconds)
+            if due and config.mode == "stop":
+                watchdog.stopping = True
+            try:
+                write_status(config.status_file, watchdog.status())
+            except OSError as exc:
+                log(f"couldn't write {config.status_file}: {exc}")
+            idle_minutes = config.idle_seconds / 60
+            if watchdog.stopping:
+                log(
+                    f"no activity for {idle_minutes:g} minutes, sending SIGTERM"
+                    f" to gunicorn master {master_pid}"
+                )
+                kill(master_pid, signal.SIGTERM)
+                return 0
+            if due and not reported_due:
+                log(
+                    f"no activity for {idle_minutes:g} minutes"
+                    " (monitor mode: not stopping)"
+                )
+            reported_due = due
+            # From the schedule rather than now, so checks don't drift; but
+            # never into the past, so a long stall doesn't bunch them up.
+            next_check = max(next_check + config.interval_seconds, now)
+        # Wake at the next whole second, or the next check if that's sooner.
+        wake = math.floor(now) + 1 if uptime_recorder is not None else math.inf
+        if checking:
+            wake = min(wake, next_check)
+        sleep(max(wake - clock(), 0))
 
 
 def spawn(master_pid: int, environ: Mapping[str, str] = os.environ):
-    """Start the watchdog for gunicorn master ``master_pid`` unless it's off.
+    """Start the watchdog for gunicorn master ``master_pid`` unless it's off
+    and there's no uptime directory.
 
-    Returns the ``Popen``, or None if it's off, misconfigured (logged; better
-    to keep serving than fail to start over this) or ``/proc/net/tcp`` is
-    missing (not Linux).
+    Returns the ``Popen``, or None if it has nothing to do, is misconfigured
+    (logged; better to keep serving than fail to start over this) or
+    ``/proc/net/tcp`` is missing (not Linux).
     """
     try:
         config = config_from_env(environ)
     except ValueError as exc:
         log(f"not starting: {exc}")
         return None
-    if config.mode == "off":
+    if config.mode == "off" and config.uptime_dir is None:
         return None
     if not PROC_NET_TCP_FILES[0].exists():
         log(f"not starting: {PROC_NET_TCP_FILES[0]} is missing (Linux only)")
