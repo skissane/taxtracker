@@ -78,7 +78,7 @@
             </td>
           </tr>
           <tr>
-            <th class="lt-label">Last Request</th>
+            <th class="lt-label">Last Finished Request</th>
             <td>
               {% if status.last_request_at %}
                 {{ status.last_request_at_ago }} ago ({{ status.last_request_at|date:"Y-m-d H:i:s T" }})
@@ -143,7 +143,7 @@
         </table>
       </div>
       <p>
-        Loading this page is itself a request, so it counts as activity: the next check will see it and restart the idle timer.
+        Loading this page is itself a request, so it counts as activity: once it finishes, the next check will see it and restart the idle timer. Last Finished Request is read when the page loads, so it shows the request before this one; the other values are as of the last check.
       </p>
     {% elif not status_error %}
       <p>
