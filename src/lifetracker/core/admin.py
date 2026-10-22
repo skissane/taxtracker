@@ -8,7 +8,7 @@ from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.forms import BaseInlineFormSet
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils import timezone
@@ -511,6 +511,18 @@ _UPTIME_DEFAULT_DAYS = 7
 _UPTIME_MAX_DAYS = 366
 
 
+def _uptime_days(days_param):
+    """The uptime page's ``days`` query parameter (blank for the default) as a
+    number of days, or None if it's invalid."""
+    if not days_param:
+        return _UPTIME_DEFAULT_DAYS
+    try:
+        days = int(days_param)
+    except ValueError:
+        return None
+    return days if 1 <= days <= _UPTIME_MAX_DAYS else None
+
+
 def uptime_report_page_context(days_param, now=None):
     """The uptime page's context: the same report as the ``uptime_report``
     command, for the ``days`` query parameter (blank for the default)."""
@@ -521,18 +533,14 @@ def uptime_report_page_context(days_param, now=None):
         "directory": uptime_log.uptime_dir_from_env(),
         "report": None,
     }
-    if days_param:
-        try:
-            days = int(days_param)
-        except ValueError:
-            days = 0
-        if 1 <= days <= _UPTIME_MAX_DAYS:
-            context["days"] = days
-        else:
-            context["days_error"] = (
-                f"Days must be a whole number from 1 to {_UPTIME_MAX_DAYS}, so"
-                f" showing {_UPTIME_DEFAULT_DAYS}."
-            )
+    days = _uptime_days(days_param)
+    if days is None:
+        context["days_error"] = (
+            f"Days must be a whole number from 1 to {_UPTIME_MAX_DAYS}, so"
+            f" showing {_UPTIME_DEFAULT_DAYS}."
+        )
+    else:
+        context["days"] = days
     if context["directory"] is None:
         return context
     now = now if now is not None else time.time()
@@ -563,3 +571,70 @@ def uptime_report_view(request):
         "title": "Uptime",
     }
     return render(request, "admin/core/uptime_report.html", context)
+
+
+def _format_clock(second_of_day):
+    """E.g. "09:05:03" for a second of a day."""
+    hours, rest = divmod(second_of_day, 3600)
+    return f"{hours:02}:{rest // 60:02}:{rest % 60:02}"
+
+
+def uptime_day_page_context(date_param, days_param, now=None):
+    """The context of the uptime page's drill-down into one UTC day
+    (``date_param``, YYYY-MM-DD), listing its up periods. Raises Http404 for an
+    invalid date or one after today. ``days_param`` is the Uptime page's, kept
+    for the links back to it, and dropped if invalid."""
+    now = now if now is not None else time.time()
+    try:
+        date = datetime.date.fromisoformat(date_param)
+    except ValueError:
+        raise Http404("Not a date.") from None
+    day = (date - datetime.date(1970, 1, 1)).days
+    if day > uptime_log.day_of(now):
+        raise Http404("That day hasn't happened yet.")
+    days = _uptime_days(days_param)
+    context = {
+        "date": date,
+        "directory": uptime_log.uptime_dir_from_env(),
+        "report_query": (f"?days={days}" if days_param and days is not None else ""),
+        "previous_date": uptime_log.day_date(day - 1),
+        "next_date": None,
+        "day": None,
+        "periods": None,
+    }
+    if day < uptime_log.day_of(now):
+        context["next_date"] = uptime_log.day_date(day + 1)
+    if context["directory"] is None:
+        return context
+    result = uptime_log.day_periods(context["directory"], day, now)
+    context["day"] = result
+    if result.periods is not None:
+        last = len(result.periods) - 1
+        context["periods"] = [
+            {
+                "start": _format_clock(period.start),
+                "end": _format_clock(period.end),
+                "duration": _format_clock(period.seconds),
+                "from_previous_day": index == 0 and result.from_previous_day,
+                "into_next_day": index == last and result.into_next_day,
+                "ongoing": index == last and result.ongoing,
+            }
+            for index, period in enumerate(result.periods)
+        ]
+        context["up"] = _format_clock(sum(p.seconds for p in result.periods))
+    return context
+
+
+def uptime_day_view(request, date):
+    """The superuser-only drill-down from the uptime page into one day's up
+    periods, served like the uptime page (see ``idle_watchdog_view``) but not
+    linked from the top bar."""
+    if not request.user.is_superuser:
+        raise PermissionDenied
+
+    context = {
+        **admin.site.each_context(request),
+        **uptime_day_page_context(date, request.GET.get("days", "").strip()),
+    }
+    context["title"] = f"Uptime on {context['date'].isoformat()}"
+    return render(request, "admin/core/uptime_day.html", context)

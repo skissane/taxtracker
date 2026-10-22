@@ -1,0 +1,70 @@
+{% extends "admin/base_site.html" %}
+
+{% load i18n static %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'core/admin_pages.css' %}">
+  <style>
+  .lt-uptime-day .lt-num {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  </style>
+{% endblock extrastyle %}
+{% block breadcrumbs %}
+  <ol class="breadcrumbs">
+    <li><a href="{% url 'admin:index' %}">{% trans "Home" %}</a></li>
+    <li><a href="{% url 'admin:uptime_report' %}{{ report_query }}">Uptime</a></li>
+    <li aria-current="page">{{ date|date:"Y-m-d" }}</li>
+  </ol>
+{% endblock breadcrumbs %}
+{% block content %}
+  <p>
+    <a href="{% url 'admin:uptime_day' previous_date|date:'Y-m-d' %}{{ report_query }}">← {{ previous_date|date:"Y-m-d D" }}</a>
+    {% if next_date %}
+      | <a href="{% url 'admin:uptime_day' next_date|date:'Y-m-d' %}{{ report_query }}">{{ next_date|date:"Y-m-d D" }} →</a>
+    {% endif %}
+  </p>
+  {% if directory is None %}
+    <p class="errornote">
+      Uptime isn't recorded: set <code>LIFETRACKER_UPTIME_DIR</code> or <code>LIFETRACKER_DATA_DIR</code>.
+    </p>
+  {% elif periods is None %}
+    <p>No data: {{ date|date:"Y-m-d" }} is before the first file in <code>{{ directory }}</code>.</p>
+  {% elif not periods %}
+    <p>The app wasn't up on {{ date|date:"Y-m-d" }}{% if day.today %} so far{% endif %}.</p>
+  {% else %}
+    <p>
+      When the app was up on {{ date|date:"Y-m-d D" }} (UTC){% if day.today %} so far{% endif %}, from the files in <code>{{ directory }}</code>: {{ periods|length }} period{{ periods|length|pluralize }}, {{ up }} in all.
+    </p>
+    <table class="lt-uptime-day">
+      <thead>
+        <tr>
+          <th scope="col" class="lt-num">Start (UTC)</th>
+          <th scope="col" class="lt-num">Last Second Up</th>
+          <th scope="col" class="lt-num">Duration</th>
+          <th scope="col">Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for period in periods %}
+          <tr>
+            <td class="lt-num">{{ period.start }}</td>
+            <td class="lt-num">{{ period.end }}</td>
+            <td class="lt-num">{{ period.duration }}</td>
+            <td>
+              {% if period.from_previous_day %}Began the day before.{% endif %}
+              {% if period.into_next_day %}Continued into the next day.{% endif %}
+              {% if period.ongoing %}Still up.{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p>
+      Durations are hours:minutes:seconds, counting only this day. A gap of over 5 seconds ends a period, so a stall counts as a stop and start.
+    </p>
+  {% endif %}
+{% endblock content %}

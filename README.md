@@ -300,7 +300,9 @@ e.g. a throttled CPU, also counts as a stop and start):
 ```
 
 Superusers can also see it in the admin, from the **Uptime** link in the top
-bar, with a bar per day; its Days box does what `--days` does.
+bar, with a bar per day; its Days box does what `--days` does. Click a day's
+starts to see each up period that day: when it started, its last second up and
+how long it lasted.
 
 The files aren't in the cloud backup, which only has the database.
 

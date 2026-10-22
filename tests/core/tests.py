@@ -3403,6 +3403,93 @@ class UptimeLogTests(SimpleTestCase):
         self.assertEqual(uptime_log.start_count(bytes(data)), 3)
         self.assertEqual(uptime_log.start_count(bytes(10_800)), 0)
 
+    def test_up_periods(self):
+        data = bytearray(10_800)
+        data[0] = 0b1100_1000  # up at midnight, then a start at second 4
+        data[1] = 0b0000_0001  # ... and at second 15
+        data[2] = 0b1000_0000  # still up at 16
+        data[-1] = 0b0000_0011  # and up for the day's last two seconds
+
+        periods = uptime_log.up_periods(bytes(data))
+
+        self.assertEqual(
+            [(p.start, p.end, p.seconds) for p in periods],
+            [(0, 1, 2), (4, 4, 1), (15, 16, 2), (86_398, 86_399, 2)],
+        )
+        self.assertEqual(len(periods), uptime_log.start_count(bytes(data)))
+        self.assertEqual(
+            sum(p.seconds for p in periods), uptime_log.active_seconds(bytes(data))
+        )
+        self.assertEqual(uptime_log.up_periods(bytes(10_800)), [])
+        self.assertEqual(
+            [(p.start, p.end) for p in uptime_log.up_periods(b"\xff" * 10_800)],
+            [(0, 86_399)],
+        )
+
+    def test_day_periods_across_midnight(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            log = uptime_log.UptimeLog(Path(tempdir))
+            # Up from 23:00 the day before until 01:00, then 02:00 to the end
+            # of the day, which the next day continues.
+            log.record(self.MIDNIGHT + 3599, since=self.MIDNIGHT - 3600)
+            log.record(self.MIDNIGHT + 86_400, since=self.MIDNIGHT + 7200)
+            now = self.MIDNIGHT + 2 * 86_400
+            result = uptime_log.day_periods(Path(tempdir), self.DAY, now)
+            before = uptime_log.day_periods(Path(tempdir), self.DAY - 1, now)
+            empty_after = uptime_log.day_periods(Path(tempdir), self.DAY + 2, now)
+
+        self.assertEqual(result.date, uptime_log.day_date(self.DAY))
+        self.assertEqual(
+            [(p.start, p.end) for p in result.periods],
+            [(0, 3599), (7200, 86_399)],
+        )
+        self.assertTrue(result.from_previous_day)
+        self.assertTrue(result.into_next_day)
+        self.assertFalse(result.ongoing)
+        self.assertFalse(result.today)
+        # The day before ran to midnight, but didn't begin the day before it.
+        self.assertFalse(before.from_previous_day)
+        self.assertTrue(before.into_next_day)
+        self.assertEqual(empty_after.periods, [])
+        self.assertTrue(empty_after.today)
+
+    def test_day_periods_midnight_without_neighbours(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            uptime_log.UptimeLog(Path(tempdir)).record(
+                self.MIDNIGHT + 86_399, since=self.MIDNIGHT
+            )
+            result = uptime_log.day_periods(
+                Path(tempdir), self.DAY, self.MIDNIGHT + 2 * 86_400
+            )
+
+        self.assertEqual([(p.start, p.end) for p in result.periods], [(0, 86_399)])
+        self.assertFalse(result.from_previous_day)
+        self.assertFalse(result.into_next_day)
+
+    def test_day_periods_ongoing_today(self):
+        now = self.MIDNIGHT + 3600.5
+        with tempfile.TemporaryDirectory() as tempdir:
+            log = uptime_log.UptimeLog(Path(tempdir))
+            log.record(self.MIDNIGHT + 100, since=self.MIDNIGHT + 10)
+            log.record(now - 5, since=self.MIDNIGHT + 600)
+            ongoing = uptime_log.day_periods(Path(tempdir), self.DAY, now)
+            stopped = uptime_log.day_periods(Path(tempdir), self.DAY, now + 10)
+
+        self.assertEqual(len(ongoing.periods), 2)
+        self.assertTrue(ongoing.today)
+        self.assertTrue(ongoing.ongoing)
+        self.assertFalse(stopped.ongoing)
+
+    def test_day_periods_no_data(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            empty = uptime_log.day_periods(Path(tempdir), self.DAY, self.MIDNIGHT)
+            uptime_log.UptimeLog(Path(tempdir)).record(self.MIDNIGHT)
+            before = uptime_log.day_periods(Path(tempdir), self.DAY - 1, self.MIDNIGHT)
+
+        self.assertIsNone(empty.periods)
+        self.assertIsNone(before.periods)
+        self.assertFalse(before.from_previous_day or before.into_next_day)
+
 
 class UptimeReportCommandTests(SimpleTestCase):
     NOW = 20_748 * 86_400 + 43_199.5  # 2026-10-22T11:59:59.5Z
@@ -3519,7 +3606,8 @@ class UptimeReportAdminViewTests(TestCase):
         )
         self.assertIn("(so far)", rows[0][0])
         self.assertEqual(rows[0][3], "3\xa0hours of 12\xa0hours")
-        self.assertEqual(rows[0][4], "1")
+        self.assertEqual(rows[0][4], '<a href="/admin/uptime/2026-10-22/?days=4">1</a>')
+        self.assertEqual(rows[3][4], "")
         self.assertEqual(rows[2][3], "12\xa0hours of 1\xa0day")
         self.assertIn('<meter min="0" max="100" value="50.00">', rows[2][2])
 
@@ -3545,6 +3633,141 @@ class UptimeReportAdminViewTests(TestCase):
 
         self.assertContains(response, "Uptime isn't recorded")
         self.assertNotContains(response, 'lt-uptime"')
+
+
+class UptimeDayAdminViewTests(TestCase):
+    NOW = UptimeReportCommandTests.NOW  # 2026-10-22T11:59:59.5Z
+    URL = "/admin/uptime/2026-10-20/"
+
+    def setUp(self):
+        User.objects.create_superuser("admin", "admin@example.com", "password")
+        self.client.login(username="admin", password="password")
+        tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        self.directory = Path(tempdir.name)
+        for patcher in (
+            mock.patch.dict(os.environ, {"LIFETRACKER_UPTIME_DIR": tempdir.name}),
+            mock.patch("time.time", return_value=self.NOW),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    _rows = UptimeReportAdminViewTests._rows
+
+    def _record(self):
+        log = uptime_log.UptimeLog(self.directory)
+        midnight = 20_746 * 86_400  # 2026-10-20
+        # From 23:30 the day before to 00:30, 09:05:03 for 2 hours, and the
+        # last second of the day, which the next day doesn't continue.
+        log.record(midnight + 1799, since=midnight - 1800)
+        log.record(midnight + 32_703 + 7199, since=midnight + 32_703)
+        log.record(midnight + 86_399)
+        log.record(self.NOW, since=self.NOW - 59.5)
+
+    def test_url(self):
+        self.assertEqual(reverse("admin:uptime_day", args=["2026-10-20"]), self.URL)
+
+    def test_superusers_only(self):
+        staff = User.objects.create_user("staff", "s@example.com", "pass")
+        staff.is_staff = True
+        staff.save()
+        client = Client()
+        client.login(username="staff", password="pass")
+        self.assertEqual(client.get(self.URL).status_code, 403)
+        self.assertRedirects(
+            Client().get(self.URL),
+            f"{reverse('admin:login')}?next={self.URL}",
+            fetch_redirect_response=False,
+        )
+
+    def test_report_links_starts(self):
+        self._record()
+
+        response = self.client.get("/admin/uptime/", {"days": "5"})
+
+        self.assertContains(
+            response, '<a href="/admin/uptime/2026-10-20/?days=5">3</a>', html=True
+        )
+        self.assertContains(
+            response, '<a href="/admin/uptime/2026-10-21/?days=5">0</a>', html=True
+        )
+        # No data, so no link.
+        self.assertContains(response, "No data")
+        self.assertNotContains(response, "/admin/uptime/2026-10-18/")
+
+    def test_page_lists_periods(self):
+        self._record()
+
+        response = self.client.get(self.URL, {"days": "4"})
+
+        self.assertEqual(
+            self._rows(response),
+            [
+                ["00:00:00", "00:29:59", "00:30:00", "Began the day before."],
+                ["09:05:03", "11:05:02", "02:00:00", ""],
+                ["23:59:59", "23:59:59", "00:00:01", ""],
+            ],
+        )
+        self.assertContains(response, "3 periods, 02:30:01 in all")
+        self.assertContains(response, "<title>Uptime on 2026-10-20")
+        # Links back to the report, and to the days either side, keep its days.
+        self.assertContains(response, 'href="/admin/uptime/?days=4"')
+        self.assertContains(response, 'href="/admin/uptime/2026-10-19/?days=4"')
+        self.assertContains(response, 'href="/admin/uptime/2026-10-21/?days=4"')
+
+    def test_today(self):
+        self._record()
+
+        response = self.client.get("/admin/uptime/2026-10-22/")
+
+        self.assertEqual(
+            self._rows(response), [["11:59:00", "11:59:59", "00:01:00", "Still up."]]
+        )
+        self.assertContains(response, "so far")
+        # No next day yet, and no days parameter to keep.
+        self.assertNotContains(response, "2026-10-23")
+        self.assertContains(response, 'href="/admin/uptime/"')
+
+    def test_continues_into_next_day(self):
+        uptime_log.UptimeLog(self.directory).record(
+            20_747 * 86_400 + 10, since=20_747 * 86_400 - 10
+        )
+
+        response = self.client.get("/admin/uptime/2026-10-20/")
+
+        self.assertEqual(
+            self._rows(response),
+            [["23:59:50", "23:59:59", "00:00:10", "Continued into the next day."]],
+        )
+
+    def test_no_periods_and_no_data(self):
+        uptime_log.UptimeLog(self.directory).record(20_746 * 86_400)
+
+        empty = self.client.get("/admin/uptime/2026-10-21/")
+        before = self.client.get("/admin/uptime/2026-10-19/")
+
+        self.assertContains(empty, "The app wasn't up on 2026-10-21.")
+        self.assertContains(before, "No data: 2026-10-19 is before the first file")
+        self.assertNotContains(before, "<tbody>")
+
+    def test_bad_and_future_dates(self):
+        for date in ("2026-10-23", "2026-13-01", "yesterday"):
+            with self.subTest(date=date):
+                self.assertEqual(
+                    self.client.get(f"/admin/uptime/{date}/").status_code, 404
+                )
+
+    def test_bad_days_dropped(self):
+        response = self.client.get(self.URL, {"days": "0"})
+
+        self.assertContains(response, 'href="/admin/uptime/"')
+        self.assertNotContains(response, "days=")
+
+    def test_not_recorded(self):
+        with mock.patch.dict(os.environ, {"LIFETRACKER_UPTIME_DIR": "off"}):
+            response = self.client.get(self.URL)
+
+        self.assertContains(response, "Uptime isn't recorded")
 
 
 def _watchdog_status(now, **overrides):

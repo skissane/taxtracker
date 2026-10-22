@@ -70,6 +70,7 @@ class LifetrackerAdminSite(admin.AdminSite):
         # instance of this class, so a top-level import would be circular.
         from lifetracker.core.admin import (  # noqa: PLC0415
             idle_watchdog_view,
+            uptime_day_view,
             uptime_report_view,
         )
 
@@ -85,6 +86,11 @@ class LifetrackerAdminSite(admin.AdminSite):
                 "uptime/",
                 self.admin_view(uptime_report_view),
                 name="uptime_report",
+            ),
+            path(
+                "uptime/<str:date>/",
+                self.admin_view(uptime_day_view),
+                name="uptime_day",
             ),
             *super().get_urls(),
         ]

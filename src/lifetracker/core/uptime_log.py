@@ -21,6 +21,7 @@ Doesn't import Django, as the watchdog doesn't.
 
 import datetime
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -136,6 +137,72 @@ def daily_report(directory: Path, days: int, now: float) -> list[DayUptime]:
             up, starts = active_seconds(data), start_count(data)
         report.append(DayUptime(day_date(day), up, elapsed, starts, day == today))
     return report
+
+
+@dataclass(frozen=True)
+class UpPeriod:
+    """One run of up seconds in a day: ``start`` to ``end``, inclusive, as
+    seconds of the day."""
+
+    start: int
+    end: int
+
+    @property
+    def seconds(self) -> int:
+        return self.end - self.start + 1
+
+
+def up_periods(data: bytes) -> list[UpPeriod]:
+    """A day's runs of up seconds, in order: one per start (``start_count``)."""
+    bits = format(int.from_bytes(data, "big"), f"0{len(data) * 8}b")
+    return [UpPeriod(m.start(), m.end() - 1) for m in re.finditer("1+", bits)]
+
+
+def _second_is_up(data: bytes | None, second: int) -> bool:
+    return data is not None and bool(data[second >> 3] >> (7 - second % 8) & 1)
+
+
+@dataclass(frozen=True)
+class DayPeriods:
+    """One day's up periods, for drilling into a ``DayUptime``'s starts.
+    ``periods`` is None if there's no data, as for ``DayUptime``. A first period
+    starting at midnight may have begun the day before (``from_previous_day``),
+    a last one ending at 23:59:59 may continue into the next day
+    (``into_next_day``), and today's last one may still be going (``ongoing``)."""
+
+    date: datetime.date
+    periods: list[UpPeriod] | None
+    from_previous_day: bool
+    into_next_day: bool
+    ongoing: bool
+    today: bool
+
+
+def day_periods(directory: Path, day: int, now: float) -> DayPeriods:
+    """The up periods of ``day``, which mustn't be after the one ``now`` is on."""
+    today = day_of(now)
+    first_recorded = first_recorded_day(directory)
+    if first_recorded is None or day < first_recorded:
+        return DayPeriods(day_date(day), None, False, False, False, day == today)
+    data = read_day(directory, day) or bytes(DAY_FILE_SIZE)
+    periods = up_periods(data)
+    last_second = SECONDS_PER_DAY - 1
+    from_previous = bool(periods) and periods[0].start == 0
+    from_previous = from_previous and _second_is_up(
+        read_day(directory, day - 1), last_second
+    )
+    into_next = bool(periods) and periods[-1].end == last_second
+    into_next = into_next and _second_is_up(read_day(directory, day + 1), 0)
+    # The watchdog records each second as it passes, and fills in gaps of up to
+    # MAX_FILLED_GAP_SECONDS, so a period that recent may still be going.
+    ongoing = (
+        day == today
+        and bool(periods)
+        and periods[-1].end >= int(now) % SECONDS_PER_DAY - 1 - MAX_FILLED_GAP_SECONDS
+    )
+    return DayPeriods(
+        day_date(day), periods, from_previous, into_next, ongoing, day == today
+    )
 
 
 class UptimeLog:
