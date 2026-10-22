@@ -4352,6 +4352,25 @@ class JWTKeyTests(SimpleTestCase):
         self.assertEqual(self.private_path.read_bytes(), pem)
         self.assertEqual(_jwks_key(self.jwks_path).key_id, kid)
 
+    def test_unchanged_jwks_not_rewritten(self):
+        # So a read-only config directory works once both files exist, as with
+        # `just docker-run`'s /config.
+        _, kid = jwt_auth.signing_key()
+        self._forget_cached_key()
+        with mock.patch.object(
+            jwt_auth.tempfile, "mkstemp", side_effect=AssertionError("wrote")
+        ):
+            self.assertEqual(jwt_auth.signing_key()[1], kid)
+
+    def test_failed_jwks_write_leaves_no_temporary_file(self):
+        self.dir.mkdir()
+        with (
+            mock.patch.object(jwt_auth.os, "replace", side_effect=OSError("full")),
+            self.assertRaisesRegex(OSError, "full"),
+        ):
+            jwt_auth._write_jwks({"kty": "OKP"}, self.jwks_path)
+        self.assertEqual(list(self.dir.iterdir()), [])
+
     def test_key_cached_per_process(self):
         first = jwt_auth.signing_key()
         self.private_path.unlink()
