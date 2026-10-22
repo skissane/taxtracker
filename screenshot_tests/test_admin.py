@@ -14,6 +14,8 @@ from unittest import mock
 import pytest
 from playwright.sync_api import sync_playwright
 
+from lifetracker.core import uptime_log
+
 SCREENSHOT_DIR = Path(__file__).resolve().parent.parent / "screenshots"
 
 
@@ -141,3 +143,22 @@ def test_idle_watchdog(admin_user, page, monkeypatch, tmp_path):
     _log_in(page, admin_user)
     page.goto("/admin/idle-watchdog/")
     _screenshot(page, "idle-watchdog")
+
+
+def test_uptime(admin_user, page, monkeypatch, tmp_path):
+    # A made-up week: each earlier day up for a few hours in two spans (so two
+    # starts), one day not at all, and today since the start of the UTC day or
+    # for the last three hours, whichever is shorter.
+    now = datetime.datetime.now(datetime.UTC).timestamp()
+    today = uptime_log.day_of(now)
+    log = uptime_log.UptimeLog(tmp_path)
+    for day, hours in zip(range(today - 6, today), [2, 5, 3, 0, 9, 16], strict=True):
+        if hours:
+            start = day * uptime_log.SECONDS_PER_DAY
+            log.record(start + 3600 * hours - 1, since=start + 3600)
+            log.record(start + 3600 * (hours + 2), since=start + 3600 * (hours + 1))
+    log.record(now, since=max(today * uptime_log.SECONDS_PER_DAY, now - 3 * 3600))
+    monkeypatch.setenv("LIFETRACKER_UPTIME_DIR", str(tmp_path))
+    _log_in(page, admin_user)
+    page.goto("/admin/uptime/?days=8")
+    _screenshot(page, "uptime")

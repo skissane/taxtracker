@@ -1,6 +1,7 @@
 import datetime
 import logging
 import mimetypes
+import time
 from urllib.parse import quote
 
 from django.conf import settings
@@ -13,7 +14,7 @@ from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.timesince import timesince
 
-from lifetracker.core import idle_watchdog
+from lifetracker.core import idle_watchdog, uptime_log
 from lifetracker.core.backup import (
     CLOUD_BACKUP_ERRORS,
     CloudBackupStatusUpdateError,
@@ -503,3 +504,62 @@ def idle_watchdog_view(request):
         "title": "Idle Watchdog",
     }
     return render(request, "admin/core/idle_watchdog.html", context)
+
+
+# The uptime page's default and largest ``days``.
+_UPTIME_DEFAULT_DAYS = 7
+_UPTIME_MAX_DAYS = 366
+
+
+def uptime_report_page_context(days_param, now=None):
+    """The uptime page's context: the same report as the ``uptime_report``
+    command, for the ``days`` query parameter (blank for the default)."""
+    context = {
+        "days": _UPTIME_DEFAULT_DAYS,
+        "max_days": _UPTIME_MAX_DAYS,
+        "days_error": None,
+        "directory": uptime_log.uptime_dir_from_env(),
+        "report": None,
+    }
+    if days_param:
+        try:
+            days = int(days_param)
+        except ValueError:
+            days = 0
+        if 1 <= days <= _UPTIME_MAX_DAYS:
+            context["days"] = days
+        else:
+            context["days_error"] = (
+                f"Days must be a whole number from 1 to {_UPTIME_MAX_DAYS}, so"
+                f" showing {_UPTIME_DEFAULT_DAYS}."
+            )
+    if context["directory"] is None:
+        return context
+    now = now if now is not None else time.time()
+    # Newest first, as on the cloud backup list.
+    context["report"] = [
+        {
+            "row": row,
+            "percent": None if row.share is None else row.share * 100,
+            "up": _format_duration(row.up_seconds or 0),
+            "elapsed": _format_duration(row.elapsed_seconds),
+        }
+        for row in reversed(
+            uptime_log.daily_report(context["directory"], context["days"], now)
+        )
+    ]
+    return context
+
+
+def uptime_report_view(request):
+    """The superuser-only uptime page, served and linked like the idle watchdog
+    page (see ``idle_watchdog_view``)."""
+    if not request.user.is_superuser:
+        raise PermissionDenied
+
+    context = {
+        **admin.site.each_context(request),
+        **uptime_report_page_context(request.GET.get("days", "").strip()),
+        "title": "Uptime",
+    }
+    return render(request, "admin/core/uptime_report.html", context)

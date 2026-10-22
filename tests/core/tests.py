@@ -3445,6 +3445,108 @@ class UptimeReportCommandTests(SimpleTestCase):
             self._report({"LIFETRACKER_UPTIME_DIR": "/nonexistent"}, days=0)
 
 
+class UptimeReportAdminViewTests(TestCase):
+    URL = "/admin/uptime/"
+    NOW = UptimeReportCommandTests.NOW
+
+    def setUp(self):
+        User.objects.create_superuser("admin", "admin@example.com", "password")
+        self.client.login(username="admin", password="password")
+        tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        self.directory = Path(tempdir.name)
+        for patcher in (
+            mock.patch.dict(os.environ, {"LIFETRACKER_UPTIME_DIR": tempdir.name}),
+            mock.patch("time.time", return_value=self.NOW),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _rows(self, response):
+        return [
+            [cell.strip() for cell in re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)]
+            for row in re.findall(
+                r"<tr>(.*?)</tr>",
+                response.content.decode().split("<tbody>")[1],
+                re.S,
+            )
+        ]
+
+    def test_url(self):
+        self.assertEqual(reverse("admin:uptime_report"), self.URL)
+
+    def test_top_bar_links_to_page_for_superusers_only(self):
+        link = f'<a href="{self.URL}">Uptime</a>'
+        self.assertContains(self.client.get(reverse("admin:index")), link, html=True)
+
+        staff = User.objects.create_user("staff", "s@example.com", "pass")
+        staff.is_staff = True
+        staff.save()
+        client = Client()
+        client.login(username="staff", password="pass")
+        self.assertNotContains(client.get(reverse("admin:index")), self.URL)
+        self.assertEqual(client.get(self.URL).status_code, 403)
+
+    def test_page_requires_login(self):
+        response = Client().get(self.URL)
+
+        self.assertRedirects(
+            response,
+            f"{reverse('admin:login')}?next={self.URL}",
+            fetch_redirect_response=False,
+        )
+
+    def test_page_shows_report(self):
+        log = uptime_log.UptimeLog(self.directory)
+        # As in UptimeReportCommandTests.test_report.
+        log.record(20_746 * 86_400 + 43_199, since=20_746 * 86_400)
+        log.record(self.NOW, since=self.NOW - 10_799.5)
+
+        response = self.client.get(self.URL, {"days": "4"})
+
+        self.assertContains(response, f"<code>{self.directory}</code>")
+        self.assertContains(response, 'value="4"')
+        rows = self._rows(response)
+        # Newest first.
+        self.assertEqual(
+            [(row[0].split()[0], row[1]) for row in rows],
+            [
+                ("2026-10-22", "25.00%"),
+                ("2026-10-21", "0.00%"),
+                ("2026-10-20", "50.00%"),
+                ("2026-10-19", "No data"),
+            ],
+        )
+        self.assertIn("(so far)", rows[0][0])
+        self.assertEqual(rows[0][3], "3\xa0hours of 12\xa0hours")
+        self.assertEqual(rows[0][4], "1")
+        self.assertEqual(rows[2][3], "12\xa0hours of 1\xa0day")
+        self.assertIn('<meter min="0" max="100" value="50.00">', rows[2][2])
+
+    def test_default_days(self):
+        response = self.client.get(self.URL)
+
+        self.assertEqual(len(self._rows(response)), 7)
+        self.assertNotContains(response, "errornote")
+
+    def test_bad_days(self):
+        for days in ("0", "367", "x"):
+            with self.subTest(days=days):
+                response = self.client.get(self.URL, {"days": days})
+
+                self.assertContains(
+                    response, "Days must be a whole number from 1 to 366"
+                )
+                self.assertEqual(len(self._rows(response)), 7)
+
+    def test_not_recorded(self):
+        with mock.patch.dict(os.environ, {"LIFETRACKER_UPTIME_DIR": "off"}):
+            response = self.client.get(self.URL)
+
+        self.assertContains(response, "Uptime isn't recorded")
+        self.assertNotContains(response, 'lt-uptime"')
+
+
 def _watchdog_status(now, **overrides):
     """A status file's contents, as ``Watchdog.status`` writes them, with times
     relative to ``now`` (a UTC datetime)."""
