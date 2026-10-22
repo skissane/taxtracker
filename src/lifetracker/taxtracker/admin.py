@@ -1,12 +1,14 @@
 import io
 import re
+import shutil
+import tempfile
 import zipfile
 from pathlib import Path
 
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.http import HttpResponse
+from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
@@ -788,8 +790,11 @@ def _build_fy_index_md(fy, prefix="", zf=None):
             missing = False
             try:
                 if zf is not None:
-                    with attachment.file.open("rb") as fh:
-                        zf.writestr(zip_path, fh.read())
+                    with (
+                        attachment.file.open("rb") as fh,
+                        zf.open(zip_path, "w") as dest,
+                    ):
+                        shutil.copyfileobj(fh, dest)
                 else:
                     attachment.file.open("rb").close()
             except OSError, DBStoredFile.DoesNotExist, ValueError:
@@ -821,9 +826,26 @@ def _write_fy_to_zip(zf, fy, prefix=""):
     zf.writestr(f"{prefix}index.md", index_md)
 
 
+# ZIPs bigger than this are built on disk rather than in memory, as every
+# attachment in them can add up to more than the Machine's RAM.
+_ZIP_SPOOL_MAX_SIZE = 10 * 1024 * 1024
+
+
+def _zip_buffer():
+    """Return a file to build a ZIP in: in memory while small, then on disk."""
+    return tempfile.SpooledTemporaryFile(max_size=_ZIP_SPOOL_MAX_SIZE)
+
+
+def _zip_response(buf, filename):
+    """Stream the ZIP in *buf* as a download, closing *buf* once it's sent."""
+    return FileResponse(
+        buf, as_attachment=True, filename=filename, content_type="application/zip"
+    )
+
+
 def _build_zip(fy):
     """Build a ZIP file for all attachments of a FinancialYear."""
-    buf = io.BytesIO()
+    buf = _zip_buffer()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         _write_fy_to_zip(zf, fy)
     buf.seek(0)
@@ -832,7 +854,7 @@ def _build_zip(fy):
 
 def _build_multi_zip(fys):
     """Build a ZIP with each FinancialYear under its own top-level directory."""
-    buf = io.BytesIO()
+    buf = _zip_buffer()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for fy in fys:
             _write_fy_to_zip(zf, fy, prefix=f"{fy}/")
@@ -1018,10 +1040,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
     def download_zip_view(self, request, pk):
         fy = get_object_or_404(FinancialYear, pk=pk)
-        buf = _build_zip(fy)
-        response = HttpResponse(buf.getvalue(), content_type="application/zip")
-        response["Content-Disposition"] = f'attachment; filename="{fy}_attachments.zip"'
-        return response
+        return _zip_response(_build_zip(fy), f"{fy}_attachments.zip")
 
     # ------------------------------------------------------------------
     # Multi-year ZIP download view
@@ -1054,9 +1073,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
                     fname = f"FY{years[0]}_attachments.zip"
                 else:
                     fname = f"FY{years[0]}-FY{years[-1]}_multi_attachments.zip"
-                response = HttpResponse(buf.getvalue(), content_type="application/zip")
-                response["Content-Disposition"] = f'attachment; filename="{fname}"'
-                return response
+                return _zip_response(buf, fname)
 
         context = {
             **self.admin_site.each_context(request),

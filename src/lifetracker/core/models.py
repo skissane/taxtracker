@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.storage import Storage
 from django.db import models
+from django.db.models.functions import Length
 from django.urls import reverse
 from django.utils.deconstruct import deconstructible
 
@@ -196,8 +197,13 @@ class DatabaseStorage(Storage):
 
     def size(self, name):
         pk = self._name_to_pk(name)
-        obj = DBStoredFile.objects.get(pk=pk)
-        return len(obj.content)
+        # LENGTH() of a blob reads only its size, not the content.
+        return (
+            DBStoredFile.objects.filter(pk=pk)
+            .annotate(size=Length("content"))
+            .values_list("size", flat=True)
+            .get()
+        )
 
     def get_available_name(self, name, max_length=None):
         # Each save creates a new record so there are no name conflicts.
