@@ -14,6 +14,7 @@ import os
 import secrets
 import socket
 from pathlib import Path
+from urllib.parse import quote
 
 from django.core.exceptions import ImproperlyConfigured
 from django.templatetags.static import static
@@ -272,6 +273,24 @@ LIFETRACKER_BACKUP_HOSTNAME = (
     os.environ.get("LIFETRACKER_BACKUP_HOSTNAME", "").strip()
     or _fly_hostname
     or socket.gethostname()
+)
+
+
+def fly_machine_url(app_name, machine_id):
+    """The Machine's page in Fly's dashboard, linked from the admin's top bar for
+    superusers; empty (no link) unless both are non-blank."""
+    app_name, machine_id = app_name.strip(), machine_id.strip()
+    if not (app_name and machine_id):
+        return ""
+    return (
+        f"https://fly.io/apps/{quote(app_name, safe='')}"
+        f"/machines/{quote(machine_id, safe='')}"
+    )
+
+
+# Fly sets both on its Machines.
+LIFETRACKER_FLY_MACHINE_URL = fly_machine_url(
+    _fly_app_name, os.environ.get("FLY_MACHINE_ID", "")
 )
 
 # Google SSO: disabled by default unless credentials are configured. When enabled,

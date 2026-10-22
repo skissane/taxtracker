@@ -84,6 +84,7 @@ from lifetracker.core.models import (
     MimeType,
 )
 from lifetracker.core.timing import REQUEST_START_ATTR
+from lifetracker.settings import fly_machine_url
 from lifetracker.tasktracker.models import Task, TaskAttachment
 from lifetracker.taxtracker.models import Attachment, FinancialYear, Item
 from lifetracker.wsgi import application as wsgi_application
@@ -1040,6 +1041,32 @@ class AdminSitePerRequestHeaderTests(TestCase):
         self.assertNotContains(response, "Example Site")
 
 
+class AdminSiteFlyMachineLinkTests(TestCase):
+    URL = "https://fly.io/apps/example-app/machines/0123456789abcd"
+    LINK = f'<a href="{URL}" target="_blank" rel="noopener noreferrer">Fly Machine</a>'
+
+    def _index(self, user):
+        client = Client()
+        client.force_login(user)
+        return client.get(reverse("admin:index"))
+
+    @override_settings(LIFETRACKER_FLY_MACHINE_URL=URL)
+    def test_top_bar_links_to_fly_machine_for_superusers(self):
+        response = self._index(User.objects.create_superuser("admin", "", "pw"))
+        self.assertContains(response, self.LINK, html=True)
+
+    @override_settings(LIFETRACKER_FLY_MACHINE_URL=URL)
+    def test_no_link_for_staff_or_logged_out(self):
+        staff = User.objects.create_user("staff", "", "pw", is_staff=True)
+        self.assertNotContains(self._index(staff), self.URL)
+        self.assertNotContains(Client().get(reverse("admin:login")), self.URL)
+
+    @override_settings(LIFETRACKER_FLY_MACHINE_URL="")
+    def test_no_link_when_not_on_fly(self):
+        response = self._index(User.objects.create_superuser("admin", "", "pw"))
+        self.assertNotContains(response, "Fly Machine")
+
+
 class _SettingsSubprocessMixin:
     """settings.py computes its values at import time, from files under $HOME
     and from environment variables, before Django is even configured. They can
@@ -1411,6 +1438,46 @@ class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
                 LIFETRACKER_BACKUP_HOSTNAME="test-instance", FLY_APP_NAME="example-app"
             )[2],
             "test-instance",
+        )
+
+
+class FlyMachineUrlTests(SimpleTestCase):
+    def test_built_from_app_name_and_machine_id(self):
+        self.assertEqual(
+            fly_machine_url(" example-app ", "0123456789abcd "),
+            "https://fly.io/apps/example-app/machines/0123456789abcd",
+        )
+
+    def test_values_are_url_quoted(self):
+        self.assertEqual(
+            fly_machine_url("a/b", "c?d"), "https://fly.io/apps/a%2Fb/machines/c%3Fd"
+        )
+
+    def test_empty_unless_both_are_set(self):
+        for app_name, machine_id in [
+            ("", ""),
+            ("example-app", ""),
+            ("", "0123456789abcd"),
+            ("example-app", "  "),
+            (" ", "0123456789abcd"),
+        ]:
+            with self.subTest(app_name=app_name, machine_id=machine_id):
+                self.assertEqual(fly_machine_url(app_name, machine_id), "")
+
+
+class SettingsFlyMachineUrlTests(_SettingsSubprocessMixin, TestCase):
+    def _url(self, **env):
+        with tempfile.TemporaryDirectory() as home:
+            proc = self._run(
+                home, extra_env=env, expr="repr(s.LIFETRACKER_FLY_MACHINE_URL)"
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return ast.literal_eval(proc.stdout.strip())
+
+    def test_read_from_fly_environment_variables(self):
+        self.assertEqual(
+            self._url(FLY_APP_NAME="example-app", FLY_MACHINE_ID="0123456789abcd"),
+            "https://fly.io/apps/example-app/machines/0123456789abcd",
         )
 
 

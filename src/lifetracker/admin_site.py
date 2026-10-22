@@ -111,4 +111,6 @@ class LifetrackerAdminSite(admin.AdminSite):
             instance_name=settings.LIFETRACKER_BACKUP_HOSTNAME,
             link_commit=authenticated,
         )
+        # Linked from the top bar (templates/admin/base_site.html) for superusers.
+        context["fly_machine_url"] = settings.LIFETRACKER_FLY_MACHINE_URL
         return context
