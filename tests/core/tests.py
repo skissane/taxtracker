@@ -3232,6 +3232,18 @@ class IdleWatchdogUptimeRunTests(SimpleTestCase):
         self.assertIn(f"recording uptime in {tempdir}", stderr)
         self.assertNotIn("started in", stderr)
 
+    def test_nothing_to_do_exits_at_once(self):
+        # e.g. run by hand with both off: without the early return the loop
+        # would have nothing to wake for, and time.sleep(inf) raises.
+        sleep = mock.Mock()
+
+        result = idle_watchdog.run(
+            _watchdog_config("off"), self.MASTER_PID, sleep=sleep
+        )
+
+        self.assertEqual(result, 0)
+        sleep.assert_not_called()
+
     def test_checks_still_every_interval(self):
         with tempfile.TemporaryDirectory() as tempdir:
             status_file = Path(tempdir) / "status.json"
