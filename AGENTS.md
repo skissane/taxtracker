@@ -271,6 +271,7 @@ The human-facing setup steps are in README.md's Fly.io section; keep the two in 
 `just fly-setup` (`fly-setup.sh`) idempotently creates the app, volume, Fly secrets (`LIFETRACKER_INITIAL_ADMIN_PASSWORD`, the S3 settings and, if present, `LIFETRACKER_UNAUTHENTICATED_SITE_NAME` and the `LIFETRACKER_GOOGLE_SSO_*` settings other than `CALLBACK_DOMAIN`, which production shares with local dev via one OAuth client with both redirect URIs) and `FLY_APP`/`FLY_API_TOKEN` GitHub secrets from `.env` (`--replace-token` overwrites `FLY_API_TOKEN` with a fresh deploy token; it checks a new token with the same `flyctl status` call as CI's `check-fly` job before storing it); it reads the volume's name and region from `fly.toml`.
 It runs locally, so it may print the app name; only CI output (where GitHub masks secret values) must not reveal it.
 On the Machine, `LIFETRACKER_ALLOWED_HOSTS` and `LIFETRACKER_BACKUP_HOSTNAME` both default to `<app>.fly.dev` from `FLY_APP_NAME`, which Fly sets at runtime.
+`settings.LIFETRACKER_FLY_MACHINE_URL` is the Machine's page in Fly's dashboard, `https://fly.io/apps/<FLY_APP_NAME>/machines/<FLY_MACHINE_ID>` (both set by Fly; built by `settings.fly_machine_url`), or empty unless both are non-blank; `LifetrackerAdminSite.each_context` passes it as `fly_machine_url`, and `base_site.html` links it from the top bar for superusers ("Fly Machine", in a new tab) when it's non-empty.
 It runs one Machine with the image CI publishes to GHCR, with a Fly volume mounted at `/data` for the database and secret key, and auto-stop/start when idle.
 Fly Proxy's auto-stop only sees traffic through the proxy, not SSH (which goes over the private network), so it can stop the Machine mid-session (issue #135).
 The replacement is the idle watchdog, `core/idle_watchdog.py`.
@@ -318,6 +319,24 @@ When a test hits a warning:
   `pytest.warns` is a two-sided check: it also fails if the warning *stops* occurring, so if the underlying code later changes and the warning goes away, the test fails and forces someone to remove the now-stale wrapper.
   A `filterwarnings` ignore rule has no such mechanism — it just keeps silently suppressing nothing, orphaned, indefinitely.
   Reserve global ignore entries for warnings that are pervasive and not tied to one specific assertable call site.
+
+## Issue labels
+
+Issues are labelled `dimension:value`.
+When you file an issue, give it one `type:` and one `priority:` label, a `size:` label unless it's a parent issue, and any `concern:` labels that apply.
+
+- `type:` (exactly one): `bug` (something behaves wrongly), `feature` (a new capability or module), `improvement` (makes something that already works better), `maintenance` (refactors, dead code, CI, dependencies; no visible change) or `docs` (documentation only).
+- `priority:` (exactly one), defined by what to do about it: `p0` (drop everything: production is broken or data is at risk), `p1` (do next), `p2` (worth doing when convenient) or `p3` (someday/maybe).
+- `size:` (exactly one, except on parent issues), by how many PRs it takes rather than hours: `s` (one small PR), `m` (one PR that needs some design) or `l` (several PRs).
+  An `l` issue should become a parent issue with sub-issues; parent issues get no `size:` label, their sub-issues do.
+- `concern:` (zero or more): `security` (a security risk or hardening) and `data-integrity` (could lose or corrupt data).
+  These are separate from `type:`, as a security problem can be a bug, a missing feature or a maintenance job.
+
+An open issue with no `priority:` label is untriaged; find them with `is:open -label:priority:p0 -label:priority:p1 -label:priority:p2 -label:priority:p3`.
+When asked what to work on next, start from the `priority:p1` issues.
+Update an issue's labels when you learn more about it, e.g. a fix turns out bigger than its `size:`, or it's split into sub-issues and so loses its `size:`.
+Use only these labels: applying a label that doesn't exist creates a new grey one, so a typo or a new value silently adds to the scheme.
+Propose a new dimension or value to the owner rather than inventing one.
 
 ## Pitfalls
 
