@@ -103,6 +103,7 @@ Like `test`, it waits on `dependabot-fix`.
 They assert nothing beyond the pages loading.
 On a PR, once it succeeds, `post-screenshots` downloads that artifact and runs `just screenshots-post` (`scripts/post_screenshots.py`, stdlib-only, run with `uv run --no-project`).
 It uploads each PNG as a user attachment, then writes one `github-actions[bot]` PR comment embedding them, editing the previous one in place if there is one (found by a hidden `<!-- lifetracker-screenshots -->` marker and the `--author` login).
+Given `--commit` (CI passes the PR's head commit), it first checks that commit is still the PR's head, and otherwise posts nothing and exits 0: the job's per-PR `concurrency` group only stops two posts running at once, not an older commit's slow run posting after a newer one's, which would overwrite newer screenshots with stale ones.
 The upload uses the undocumented `POST https://uploads.github.com/user-attachments/assets` endpoint, sending the same request `gh ... --attach` does (cli/cli `internal/attachments/client.go`), which only accepts user tokens, not installation tokens such as `GITHUB_TOKEN`.
 So uploads use the `SCREENSHOTS_TOKEN` Actions secret, a fine-grained PAT for this repo with only Pull requests: read and write (the job fails if it's unset), and the comment uses `GITHUB_TOKEN` with `pull-requests: write`.
 Locally both tokens default to `gh auth token`.

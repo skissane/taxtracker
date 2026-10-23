@@ -83,7 +83,8 @@ screenshots:
     LIFETRACKER_COMMIT_ID="${LIFETRACKER_COMMIT_ID:-$(git rev-parse HEAD)}" uv run --group dev --group screenshots pytest screenshot_tests -n 0
 
 # screenshots-post's arguments are a PR number and, optionally, --commit and
-# --run-url for the comment's "Taken for" line (see --help for the rest). It
+# --run-url for the comment's "Taken for" line (see --help for the rest); with
+# --commit, it posts nothing unless that's still the PR's head commit. It
 # uploads the images with $SCREENSHOTS_TOKEN (a user token) and comments with
 # $GITHUB_TOKEN, each defaulting to `gh auth token`, so locally it posts as
 # you. It edits the previous screenshot comment by the same author, found by a
