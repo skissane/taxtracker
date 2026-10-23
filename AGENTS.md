@@ -73,7 +73,7 @@ uv run lifetracker-cli --help
 
 **Stack:** Django 6.x, Python 3.14, SQLite, `uv` for package management.
 `pyproject.toml`'s `[tool.uv] required-version` sets the oldest uv allowed (older ones write `uv.lock` in an older format); the `version:` of each `setup-uv` step in `ci.yml` and the `ghcr.io/astral-sh/uv` image tag in the `Dockerfile` pin one exact uv, so raise all three together.
-The entire UI is the Django admin — there are no custom non-admin views (except file serving), and `/` redirects to `/admin/`.
+The entire UI is the Django admin — there are no custom non-admin views (except file serving and the `/healthz/` health check), and `/` redirects to `/admin/`.
 No frontend framework.
 
 **Package layout:** `src/lifetracker/` is the Django project (settings, urls).
@@ -139,7 +139,7 @@ Nothing rotates the signing key; a new one appears only if the private key file 
 No token is issued on a 500, as `SessionMiddleware` wouldn't save the session.
 The private key is created on first use (`signing_key()`, cached per process; linked into place so concurrent workers can't overwrite each other's) as `LIFETRACKER_JWT_PRIVATE_KEY_FILE` (default `jwt_private_key.pem` in the config directory, mode 0600), and the public key written as a one-key JWKS (`kid` is its RFC 7638 thumbprint) to `LIFETRACKER_JWT_JWKS_FILE` (default `jwt_jwks.json` there, mode 0644) for the proxy; the JWKS is only rewritten if its contents differ, so a read-only config directory works once both exist.
 The `ensure_jwt_key` command (core) creates them; `docker-entrypoint.sh` and `run.sh` run it after `ensure_superuser`, and `just docker-run` runs it on the host, as the container's `/config` is read-only.
-`core/auth_whitelist.py`'s `auth_whitelist()` is the one list of requests that need no login, for the proxy: the admin login (GET/HEAD/POST), logout (POST), the Google SSO start and callback (GET/HEAD), by exact path from `reverse()`, and everything under `STATIC_URL` (GET/HEAD; WhiteNoise serves those before the middleware anyway).
+`core/auth_whitelist.py`'s `auth_whitelist()` is the one list of requests that need no login, for the proxy: the admin login (GET/HEAD/POST), logout (POST), the Google SSO start and callback (GET/HEAD), by exact path from `reverse()`, everything under `STATIC_URL` (GET/HEAD; WhiteNoise serves those before the middleware anyway), and the health check, `/healthz/` (GET/HEAD).
 The `auth_whitelist` command prints the list as JSON, for generating the proxy's config (#179).
 `tests/conftest.py` has an autouse fixture pointing both key file settings at a per-process temporary directory, so tests never write keys to the real config directory.
 
@@ -325,6 +325,11 @@ A volume attaches to one Machine, so the app must never be scaled past one; CI's
 `.env` is in `.dockerignore` so it's never baked into an image.
 On every push to `master`, once tests pass, CI deploys the exact image the `test` job built rather than rebuilding it: `test` saves it (`docker save`) as a workflow artifact, `publish` (the only job with `packages: write`, and it runs no repo code) loads it and pushes it to GHCR (public) as `ghcr.io/skissane/taxtracker:<sha>` and `:latest`, and `deploy` runs `flyctl deploy --ha=false --image ghcr.io/skissane/taxtracker@<digest>`, so Fly pulls it by digest.
 `deploy` uses the `FLY_API_TOKEN` repo secret (a deploy token scoped to the app); deploys queue rather than cancel each other.
+`flyctl deploy` restarts a running Machine on the new image, smoke-checking it, but only updates a stopped one, leaving it stopped (flyctl's `shouldSkipLaunch`), which with the idle watchdog is usual; nothing would then boot the new image, and run its migrations, until the next visit.
+So `deploy` then runs `scripts/check_deploy.py` (stdlib-only, `uv run --no-project`), which polls `https://$FLY_APP.fly.dev/healthz/` (Fly Proxy starts the Machine on the first request) every 5 seconds for up to 5 minutes until it answers 200 with `"status": "ok"` and `"commit"` equal to `GITHUB_SHA`, and otherwise fails the job; it never prints the URL, which holds the app's name.
+`/healthz/` (`core/health.py`'s `healthz`, unauthenticated and on the auth whitelist) returns `{"status": "ok", "commit": LIFETRACKER_COMMIT_ID}`, or a 503 with `"status": "error"` and a short fixed `"problem"` (the details logged): `database error` if `SELECT 1` or loading the migration plan raises a `DatabaseError`, `unapplied migrations` if the plan isn't empty, or `unhealthy` for any other exception.
+`docker-entrypoint.sh` migrates before starting gunicorn, so any answer at all means `migrate` ran.
+Don't point Fly's `[[http_service.checks]]` at it: each request touches the idle watchdog's request file, so regular checks would stop the Machine ever idling out; CI's single check only keeps it up for one idle timeout.
 On every run, PRs included, the `check-fly` job fails the build unless `FLY_APP` and `FLY_API_TOKEN` are set and `flyctl status -a "$FLY_APP"` succeeds with that token (not `flyctl apps list`, which a deploy token isn't authorised for), and `deploy` also waits on it; it's skipped when `github.actor` is `dependabot[bot]`, whose runs don't get the repo's Actions secrets, but PRs from forks (likewise without them) fail it.
 `fly.toml`'s `[build] image` is `:latest`, so a manual `fly deploy` redeploys master's most recently published image; to deploy local changes, publish them through CI rather than building on Fly.
 Every boot runs `migrate` against the only copy of the data, so run a cloud backup before merging a risky migration (Fly's daily volume snapshots are the only automatic fallback).

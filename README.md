@@ -157,6 +157,8 @@ The app doesn't redirect HTTP to HTTPS or send an HSTS header itself; configure 
 
 Production runs on [Fly.io](https://fly.io), configured by `fly.toml`: one Machine in Sydney, a volume at `/data` for the database and secret key, and the idle watchdog (below) stopping it when idle.
 Every push to `master` deploys automatically once CI passes: CI pushes the tested image to GHCR, then deploys that exact image to Fly.
+A deploy leaves a stopped Machine stopped, so CI then requests `/healthz/`, which starts it, and fails unless the app answers within 5 minutes that it's healthy (the database answers and every migration is applied) and running the deployed commit; if it fails, check `fly logs`.
+That request keeps the Machine up until the idle watchdog stops it again.
 
 The app's name is deliberately kept out of this public repo.
 `fly.toml` has no `app` line; CI reads the name from the `FLY_APP` repository secret, and `flyctl` reads it from the `FLY_APP` environment variable.

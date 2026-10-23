@@ -372,7 +372,8 @@ jobs:
   # FLY_API_TOKEN is a deploy token scoped to that app. Fly pulls the image
   # from GHCR by digest, so it's exactly the one the test job built; that
   # overrides fly.toml's [build] image (:latest), which could have moved on if
-  # a later run has published since. The checkout is only for fly.toml.
+  # a later run has published since. The checkout is for fly.toml and the
+  # health check script.
   # Like publish, its if: checks its needs explicitly, as the implicit success()
   # would see dependabot-fix skipped and skip this job too.
   deploy:
@@ -403,3 +404,16 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           FLY_APP: ${{ secrets.FLY_APP }}
           IMAGE: ${{ needs.publish.outputs.image }}
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+
+      - name: Check the deployed app is healthy
+        # flyctl deploy leaves a stopped Machine stopped, so this request may be
+        # what starts it (via Fly Proxy), running the migrations; it fails the
+        # job unless /healthz/ reports this commit within the timeout. The
+        # script needs only the standard library.
+        run: uv run --no-project scripts/check_deploy.py "https://$FLY_APP.fly.dev/healthz/" "$GITHUB_SHA"
+        env:
+          FLY_APP: ${{ secrets.FLY_APP }}
