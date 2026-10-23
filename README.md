@@ -149,7 +149,7 @@ The app doesn't redirect HTTP to HTTPS or send an HSTS header itself; configure 
 
 ### Fly.io
 
-Production runs on [Fly.io](https://fly.io), configured by `fly.toml`: one Machine in Sydney, a volume at `/data` for the database and secret key, and auto-stop when idle.
+Production runs on [Fly.io](https://fly.io), configured by `fly.toml`: one Machine in Sydney, a volume at `/data` for the database and secret key, and the idle watchdog (below) stopping it when idle.
 Every push to `master` deploys automatically once CI passes: CI pushes the tested image to GHCR, then deploys that exact image to Fly.
 
 The app's name is deliberately kept out of this public repo.
@@ -182,9 +182,9 @@ To run as another user, put `--user=<name>` first, e.g. `./flyssh.sh --user=root
 Use `--` before a command that itself starts with `--`.
 
 If the Machine isn't running, `./flyssh.sh` starts it first, waiting for it to finish stopping if need be (this needs `jq`).
-The Machine auto-stops when idle, and Fly judges that by HTTP traffic through its proxy, not SSH sessions, so a long session or command may still be cut off.
+Fly's own auto-stop judges idleness by HTTP traffic through its proxy, not SSH sessions, so it could cut off a long session or command; `fly.toml` turns it off.
 
-The fix is the idle watchdog (`src/lifetracker/core/idle_watchdog.py`), which gunicorn starts as a separate process.
+Instead, the Machine is stopped by the idle watchdog (`src/lifetracker/core/idle_watchdog.py`), which gunicorn starts as a separate process.
 It counts established connections to the app's port and SSH's (port 22) in `/proc/net/tcp` and `/proc/net/tcp6`.
 Most HTTP requests are over between two checks, so gunicorn's workers also touch a file after every request, which counts as activity too.
 Once there's been no activity for a while, the watchdog stops gunicorn gracefully.
@@ -228,9 +228,7 @@ Click a day's starts to see each up period that day: when it started, its last s
 
 The files aren't in the cloud backup, which only has the database.
 
-`fly.toml` currently runs it in `monitor` mode alongside Fly's own auto-stop, to check that SSH sessions show up.
-While connected, check that port 22 has a connection, on the admin page or with `./flyssh.sh cat /tmp/lifetracker-idle-watchdog.json`.
-Then set `LIFETRACKER_IDLE_STOP` to `stop` and `auto_stop_machines` to `"off"`.
+`fly.toml` runs it in `stop` mode, with Fly's own auto-stop (`auto_stop_machines`) off; Fly still starts the Machine on the next request.
 
 `./fly-machine-id.sh` prints the Machine's ID (it needs `jq`), for `flyctl` commands that take one:
 

@@ -279,8 +279,8 @@ The human-facing setup steps are in README.md's Fly.io section; keep the two in 
 It runs locally, so it may print the app name; only CI output (where GitHub masks secret values) must not reveal it.
 On the Machine, `LIFETRACKER_ALLOWED_HOSTS` and `LIFETRACKER_BACKUP_HOSTNAME` both default to `<app>.fly.dev` from `FLY_APP_NAME`, which Fly sets at runtime.
 `settings.LIFETRACKER_FLY_MACHINE_URL` is the Machine's page in Fly's dashboard, `https://fly.io/apps/<FLY_APP_NAME>/machines/<FLY_MACHINE_ID>` (both set by Fly; built by `settings.fly_machine_url`), or empty unless both are non-blank; `LifetrackerAdminSite.each_context` passes it as `fly_machine_url`, and `base_site.html` links it from the top bar for superusers ("Fly Machine", in a new tab) when it's non-empty.
-It runs one Machine with the image CI publishes to GHCR, with a Fly volume mounted at `/data` for the database and secret key, and auto-stop/start when idle.
-Fly Proxy's auto-stop only sees traffic through the proxy, not SSH (which goes over the private network), so it can stop the Machine mid-session (issue #135).
+It runs one Machine with the image CI publishes to GHCR, with a Fly volume mounted at `/data` for the database and secret key, stopped when idle and started on the next request.
+Fly Proxy's auto-stop only sees traffic through the proxy, not SSH (which goes over the private network), so it could stop the Machine mid-session (issue #135); `fly.toml` turns it off (`auto_stop_machines = "off"`, keeping `auto_start_machines`).
 The replacement is the idle watchdog, `core/idle_watchdog.py`.
 `docker-entrypoint.sh` runs gunicorn with gthread workers (`--threads ${LIFETRACKER_GUNICORN_THREADS:-8}`), not its default single sync worker, which blocks on a browser's idle spare connection and leaves other requests queued (issue #172); gthread holds a thread up to 5 seconds on a new idle connection, hence several threads.
 As requests can now write concurrently, `DATABASES` sets SQLite's `transaction_mode` to `IMMEDIATE` (so a transaction that reads and then writes waits for the lock instead of failing with "database is locked") and a 30-second `timeout`, and its `init_command` puts the database in WAL mode (issue #152), so readers, including management commands run over SSH such as `cloud_backup`, don't wait for a writer.
@@ -301,7 +301,7 @@ Each second's byte goes straight to the file with `os.pwrite` (no mmap, no file 
 Gaps of up to 5 seconds between wakes are filled in (longer ones stay as gaps, so count as a stop and start), seconds a failed write missed are recorded by the next one that works, and at startup the seconds since boot are recorded too if `/proc/uptime` is at most 300 (a fresh Machine, not a gunicorn restart or local Docker's host uptime).
 Core's `uptime_report` management command prints each recent day's share up and start count, and the admin's Uptime page shows the same.
 `LIFETRACKER_IDLE_STOP` is `off` by default, and a bad setting or a missing `/proc/net/tcp` logs and leaves it off rather than failing gunicorn's startup.
-`fly.toml` sets `monitor` while Fly's own auto-stop is still on; the plan is to switch to `stop` with `auto_stop_machines = "off"` once SSH sessions are confirmed to show on port 22.
+`fly.toml` sets `stop` (SSH sessions were confirmed to show on port 22 in `monitor` mode first).
 Other non-secret settings are in `fly.toml`'s `[env]`; the `LIFETRACKER_BACKUP_S3_*` credentials are Fly secrets (`fly secrets set`), never in `fly.toml`.
 A volume attaches to one Machine, so the app must never be scaled past one; CI's deploy passes `--ha=false` so that if the app has no Machine yet (e.g. first deploy) it creates one, not two, and manual `fly deploy`s should too.
 `.env` is in `.dockerignore` so it's never baked into an image.
