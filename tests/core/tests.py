@@ -4076,20 +4076,20 @@ class UptimeDayAdminViewTests(TestCase):
             self._rows(response),
             [
                 [
-                    "00:00:00 (local: 2026-10-20T00:00:00Z)",
-                    "00:29:59 (local: 2026-10-20T00:29:59Z)",
+                    "00:00:00 (2026-10-20T00:00:00Z local)",
+                    "00:29:59 (2026-10-20T00:29:59Z local)",
                     "00:30:00",
                     "Began the day before.",
                 ],
                 [
-                    "09:05:03 (local: 2026-10-20T09:05:03Z)",
-                    "11:05:02 (local: 2026-10-20T11:05:02Z)",
+                    "09:05:03 (2026-10-20T09:05:03Z local)",
+                    "11:05:02 (2026-10-20T11:05:02Z local)",
                     "02:00:00",
                     "",
                 ],
                 [
-                    "23:59:59 (local: 2026-10-20T23:59:59Z)",
-                    "23:59:59 (local: 2026-10-20T23:59:59Z)",
+                    "23:59:59 (2026-10-20T23:59:59Z local)",
+                    "23:59:59 (2026-10-20T23:59:59Z local)",
                     "00:00:01",
                     "",
                 ],
@@ -4111,8 +4111,8 @@ class UptimeDayAdminViewTests(TestCase):
             self._rows(response),
             [
                 [
-                    "11:59:00 (local: 2026-10-22T11:59:00Z)",
-                    "11:59:59 (local: 2026-10-22T11:59:59Z)",
+                    "11:59:00 (2026-10-22T11:59:00Z local)",
+                    "11:59:59 (2026-10-22T11:59:59Z local)",
                     "00:01:00",
                     "Still up.",
                 ]
@@ -4134,8 +4134,8 @@ class UptimeDayAdminViewTests(TestCase):
             self._rows(response),
             [
                 [
-                    "23:59:50 (local: 2026-10-20T23:59:50Z)",
-                    "23:59:59 (local: 2026-10-20T23:59:59Z)",
+                    "23:59:50 (2026-10-20T23:59:50Z local)",
+                    "23:59:59 (2026-10-20T23:59:59Z local)",
                     "00:00:10",
                     "Continued into the next day.",
                 ]
@@ -4152,8 +4152,9 @@ class UptimeDayAdminViewTests(TestCase):
         self.assertContains(response, "/static/core/local_times.js")
         self.assertContains(
             response,
-            '<span data-lt-local-only hidden>(local: <time data-lt-local="weekday"'
-            ' datetime="2026-10-20T09:05:03Z">2026-10-20T09:05:03Z</time>)</span>',
+            '<span data-lt-local-only hidden>(<time data-lt-local="weekday"'
+            ' datetime="2026-10-20T09:05:03Z">2026-10-20T09:05:03Z</time> local)'
+            "</span>",
             html=True,
         )
         self.assertContains(response, "data-lt-local-only hidden", count=7)
