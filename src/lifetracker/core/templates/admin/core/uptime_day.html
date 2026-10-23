@@ -13,6 +13,10 @@
   }
   </style>
 {% endblock extrastyle %}
+{% block extrahead %}
+  {{ block.super }}
+  <script src="{% static 'core/local_times.js' %}" defer></script>
+{% endblock extrahead %}
 {% block breadcrumbs %}
   <ol class="breadcrumbs">
     <li><a href="{% url 'admin:index' %}">{% trans "Home" %}</a></li>
@@ -42,11 +46,14 @@
     <p>
       When the app was up on {{ date|date:"Y-m-d D" }} (UTC){% if day.today %} so far{% endif %}, from the files in <code>{{ directory }}</code>: {{ periods|length }} period{{ periods|length|pluralize }}, {{ up }} in all.
     </p>
+    <p data-lt-local-only hidden>
+      In your browser's time zone, <span data-lt-time-zone>local time</span>, that UTC day runs from <time data-lt-local datetime="{{ day_start }}">{{ day_start }}</time> to <time data-lt-local datetime="{{ day_end }}">{{ day_end }}</time>.
+    </p>
     <table class="lt-uptime-day">
       <thead>
         <tr>
           <th scope="col" class="lt-num">Start (UTC)</th>
-          <th scope="col" class="lt-num">Last Second Up</th>
+          <th scope="col" class="lt-num">Last Second Up (UTC)</th>
           <th scope="col" class="lt-num">Duration</th>
           <th scope="col">Notes</th>
         </tr>
@@ -54,8 +61,16 @@
       <tbody>
         {% for period in periods %}
           <tr>
-            <td class="lt-num">{{ period.start }}</td>
-            <td class="lt-num">{{ period.end }}</td>
+            <td class="lt-num">
+              {{ period.start }}
+              <span data-lt-local-only hidden>(<time data-lt-local="weekday"
+      datetime="{{ period.start_iso }}">{{ period.start_iso }}</time> local)</span>
+            </td>
+            <td class="lt-num">
+              {{ period.end }}
+              <span data-lt-local-only hidden>(<time data-lt-local="weekday"
+      datetime="{{ period.end_iso }}">{{ period.end_iso }}</time> local)</span>
+            </td>
             <td class="lt-num">{{ period.duration }}</td>
             <td>
               {% if period.from_previous_day %}Began the day before.{% endif %}
