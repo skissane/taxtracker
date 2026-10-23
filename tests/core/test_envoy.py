@@ -21,6 +21,7 @@ import time
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -102,6 +103,14 @@ class EnvoyConfigRenderTests(SimpleTestCase):
             envoy_config.login_redirect(),
             reverse("admin:login") + "?next=%DYNAMIC_METADATA(lifetracker:next)%",
         )
+
+    def test_login_redirect_rejects_percent_in_login_path(self):
+        # It would start a formatter command operator in Envoy's Location.
+        with (
+            mock.patch.object(envoy_config, "reverse", return_value="/log%20in/"),
+            self.assertRaisesMessage(ValueError, "/log%20in/"),
+        ):
+            envoy_config.login_redirect()
 
     def test_rejects_bad_settings(self):
         cases = [
