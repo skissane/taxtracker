@@ -33,7 +33,8 @@ Dependabot runs its own uv, which can write `uv.lock` in a newer format than our
 So `just dependabot-relock origin/<base>` (`scripts/dependabot_relock.py`, stdlib-only) puts back the `uv.lock` the branch started from (at its merge base with the base branch, so the base branch's own later lock changes aren't undone) and re-locks it with our uv, passing `--upgrade-package <name>==<version>` for each package whose locked versions Dependabot changed, then fails, restoring Dependabot's lock, unless the result locks exactly Dependabot's versions (or if `uv lock` fails).
 The job checks out with `fetch-depth: 0` so the base branch and the merge base are there.
 It pushes with the `DEPENDABOT_FIX_TOKEN` secret (a token with `contents: write` on the repo; it must be a Dependabot secret, as Dependabot runs don't get Actions secrets, and the job fails if it's unset), not `GITHUB_TOKEN`, because pushes made with `GITHUB_TOKEN` don't trigger new workflow runs.
-As the branch's bumped dependency isn't trusted, only the final push step sees the token: checkout runs with `persist-credentials: false`, and the job never syncs or installs anything (`requirements-check`/`requirements-fix` use `uv run --no-project`, as the script needs only the standard library).
+As the branch's bumped dependency isn't trusted, only the final push step sees the token: checkout runs with `persist-credentials: false`, and the job never syncs or installs anything (`requirements-check`/`requirements-fix` and `dependabot-relock` use `uv run --no-project`, as the scripts need only the standard library).
+Its `uv lock` runs can still build a dependency's sdist to read its metadata, running that package's build backend, but no step before the push has the token.
 `test` waits on it and runs only if it was skipped or pushed nothing; if it pushed, that run's `test` is skipped and the run the push triggers tests the fixed commit.
 
 ```bash

@@ -36,6 +36,8 @@ def _locked_versions(lock_text: str) -> dict[str, tuple[str, ...]]:
 def _upgrade_args(
     base: dict[str, tuple[str, ...]], target: dict[str, tuple[str, ...]]
 ) -> list[str]:
+    # Packages Dependabot dropped need no argument: re-locking drops them if
+    # nothing needs them any more, and the check after it catches it if not.
     args = []
     for name, versions in sorted(target.items()):
         if base.get(name) == versions:
