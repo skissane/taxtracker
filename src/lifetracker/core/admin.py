@@ -435,7 +435,7 @@ def idle_watchdog_page_context(now=None):
     try:
         checked_at = _parse_status_time(raw["checked_at"])
         started_at = _parse_status_time(raw["started_at"])
-        stop_due_at = _parse_status_time(raw["stop_due_at"])
+        idle_timeout = float(raw["idle_timeout_seconds"])
         interval = float(raw["check_interval_seconds"])
         status = {
             "mode": raw["mode"],
@@ -445,10 +445,9 @@ def idle_watchdog_page_context(now=None):
             "started_at": started_at,
             "uptime": _format_duration((now - started_at).total_seconds()),
             "checked_at": checked_at,
-            "idle_timeout": _format_duration(raw["idle_timeout_seconds"]),
+            "idle_timeout": _format_duration(idle_timeout),
             "check_interval": _format_duration(interval),
             "idle_since": _parse_status_time(raw["idle_since"]),
-            "stop_due_at": stop_due_at,
             "ports": [
                 {
                     "port": port["port"],
@@ -488,9 +487,11 @@ def idle_watchdog_page_context(now=None):
         status[f"{name}_ago"] = (
             _format_duration((now - value).total_seconds()) if value else None
         )
-    remaining = (stop_due_at - now).total_seconds()
-    status["stop_overdue"] = remaining <= 0
-    status["stop_due_in"] = _format_duration(abs(remaining))
+    # Not the status file's stop_due_at, which predates this page's own
+    # request: that counts as activity, so the next check restarts the timer
+    # from when it finishes, about now. It only stops at a check, so up to one
+    # check interval later.
+    status["stop_at"] = now + datetime.timedelta(seconds=idle_timeout)
     for port in status["ports"]:
         seen = port["last_connection_at"]
         port["last_connection_ago"] = (

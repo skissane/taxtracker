@@ -4099,8 +4099,9 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
         self.assertEqual(status["last_request_at_ago"], "7 seconds")
         self.assertEqual(status["idle_since_ago"], "20 seconds")
         self.assertFalse(status["stale"])
-        self.assertFalse(status["stop_overdue"])
-        self.assertEqual(status["stop_due_in"], "9\xa0minutes")
+        # Not the status file's stop_due_at: this page's request restarts the
+        # idle timer.
+        self.assertEqual(status["stop_at"], self.NOW + datetime.timedelta(minutes=10))
         self.assertEqual(
             [
                 (port["port"], port["connections"], port["last_connection_ago"])
@@ -4115,18 +4116,15 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
         self.assertIsNone(status["last_request_at"])
         self.assertIsNone(status["last_request_at_ago"])
 
-    def test_stale_and_overdue(self):
+    def test_stale(self):
         context = self._context(
             _watchdog_status(
                 self.NOW,
                 checked_at=(self.NOW - datetime.timedelta(minutes=30)).isoformat(),
-                stop_due_at=(self.NOW - datetime.timedelta(minutes=2)).isoformat(),
             )
         )
 
         self.assertTrue(context["status"]["stale"])
-        self.assertTrue(context["status"]["stop_overdue"])
-        self.assertEqual(context["status"]["stop_due_in"], "2\xa0minutes")
 
     def test_before_first_check_judged_by_start_time(self):
         for started_seconds_ago, stale in [(10, False), (600, True)]:
@@ -4224,10 +4222,29 @@ class IdleWatchdogAdminViewTests(TestCase):
 
         self.assertContains(response, "<code>stop</code>")
         self.assertContains(response, "Idle (no connections open)")
-        self.assertContains(response, "stops in")
+        self.assertContains(response, "Stops At")
+        self.assertContains(response, "if nothing else happens (10\xa0minutes after")
+        self.assertNotContains(response, "monitor mode")
         self.assertContains(response, "gunicorn master PID 41")
         self.assertContains(response, "<code>22</code>")
         self.assertNotContains(response, "has probably stopped running")
+
+    def test_page_stop_time_by_state_and_mode(self):
+        for mode, state, label, expected in [
+            ("stop", "active", "Stops At", "Not while connections are open"),
+            ("stop", "stopping", "Stops At", "Now: the idle timeout was reached"),
+            ("monitor", "idle", "Would Stop At", "(monitor mode: never stops)"),
+        ]:
+            with self.subTest(mode=mode, state=state):
+                idle_watchdog.write_status(
+                    self.status_file,
+                    _watchdog_status(timezone.now(), mode=mode, state=state),
+                )
+
+                response = self.client.get(self.URL)
+
+                self.assertContains(response, label)
+                self.assertContains(response, expected)
 
     def test_page_warns_when_stale(self):
         stale = timezone.now() - datetime.timedelta(hours=1)
@@ -4244,6 +4261,8 @@ class IdleWatchdogAdminViewTests(TestCase):
             " stopped running",
         )
         self.assertContains(response, "Stopping gunicorn")
+        self.assertContains(response, "Unknown: the watchdog doesn")
+        self.assertNotContains(response, "Now: the idle timeout was reached")
 
     def test_page_without_status(self):
         response = self.client.get(self.URL)
