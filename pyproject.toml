@@ -3,7 +3,7 @@ name = "lifetracker"
 version = "0.1.0"
 description = "Personal life admin tracker app, with tax and task tracking modules"
 readme = "README.md"
-requires-python = "~=3.14.0"
+requires-python = "~=3.14.9"
 dependencies = [
     "boto3>=1.43.111",
     "click>=8.5.0",
