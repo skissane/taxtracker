@@ -23,7 +23,7 @@ jobs:
           version: "0.13.5"
 
       - name: Set up Python
-        run: uv python install 3.14.3
+        run: uv python install 3.14.9
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -120,7 +120,7 @@ jobs:
           version: "0.13.5"
 
       - name: Set up Python
-        run: uv python install 3.14.3
+        run: uv python install 3.14.9
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -191,7 +191,7 @@ jobs:
           version: "0.13.5"
 
       - name: Set up Python
-        run: uv python install 3.14.3
+        run: uv python install 3.14.9
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -250,7 +250,7 @@ jobs:
           version: "0.13.5"
 
       - name: Set up Python
-        run: uv python install 3.14.3
+        run: uv python install 3.14.9
 
       - name: Install just
         uses: extractions/setup-just@v3
