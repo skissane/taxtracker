@@ -1,10 +1,11 @@
 """Tests for Envoy's config (core/envoy_config.py and envoy/envoy.yaml).
 
 ``EnvoyAuthTests`` runs the real Envoy, with the config the entrypoint would
-write, in front of a fake upstream that echoes each request it gets. It finds
-Envoy at ``$LIFETRACKER_ENVOY``, else ``.envoy/envoy`` (where `just envoy-bin`
-copies the Docker image's), else on ``PATH``, and is skipped if there's none,
-unless ``LIFETRACKER_REQUIRE_ENVOY`` is set, as it is in CI.
+write, in front of a fake upstream that echoes each request it gets. It runs
+the ``envoy`` binary at ``$LIFETRACKER_ENVOY`` if that's set, else the Envoy
+image the Dockerfile names, with ``docker run --network host`` (on macOS, this
+needs Docker Desktop's host networking turned on). It's skipped if Docker isn't
+available, unless ``LIFETRACKER_REQUIRE_ENVOY`` is set, as it is in CI.
 """
 
 import datetime
@@ -12,14 +13,17 @@ import http.client
 import http.server
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 import types
 import unittest
+import uuid
 from pathlib import Path
 from unittest import mock
 
@@ -175,14 +179,23 @@ class EnvoyConfigCommandTests(SimpleTestCase):
             self.assertFalse(output.exists())
 
 
-def _envoy_binary():
-    configured = os.environ.get("LIFETRACKER_ENVOY")
-    if configured:
-        return configured
-    copied = REPO_ROOT / ".envoy" / "envoy"
-    if copied.exists():
-        return str(copied)
-    return shutil.which("envoy")
+def _envoy_image():
+    """The Envoy image the Dockerfile copies Envoy from, so the tests run the
+    same version as the container."""
+    dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    match = re.search(r"^FROM (envoyproxy/envoy:\S+) AS envoy$", dockerfile, re.M)
+    if match is None:
+        raise RuntimeError("No Envoy image in the Dockerfile")
+    return match.group(1)
+
+
+def _docker():
+    """The docker command, if there is one and its daemon answers."""
+    docker = shutil.which("docker")
+    if docker is None:
+        return None
+    info = subprocess.run([docker, "info"], capture_output=True)
+    return docker if info.returncode == 0 else None
 
 
 def _free_port():
@@ -224,13 +237,25 @@ class EnvoyAuthTests(SimpleTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        envoy = _envoy_binary()
-        if envoy is None:
+        envoy = os.environ.get("LIFETRACKER_ENVOY")
+        docker = None if envoy else _docker()
+        if not envoy and docker is None:
             if os.environ.get("LIFETRACKER_REQUIRE_ENVOY"):
                 raise RuntimeError(
-                    "Envoy not found, and LIFETRACKER_REQUIRE_ENVOY is set"
+                    "Docker isn't available to run Envoy, and"
+                    " LIFETRACKER_REQUIRE_ENVOY is set"
                 )
-            raise unittest.SkipTest("Envoy not found")
+            raise unittest.SkipTest("Docker isn't available to run Envoy")
+        if docker is not None:
+            image = _envoy_image()
+            # Pulled here, so the wait for Envoy below doesn't include it.
+            inspect = subprocess.run(
+                [docker, "image", "inspect", image], capture_output=True
+            )
+            if inspect.returncode != 0:
+                subprocess.run(
+                    [docker, "pull", image], check=True, stdout=subprocess.DEVNULL
+                )
 
         tempdir = tempfile.TemporaryDirectory()
         cls.addClassCleanup(tempdir.cleanup)
@@ -257,38 +282,77 @@ class EnvoyAuthTests(SimpleTestCase):
                     upstream_port=cls.upstream.server_address[1],
                 )
             )
+        args = [
+            "--config-path",
+            str(config_path),
+            "--concurrency",
+            "1",
+            "--disable-hot-restart",
+            "--log-level",
+            "warn",
+        ]
+        if docker is None:
+            command = [envoy, *args]
+        else:
+            # Host networking, so 127.0.0.1 is the same inside and out; the
+            # temporary directory (config and JWKS) is mounted at the same
+            # path, and Envoy runs as us so it can read it.
+            container = f"lifetracker-test-envoy-{uuid.uuid4().hex[:12]}"
+            command = [
+                docker,
+                "run",
+                "--rm",
+                "--name",
+                container,
+                "--network",
+                "host",
+                "--user",
+                f"{os.getuid()}:{os.getgid()}",
+                "--volume",
+                f"{temp}:{temp}:ro",
+                "--entrypoint",
+                "/usr/local/bin/envoy",
+                image,
+                *args,
+            ]
         process = subprocess.Popen(
-            [
-                envoy,
-                "--config-path",
-                str(config_path),
-                "--concurrency",
-                "1",
-                "--disable-hot-restart",
-                "--log-level",
-                "warn",
-            ],
+            command,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
         )
 
         def stop():
+            if docker is not None:
+                subprocess.run([docker, "rm", "-f", container], capture_output=True)
             process.terminate()
-            process.communicate(timeout=10)
+            process.communicate(timeout=30)
 
         cls.addClassCleanup(stop)
-        deadline = time.monotonic() + 20
+        # Waits for a request to get through to the upstream, not just for the
+        # port to open, since Docker Desktop may accept connections before
+        # Envoy is listening.
+        deadline = time.monotonic() + 30
         while True:
             if process.poll() is not None:
                 raise RuntimeError(f"Envoy exited: {process.stderr.read()}")
+            connection = http.client.HTTPConnection("127.0.0.1", cls.port, timeout=1)
             try:
-                socket.create_connection(("127.0.0.1", cls.port), timeout=1).close()
-                break
-            except OSError:
-                if time.monotonic() > deadline:
-                    raise
-                time.sleep(0.1)
+                connection.request("GET", reverse("healthz"))
+                if connection.getresponse().status == 200:
+                    break
+            except OSError, http.client.HTTPException:
+                pass
+            finally:
+                connection.close()
+            if time.monotonic() > deadline:
+                hint = (
+                    " (is Docker Desktop's host networking turned on?)"
+                    if docker is not None and sys.platform == "darwin"
+                    else ""
+                )
+                raise RuntimeError(f"Envoy didn't answer within 30 seconds{hint}")
+            time.sleep(0.1)
 
     def _token(self, expires_in=3600, key=None, **claims):
         """A token as Django issues it, re-signed with ``key`` and ``claims``

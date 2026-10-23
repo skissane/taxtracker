@@ -60,12 +60,9 @@ jobs:
       - name: Check formatting with djlint
         run: just fmt-check-templates
 
-      # For tests/core/test_envoy.py, which runs the real Envoy, and fails
-      # rather than being skipped without it when LIFETRACKER_REQUIRE_ENVOY is
-      # set.
-      - name: Copy Envoy out of its Docker image
-        run: just envoy-bin
-
+      # tests/core/test_envoy.py runs the real Envoy with Docker, and fails
+      # rather than being skipped without Docker when LIFETRACKER_REQUIRE_ENVOY
+      # is set.
       - name: Run tests with coverage
         run: just coverage
         env:

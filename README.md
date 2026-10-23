@@ -443,10 +443,10 @@ The main ones:
 | `just check` | Runs the whitespace, `screenshots/`, ruff and djlint checks, without fixing anything. |
 | `just fix` | Fixes lint issues and reformats code and templates. |
 | `just coverage` | Runs the tests and prints a coverage report. |
-| `just envoy-bin` | Copies the `envoy` binary out of the Envoy Docker image to `.envoy/envoy`, for the tests that run requests through Envoy, which are skipped without it (Linux only). |
 | `just screenshots` | Saves light and dark mode screenshots of admin pages to `screenshots/`, using a headless Chromium it installs with Playwright. |
 | `just ci` | Runs everything CI runs, including building the Docker image. |
 
+The tests that send requests through Envoy run it with Docker, and are skipped without it; on macOS they need Docker Desktop's host networking turned on (Settings → Resources → Network).
 On a pull request, CI also takes the screenshots and posts them as a comment on it.
 
 [`AGENTS.md`](AGENTS.md) has more detail on the code's layout, CI and conventions.

@@ -134,22 +134,6 @@ docker-smoke:
     docker exec "$name" python -c 'import socket; ip = socket.gethostbyname(socket.gethostname()); socket.create_connection((ip, 8000)).close(); s = socket.socket(); assert s.connect_ex((ip, 8001)) != 0, "gunicorn is reachable from outside the container"'
     echo "docker-smoke: OK"
 
-# envoy-bin copies the envoy binary out of the image the Dockerfile copies it
-# from, to .envoy/envoy, where tests/core/test_envoy.py looks for it (it's
-# skipped without it). The binary is for Linux, on the host's architecture.
-
-# Copy the Docker image's Envoy to .envoy/envoy, for its tests
-envoy-bin:
-    #!/usr/bin/env sh
-    set -eu
-    image="$(sed -n 's/^FROM \(envoyproxy\/envoy:[^ ]*\) AS envoy$/\1/p' Dockerfile)"
-    [ -n "$image" ] || { echo "envoy-bin: no Envoy image in the Dockerfile" >&2; exit 1; }
-    mkdir -p .envoy
-    container="$(docker create "$image")"
-    trap 'docker rm "$container" >/dev/null' EXIT
-    docker cp "$container:/usr/local/bin/envoy" .envoy/envoy
-    .envoy/envoy --version
-
 # Host config directory (secret key, initial admin password) that `just
 # docker-run` mounts read-only, the same one ./run.sh uses by default. Made
 # absolute (a relative path is taken from the repo root), since docker treats a
@@ -205,4 +189,4 @@ check: whitespace-check screenshots-dir-check lint fmt-check lint-templates fmt-
 fix: lint-fix fmt fmt-templates
 
 # Run everything the CI workflow runs
-ci: lock-check lock-os-arch-check sync requirements-check check envoy-bin coverage docker-build docker-smoke
+ci: lock-check lock-os-arch-check sync requirements-check check coverage docker-build docker-smoke
