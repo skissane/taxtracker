@@ -25,6 +25,10 @@
   }
   </style>
 {% endblock extrastyle %}
+{% block extrahead %}
+  {{ block.super }}
+  <script src="{% static 'core/local_times.js' %}" defer></script>
+{% endblock extrahead %}
 {% block breadcrumbs %}
   <ol class="breadcrumbs">
     <li><a href="{% url 'admin:index' %}">{% trans "Home" %}</a></li>
@@ -49,6 +53,9 @@
                max="{{ max_days }}"
                value="{{ days }}">
         <input type="submit" value="Show">
+      </p>
+      <p data-lt-local-only hidden>
+        In your browser's time zone, <span data-lt-time-zone>local time</span>, today's UTC day began at <time data-lt-local datetime="{{ today_start }}">{{ today_start }}</time>.
       </p>
     </form>
     <table class="lt-uptime">

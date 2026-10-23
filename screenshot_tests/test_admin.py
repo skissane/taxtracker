@@ -32,8 +32,12 @@ def page(transactional_db, live_server, settings):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         try:
+            # A fixed browser time zone, other than UTC so the uptime pages'
+            # local times differ from their UTC ones.
             yield browser.new_page(
-                base_url=live_server.url, viewport={"width": 1280, "height": 800}
+                base_url=live_server.url,
+                viewport={"width": 1280, "height": 800},
+                timezone_id="Australia/Sydney",
             )
         finally:
             browser.close()
