@@ -722,18 +722,25 @@ class DependabotRelockTests(SimpleTestCase):
     BASE = _lock(("certifi", "1.0"), ("click", "8.0"))
 
     def _run(
-        self, branch_lock: str, relocked: str
-    ) -> tuple[int, str, list[list[str]], str]:
+        self, branch_lock: str, relocked: str | None
+    ) -> tuple[int | None, str, list[list[str]], str]:
         """Run main() in a temp dir whose uv.lock is branch_lock, with
-        `git show` giving BASE and `uv lock` writing relocked; return the exit
-        code, stderr, the `uv lock` command line and the resulting uv.lock."""
+        `git show` of the merge base giving BASE and `uv lock` writing relocked
+        (or failing, if None); return the exit code (None if `uv lock`'s
+        failure was raised), stderr, the `uv lock` command line and the
+        resulting uv.lock."""
         uv_calls = []
 
         def fake_run(args, **kwargs):
+            if args[:2] == ["git", "merge-base"]:
+                self.assertEqual(args, ["git", "merge-base", "HEAD", "origin/master"])
+                return subprocess.CompletedProcess(args, 0, stdout="abc123\n")
             if args[0] == "git":
-                self.assertEqual(args, ["git", "show", "origin/master:uv.lock"])
+                self.assertEqual(args, ["git", "show", "abc123:uv.lock"])
                 return subprocess.CompletedProcess(args, 0, stdout=self.BASE)
             uv_calls.append(args)
+            if relocked is None:
+                raise subprocess.CalledProcessError(1, args)
             self.assertEqual(Path("uv.lock").read_text(encoding="utf-8"), self.BASE)
             Path("uv.lock").write_text(relocked, encoding="utf-8")
             return subprocess.CompletedProcess(args, 0)
@@ -747,7 +754,10 @@ class DependabotRelockTests(SimpleTestCase):
                 contextlib.redirect_stderr(stderr),
                 mock.patch("scripts.dependabot_relock.subprocess.run", fake_run),
             ):
-                code = relock_main("origin/master")
+                try:
+                    code = relock_main("origin/master")
+                except subprocess.CalledProcessError:
+                    code = None
             result = (path / "uv.lock").read_text(encoding="utf-8")
         return code, stderr.getvalue(), uv_calls, result
 
@@ -802,4 +812,10 @@ class DependabotRelockTests(SimpleTestCase):
         self.assertIn(
             "click: Dependabot locked ('8.0',), re-locking gave ('8.1',)", stderr
         )
+        self.assertEqual(result, branch)
+
+    def test_uv_lock_failure_restores_branch_lock(self):
+        branch = _lock(("certifi", "2.0"), ("click", "8.0"))
+        code, _, _, result = self._run(branch, None)
+        self.assertIsNone(code)
         self.assertEqual(result, branch)

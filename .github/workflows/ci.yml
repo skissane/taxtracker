@@ -238,7 +238,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
-          # Fetch the base branch too, for dependabot-relock.
+          # Fetch the base branch and history too, for dependabot-relock's merge base.
           fetch-depth: 0
           persist-credentials: false
 

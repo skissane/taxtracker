@@ -3,9 +3,12 @@
 Dependabot runs its own uv, which can write uv.lock in a newer format than the
 uv CI pins (e.g. a higher `revision`, or simplified markers), so its PRs churn
 lines unrelated to the bump. This takes the package versions from the branch's
-uv.lock, puts back the base branch's uv.lock, and re-locks it with the pinned uv,
-upgrading only the packages whose versions changed, to exactly those versions.
-It then checks that the result locks the same versions as Dependabot's did.
+uv.lock, puts back the uv.lock the branch started from (at its merge base with
+the base ref, so changes the base branch made since aren't undone), and re-locks
+it with the pinned uv, upgrading only the packages whose versions changed, to
+exactly those versions. It then checks that the result locks the same versions
+as Dependabot's did; if not, or if re-locking fails, it puts Dependabot's uv.lock
+back.
 
 Usage (from the repo root, base ref already fetched):
     uv run --no-project python scripts/dependabot_relock.py origin/master
@@ -47,19 +50,25 @@ def _upgrade_args(
     return args
 
 
+def _git(*args: str) -> str:
+    return subprocess.run(
+        ["git", *args], check=True, capture_output=True, text=True
+    ).stdout
+
+
 def main(base_ref: str) -> int:
     branch_lock = LOCK_PATH.read_text(encoding="utf-8")
-    base_lock = subprocess.run(
-        ["git", "show", f"{base_ref}:{LOCK_PATH}"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
+    merge_base = _git("merge-base", "HEAD", base_ref).strip()
+    base_lock = _git("show", f"{merge_base}:{LOCK_PATH}")
     target = _locked_versions(branch_lock)
     upgrade_args = _upgrade_args(_locked_versions(base_lock), target)
 
     LOCK_PATH.write_text(base_lock, encoding="utf-8")
-    subprocess.run(["uv", "lock", *upgrade_args], check=True)
+    try:
+        subprocess.run(["uv", "lock", *upgrade_args], check=True)
+    except BaseException:
+        LOCK_PATH.write_text(branch_lock, encoding="utf-8")
+        raise
 
     relocked = _locked_versions(LOCK_PATH.read_text(encoding="utf-8"))
     if relocked != target:
