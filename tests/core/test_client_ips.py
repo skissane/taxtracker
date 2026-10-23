@@ -455,6 +455,18 @@ class RecordTests(TempDirMixin, SimpleTestCase):
         self.assertEqual(self._row()["last_request"], "GET /admin/")
         self.assertEqual(self._row()["last_seen"], 1000)
 
+    def test_failed_batch_is_rolled_back(self):
+        geoip = mock.Mock(
+            lookup=mock.Mock(side_effect=[client_ips.Location(), ValueError])
+        )
+        with self.assertRaises(ValueError):
+            client_ips.record(
+                self.connection, [request(), request(ip="198.51.100.1")], geoip
+            )
+        self.assertEqual(client_ips.ip_count(self.connection), 0)
+        client_ips.record(self.connection, [request()], self.geoip)
+        self.assertEqual(client_ips.ip_count(self.connection), 1)
+
     def test_nothing_to_record(self):
         self.assertEqual(client_ips.record(self.connection, [], self.geoip), 0)
 
@@ -593,7 +605,9 @@ class RunTests(TempDirMixin, SimpleTestCase):
         parents = iter([1, 1, 2])
         with (
             mock.patch.object(
-                client_ips.RequestLogReader, "read", side_effect=OSError("nope")
+                client_ips.RequestLogReader,
+                "read",
+                side_effect=[OSError("nope"), OSError("nope"), []],
             ),
             mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
         ):
@@ -601,18 +615,35 @@ class RunTests(TempDirMixin, SimpleTestCase):
                 config, 1, sleep=lambda s: None, getppid=lambda: next(parents)
             )
         self.assertEqual(stderr.getvalue().count("couldn't record client IPs"), 1)
+        self.assertEqual(stderr.getvalue().count("recording client IPs again"), 1)
 
     def test_downloads_at_startup(self):
         config = self._config(download=True)
+        connection = client_ips.connect(config.db_path)
+        client_ips.record(connection, [request()], client_ips.GeoIP(None))
+        connection.close()
+
+        def update(geoip_dir):
+            write_geoip(geoip_dir)
+            return ["x.mmdb"]
+
         with (
-            mock.patch.object(
-                client_ips, "update_geoip", return_value=["x.mmdb"]
-            ) as update,
+            mock.patch.object(client_ips, "update_geoip", side_effect=update) as update,
             mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
         ):
             client_ips.run(config, 1, sleep=lambda s: None, getppid=lambda: 2)
         update.assert_called_once_with(config.geoip_dir)
         self.assertIn("downloaded x.mmdb", stderr.getvalue())
+        self.assertIn("looked up 1 IPs seen earlier", stderr.getvalue())
+
+    def test_no_download_without_geoip_dir(self):
+        config = self._config(download=True, geoip_dir=None)
+        with (
+            mock.patch.object(client_ips, "update_geoip") as update,
+            mock.patch("sys.stderr", new_callable=io.StringIO),
+        ):
+            client_ips.run(config, 1, sleep=lambda s: None, getppid=lambda: 2)
+        update.assert_not_called()
 
     def test_download_failure_is_logged(self):
         config = self._config(download=True)
@@ -642,6 +673,20 @@ class RunTests(TempDirMixin, SimpleTestCase):
             args.args[0][1:], ["-m", "lifetracker.core.client_ips", "1234"]
         )
         self.assertEqual(args.kwargs["env"], environ)
+
+    def test_main(self):
+        environ = {"LIFETRACKER_CLIENT_IP_DB": str(self.temp / "x.sqlite3")}
+        with (
+            mock.patch.dict(os.environ, environ),
+            mock.patch("signal.signal") as signal_,
+            mock.patch.object(client_ips, "run", return_value=0) as run,
+        ):
+            self.assertEqual(client_ips.main(["1234"]), 0)
+        run.assert_called_once_with(client_ips.config_from_env(environ), 1234)
+        handler = signal_.call_args.args[1]
+        with self.assertRaises(SystemExit) as cm:
+            handler(15, None)
+        self.assertEqual(cm.exception.code, 0)
 
     def test_main_usage(self):
         with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:

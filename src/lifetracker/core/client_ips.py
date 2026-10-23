@@ -173,8 +173,8 @@ def parse_line(line: str) -> Request | None:
         when = float(entry["time"])
     except ValueError, TypeError, KeyError:
         return None
-    if not isinstance(entry, dict):
-        return None
+    # Only a JSON object got this far: indexing anything else with "time"
+    # raises TypeError.
     ip = _ip(entry.get("fly_client_ip")) or _ip(entry.get("peer"))
     if ip is None:
         return None
