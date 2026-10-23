@@ -41,6 +41,54 @@ if [ "$#" -gt 0 ]; then
   exec "$@"
 fi
 
+# Envoy listens on $PORT and passes requests on to gunicorn, which listens
+# only on loopback, so nothing outside the container reaches it directly (issue
+# #178; envoy/envoy.yaml). Envoy can't read environment variables, so fill in
+# its config template here.
+listen_host="${LIFETRACKER_HOST:-0.0.0.0}"
+listen_port="${PORT:-8000}"
+gunicorn_port="${LIFETRACKER_GUNICORN_PORT:-8001}"
+for port in "$listen_port" "$gunicorn_port"; do
+  case "$port" in
+    *[!0-9]*)
+      echo "docker-entrypoint.sh: invalid port: $port" >&2
+      exit 1
+      ;;
+  esac
+done
+case "$listen_host" in
+  *[!0-9A-Fa-f.:]*)
+    echo "docker-entrypoint.sh: LIFETRACKER_HOST must be an IP address: $listen_host" >&2
+    exit 1
+    ;;
+esac
+envoy_config="${TMPDIR:-/tmp}/lifetracker-envoy.yaml"
+sed \
+  -e "s/@LISTEN_HOST@/$listen_host/" \
+  -e "s/@LISTEN_PORT@/$listen_port/" \
+  -e "s/@UPSTREAM_PORT@/$gunicorn_port/" \
+  envoy/envoy.yaml >"$envoy_config"
+
+# Run Envoy in the background, restarting it a second after it exits. This
+# process becomes gunicorn below, the container's main process, so gunicorn
+# exiting (e.g. the idle watchdog stopping the Machine) ends the container,
+# Envoy included. Envoy starts first, but retries connecting to gunicorn for a
+# while (see envoy/envoy.yaml), so requests that arrive meanwhile wait.
+# One worker thread (--concurrency) is plenty on a shared-cpu-1x Machine.
+# Hot restart is off, as nothing uses it and it needs shared memory.
+(
+  while :; do
+    envoy \
+      --config-path "$envoy_config" \
+      --concurrency 1 \
+      --disable-hot-restart \
+      --log-level warn &&
+      status=0 || status=$?
+    echo "docker-entrypoint.sh: envoy exited with status $status" >&2
+    sleep 1
+  done
+) &
+
 # lifetracker.gunicorn_conf starts the idle watchdog (see
 # lifetracker/core/idle_watchdog.py) if LIFETRACKER_IDLE_STOP turns it on.
 # gthread, not the default single sync worker: browsers open spare connections
@@ -56,5 +104,5 @@ exec gunicorn \
   --error-logfile - \
   --timeout "${LIFETRACKER_GUNICORN_TIMEOUT:-120}" \
   --bind \
-  "${LIFETRACKER_HOST:-0.0.0.0}:${PORT:-8000}" \
+  "127.0.0.1:$gunicorn_port" \
   lifetracker.wsgi

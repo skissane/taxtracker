@@ -1,5 +1,9 @@
 FROM ghcr.io/astral-sh/uv:0.13.5 AS uv
 
+# Envoy, the reverse proxy in front of gunicorn (see docker-entrypoint.sh).
+# Only its binary is used, which needs nothing beyond glibc.
+FROM envoyproxy/envoy:distroless-v1.40.1 AS envoy
+
 FROM python:3.14-slim AS builder
 
 COPY --from=uv /uv /uvx /bin/
@@ -56,6 +60,8 @@ RUN groupdel dialout \
        lifetracker
 
 COPY --from=builder /app /app
+COPY --from=envoy /usr/local/bin/envoy /usr/local/bin/envoy
+COPY envoy/envoy.yaml /app/envoy/envoy.yaml
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
