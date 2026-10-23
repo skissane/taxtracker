@@ -9,6 +9,8 @@ from unittest import mock
 
 from django.test import SimpleTestCase
 
+from scripts.check_deploy import check_once
+from scripts.check_deploy import main as check_deploy_main
 from scripts.check_screenshots_dir import EXPECTED as SCREENSHOTS_GITIGNORE
 from scripts.check_screenshots_dir import main as screenshots_dir_main
 from scripts.check_whitespace import _problems
@@ -847,3 +849,99 @@ class DependabotRelockTests(SimpleTestCase):
         code, _, _, result = self._run(branch, None)
         self.assertIsNone(code)
         self.assertEqual(result, branch)
+
+
+class CheckDeployTests(SimpleTestCase):
+    URL = "https://app.example/healthz/"
+    COMMIT = "abc123"
+
+    def _response(self, status: int, payload: bytes):
+        response = mock.MagicMock()
+        response.__enter__.return_value.status = status
+        response.__enter__.return_value.read.return_value = payload
+        return response
+
+    def _http_error(self, status: int, payload: bytes):
+        return urllib.error.HTTPError(
+            self.URL, status, "Error", {}, io.BytesIO(payload)
+        )
+
+    def _check(self, result):
+        kwargs = {
+            "side_effect" if isinstance(result, Exception) else "return_value": result
+        }
+        with mock.patch("urllib.request.urlopen", **kwargs) as urlopen:
+            problem = check_once(self.URL, self.COMMIT, 7)
+        self.assertEqual(urlopen.call_args.kwargs, {"timeout": 7})
+        return problem
+
+    def test_healthy(self):
+        body = b'{"status": "ok", "commit": "abc123"}'
+        self.assertIsNone(self._check(self._response(200, body)))
+
+    def test_other_commit(self):
+        body = b'{"status": "ok", "commit": "old"}'
+        self.assertEqual(
+            self._check(self._response(200, body)),
+            "running commit 'old', not 'abc123'",
+        )
+
+    def test_unhealthy(self):
+        body = b'{"status": "error", "problem": "unapplied migrations"}'
+        self.assertEqual(
+            self._check(self._http_error(503, body)),
+            "HTTP 503, status 'error': unapplied migrations",
+        )
+
+    def test_not_json(self):
+        self.assertEqual(
+            self._check(self._http_error(502, b"<html>")), "HTTP 502, not JSON"
+        )
+        self.assertEqual(
+            self._check(self._response(200, b"[]")), "HTTP 200, unexpected JSON"
+        )
+
+    def test_request_failed(self):
+        self.assertEqual(
+            self._check(urllib.error.URLError("timed out")),
+            "request failed: timed out",
+        )
+        self.assertEqual(self._check(TimeoutError("slow")), "request failed: slow")
+
+    def _main(self, problems, *args):
+        now = [0.0]
+        sleeps = []
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += seconds
+
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            mock.patch("scripts.check_deploy.check_once", side_effect=problems),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            code = check_deploy_main(
+                [self.URL, self.COMMIT, *args], clock=lambda: now[0], sleep=sleep
+            )
+        return code, sleeps, out.getvalue(), err.getvalue()
+
+    def test_retries_until_healthy(self):
+        code, sleeps, out, _ = self._main(["request failed: x", None])
+        self.assertEqual(code, 0)
+        self.assertEqual(sleeps, [5])
+        self.assertEqual(
+            out,
+            "Attempt 1: request failed: x\nAttempt 2: healthy, running abc123\n",
+        )
+        self.assertNotIn(self.URL, out)
+
+    def test_gives_up_after_timeout(self):
+        code, sleeps, out, err = self._main(
+            ["down"] * 10, "--timeout", "10", "--interval", "4"
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(sleeps, [4, 4])
+        self.assertEqual(out.count("down"), 3)
+        self.assertIn("not healthy after 10 seconds", err)

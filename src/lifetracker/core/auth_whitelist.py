@@ -9,7 +9,7 @@ checks the cookie on these too, but only for a session that has a token, which
 it logs out if the cookie doesn't match; anyone else gets through.
 
 Paths come from ``reverse()``, so they follow the URLconf. Keep the list to what
-logging in and out needs.
+logging in and out needs, plus the health check.
 """
 
 import dataclasses
@@ -48,6 +48,8 @@ def auth_whitelist():
         # public anyway: they come from the repo and the installed packages,
         # and WhiteNoise serves them before any of this app's middleware runs.
         WhitelistEntry(settings.STATIC_URL, _GET, prefix=True),
+        # CI's post-deploy check (core/health.py), which has no session.
+        WhitelistEntry(reverse("healthz"), _GET),
     ]
 
 
