@@ -147,7 +147,11 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument("pr", type=int, help="pull request number")
     parser.add_argument("--dir", type=Path, default=Path("screenshots"))
-    parser.add_argument("--commit", help="commit the screenshots are of")
+    parser.add_argument(
+        "--commit",
+        help="commit the screenshots are of; if it isn't (a prefix of) the PR's "
+        "head, nothing is posted",
+    )
     parser.add_argument("--run-url", help="URL of the workflow run that took them")
     parser.add_argument(
         "--repo",
@@ -178,6 +182,20 @@ def main(argv: list[str]) -> int:
         author = (
             args.author or _request("GET", f"{API_URL}/user", comment_token)["login"]
         )
+        if args.commit:
+            # A run for an older commit can finish after the run for a newer
+            # one (CI queues posts per PR, but not in commit order), so post
+            # only screenshots of the PR's current head, rather than overwrite
+            # newer ones with stale ones.
+            head = _request(
+                "GET", f"{API_URL}/repos/{repo}/pulls/{args.pr}", comment_token
+            )["head"]["sha"]
+            if not head.startswith(args.commit):
+                print(
+                    f"Not posting: screenshots are of {args.commit}, but PR "
+                    f"#{args.pr}'s head is now {head}."
+                )
+                return 0
         repository_id = _request("GET", f"{API_URL}/repos/{repo}", comment_token)["id"]
         urls = {path.stem: _upload(path, repository_id, upload_token) for path in paths}
         body = _build_body(urls, args.commit, args.run_url)

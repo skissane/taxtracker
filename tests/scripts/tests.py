@@ -289,13 +289,20 @@ class ValidateUvLockOsArchTests(SimpleTestCase):
 
 class PostScreenshotsTests(SimpleTestCase):
     def _run(
-        self, filenames, *args, comments=(), env=None, fail=None, asset_url=True
+        self,
+        filenames,
+        *args,
+        comments=(),
+        env=None,
+        fail=None,
+        asset_url=True,
+        head="abc1234def",
     ) -> tuple[int, str, list[tuple]]:
         """Run main() on PR 7 in a temp dir whose screenshots/ holds the given
         files, with the API faked: uploads return a URL based on the file name,
-        and the PR has the given comments. fail names a (method, URL prefix) to
-        answer with a 403. Return the exit code, stderr and each request as
-        (method, url, token, json_body, data)."""
+        and the PR has the given head commit and comments. fail names a (method,
+        URL prefix) to answer with a 403. Return the exit code, stderr and each
+        request as (method, url, token, json_body, data)."""
         requests = []
 
         def fake_request(method, url, token, *, json_body=None, data=None, **kw):
@@ -313,6 +320,8 @@ class PostScreenshotsTests(SimpleTestCase):
             if url.startswith("https://uploads.github.com/"):
                 name = url.split("name=")[1].split("&")[0]
                 return {"url": f"https://example.com/{name}"} if asset_url else {}
+            if url == "https://api.github.com/repos/o/r/pulls/7":
+                return {"head": {"sha": head}}
             if method == "GET" and "/issues/7/comments" in url:
                 page = int(url.rsplit("page=", 1)[1])
                 return list(comments[(page - 1) * 100 : page * 100])
@@ -392,6 +401,25 @@ class PostScreenshotsTests(SimpleTestCase):
             ),
         )
         self.assertNotIn("notes", body)
+
+    def test_checks_head_commit(self):
+        code, _, requests = self._run(["index.png"], "--commit", "abc1234def")
+        self.assertEqual(code, 0)
+        self.assertIn(
+            ("GET", "https://api.github.com/repos/o/r/pulls/7"),
+            [r[:2] for r in requests],
+        )
+        self.assertEqual(self._writes(requests)[-1][0], "POST")
+
+    def test_stale_commit_posts_nothing(self):
+        # An older commit's run finishing after the newer commit's has posted.
+        comments = [{"id": 1, "user": {"login": "me"}, "body": MARKER + "\nnew"}]
+        code, _, requests = self._run(
+            ["index.png"], "--commit", "0ld0ld0", comments=comments
+        )
+        self.assertEqual(code, 0)
+        # Not even the uploads.
+        self.assertEqual(self._writes(requests), [])
 
     def test_edits_own_previous_comment_in_place(self):
         comments = [

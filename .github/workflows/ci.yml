@@ -157,7 +157,9 @@ jobs:
   # secrets (and whose code shouldn't see the tokens). It runs the PR branch's
   # own script, but installs nothing: the script is stdlib-only and runs with
   # `uv run --no-project`, so no dependency bump runs with the tokens. Queued
-  # per PR, so two runs can't both see no previous comment and both post.
+  # per PR, so two runs can't both see no previous comment and both post; not in
+  # commit order, though, so the script posts only if HEAD_SHA is still the
+  # PR's head, lest an older commit's slow run overwrite newer screenshots.
   post-screenshots:
     needs: screenshots
     if: ${{ !cancelled() && needs.screenshots.result == 'success' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
