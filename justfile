@@ -18,6 +18,10 @@ requirements-check:
 requirements-fix:
     uv run --no-project python scripts/requirements_min_versions.py fix
 
+# Re-lock a Dependabot branch's uv.lock with this uv, from the base ref's uv.lock
+dependabot-relock base:
+    uv run --no-project python scripts/dependabot_relock.py {{base}}
+
 # Check that uv.lock only has wheels for supported OS/CPU combinations
 lock-os-arch-check:
     uv run --no-project python scripts/validate_uv_lock_os_arch.py

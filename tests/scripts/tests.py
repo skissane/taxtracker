@@ -13,6 +13,7 @@ from scripts.check_screenshots_dir import EXPECTED as SCREENSHOTS_GITIGNORE
 from scripts.check_screenshots_dir import main as screenshots_dir_main
 from scripts.check_whitespace import _problems
 from scripts.check_whitespace import main as whitespace_main
+from scripts.dependabot_relock import main as relock_main
 from scripts.post_screenshots import MARKER, _request
 from scripts.post_screenshots import main as post_screenshots_main
 from scripts.requirements_min_versions import main
@@ -715,3 +716,86 @@ class CheckScreenshotsDirTests(SimpleTestCase):
         code, stdout = self._run(setup_staged)
         self.assertEqual(code, 1)
         self.assertIn("- screenshots/.gitignore has unexpected staged contents", stdout)
+
+
+class DependabotRelockTests(SimpleTestCase):
+    BASE = _lock(("certifi", "1.0"), ("click", "8.0"))
+
+    def _run(
+        self, branch_lock: str, relocked: str
+    ) -> tuple[int, str, list[list[str]], str]:
+        """Run main() in a temp dir whose uv.lock is branch_lock, with
+        `git show` giving BASE and `uv lock` writing relocked; return the exit
+        code, stderr, the `uv lock` command line and the resulting uv.lock."""
+        uv_calls = []
+
+        def fake_run(args, **kwargs):
+            if args[0] == "git":
+                self.assertEqual(args, ["git", "show", "origin/master:uv.lock"])
+                return subprocess.CompletedProcess(args, 0, stdout=self.BASE)
+            uv_calls.append(args)
+            self.assertEqual(Path("uv.lock").read_text(encoding="utf-8"), self.BASE)
+            Path("uv.lock").write_text(relocked, encoding="utf-8")
+            return subprocess.CompletedProcess(args, 0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            (path / "uv.lock").write_text(branch_lock, encoding="utf-8")
+            stderr = io.StringIO()
+            with (
+                contextlib.chdir(path),
+                contextlib.redirect_stderr(stderr),
+                mock.patch("scripts.dependabot_relock.subprocess.run", fake_run),
+            ):
+                code = relock_main("origin/master")
+            result = (path / "uv.lock").read_text(encoding="utf-8")
+        return code, stderr.getvalue(), uv_calls, result
+
+    def test_relocks_changed_packages_from_base(self):
+        branch = "revision = 5\n" + _lock(("certifi", "2.0"), ("click", "8.0"))
+        relocked = _lock(("certifi", "2.0"), ("click", "8.0"))
+        code, _, uv_calls, result = self._run(branch, relocked)
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            uv_calls, [["uv", "lock", "--upgrade-package", "certifi==2.0"]]
+        )
+        self.assertEqual(result, relocked)
+
+    def test_added_and_multi_version_packages(self):
+        branch = _lock(
+            ("certifi", "1.0"),
+            ("click", "8.0"),
+            ("new", "1"),
+            ("six", "1"),
+            ("six", "2"),
+        )
+        code, _, uv_calls, _ = self._run(branch, branch)
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            uv_calls,
+            [
+                [
+                    "uv",
+                    "lock",
+                    "--upgrade-package",
+                    "new==1",
+                    "--upgrade-package",
+                    "six",
+                ]
+            ],
+        )
+
+    def test_no_version_changes_still_relocks(self):
+        code, _, uv_calls, _ = self._run(self.BASE, self.BASE)
+        self.assertEqual(code, 0)
+        self.assertEqual(uv_calls, [["uv", "lock"]])
+
+    def test_mismatch_restores_branch_lock(self):
+        branch = _lock(("certifi", "2.0"), ("click", "8.0"))
+        relocked = _lock(("certifi", "2.0"), ("click", "8.1"))
+        code, stderr, _, result = self._run(branch, relocked)
+        self.assertEqual(code, 1)
+        self.assertIn(
+            "click: Dependabot locked ('8.0',), re-locking gave ('8.1',)", stderr
+        )
+        self.assertEqual(result, branch)

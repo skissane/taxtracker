@@ -80,6 +80,9 @@ show_missing = true
 skip_covered = false
 
 [tool.uv]
+# Older uv writes uv.lock in an older format; keep CI's and the Dockerfile's pin
+# at or above this.
+required-version = ">=0.13.5"
 environments = [
     "sys_platform == 'darwin'",
     "sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')",

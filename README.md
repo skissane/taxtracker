@@ -22,7 +22,7 @@ Attachments are stored in the SQLite database rather than as separate files, so 
 
 ## Running locally
 
-You need [uv](https://docs.astral.sh/uv/), which installs the right Python version itself.
+You need [uv](https://docs.astral.sh/uv/) 0.13.5 or later (`uv self update`), which installs the right Python version itself.
 Start the app with:
 
 ```bash
