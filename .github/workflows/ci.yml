@@ -20,7 +20,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: "0.10.10"
+          version: "0.13.5"
 
       - name: Set up Python
         run: uv python install 3.14.3
@@ -117,7 +117,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: "0.10.10"
+          version: "0.13.5"
 
       - name: Set up Python
         run: uv python install 3.14.3
@@ -186,7 +186,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: "0.10.10"
+          version: "0.13.5"
 
       - name: Set up Python
         run: uv python install 3.14.3
@@ -238,12 +238,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
+          # Fetch the base branch and history too, for dependabot-relock's merge base.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: "0.10.10"
+          version: "0.13.5"
 
       - name: Set up Python
         run: uv python install 3.14.3
@@ -252,6 +254,13 @@ jobs:
         uses: extractions/setup-just@v3
         with:
           just-version: "1.58.0"
+
+      # Dependabot's uv may write uv.lock in a newer format than ours, changing
+      # lines unrelated to the bump; redo its version changes with our uv.
+      - name: Re-lock with the pinned uv
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: just dependabot-relock "origin/$BASE_REF"
 
       - name: Update dependency minimum versions
         run: just requirements-fix
@@ -276,7 +285,7 @@ jobs:
             echo "No changes to commit"
             echo "pushed=false" >> "$GITHUB_OUTPUT"
           else
-            git commit -m "chore: sync dependency minimum versions"
+            git commit -m "chore: re-lock with pinned uv and sync dependency minimum versions"
             git push "https://x-access-token:${DEPENDABOT_FIX_TOKEN}@github.com/${REPOSITORY}.git" "HEAD:refs/heads/${HEAD_REF}"
             echo "pushed=true" >> "$GITHUB_OUTPUT"
           fi

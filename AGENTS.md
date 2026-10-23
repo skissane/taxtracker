@@ -12,7 +12,7 @@ Keep to this when editing them: put each new sentence on its own line, don't rew
 
 ## Commands
 
-CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `screenshots-dir-check`, `lint`, `fmt-check`, `lint-templates`, `fmt-check-templates`, `coverage`, `screenshots`, `screenshots-post`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`).
+CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `screenshots-dir-check`, `lint`, `fmt-check`, `lint-templates`, `fmt-check-templates`, `coverage`, `screenshots`, `screenshots-post`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`).
 `just ci` drifts from `ci.yml` if the workflow changes without a matching justfile edit; `run_workflow_local.py` avoids that by parsing the workflow YAML directly and running its `run:` steps as written (see its docstring for what it does and doesn't support).
 After `just coverage` runs, CI uploads `coverage.xml` to Codecov (`codecov/codecov-action`), and also uploads the `junit.xml` test results it writes for Codecov Test Analytics (`report_type: test_results`, even if the tests failed; not `codecov/test-results-action`, which is deprecated); these steps need a `CODECOV_TOKEN` repo secret from codecov.io and are skipped by `run_workflow_local.py` since they're `uses:` steps.
 `ci.yml` has seven jobs, `test`, `screenshots` and `post-screenshots` (see Screenshots), `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment); `run_workflow_local.py` runs the first job in the file unless given `--job`, so keep `test` first.
@@ -28,9 +28,13 @@ There's deliberately no escape hatch: a change that really needs to alter `scree
 
 **Dependency minimums:** `pyproject.toml`'s dependency lower bounds (`>=`) are kept equal to the versions uv resolved, by `scripts/requirements_min_versions.py`: `just requirements-check` (part of `just ci` and the `test` job) fails if any in `[project].dependencies`, any optional extra or any dependency group differ from the versions in `uv.lock`, and `just requirements-fix` rewrites them; run `uv lock` afterwards.
 Dependabot only edits `pyproject.toml` when the new version falls outside the existing constraint, which a `>=` minimum never excludes, so its PRs usually bump only `uv.lock`, even with `versioning-strategy: "increase"`, and would fail that check (see <https://github.com/dependabot/dependabot-core/issues/12788#issuecomment-3606306953>).
-The `dependabot-fix` job, which runs only on PRs whose `github.actor` is `dependabot[bot]`, runs `requirements-fix` and `uv lock` on the PR branch and pushes any change as a `chore: sync dependency minimum versions` commit.
+The `dependabot-fix` job, which runs only on PRs whose `github.actor` is `dependabot[bot]`, runs `dependabot-relock`, `requirements-fix` and `uv lock` on the PR branch and pushes any change as a `chore: re-lock with pinned uv and sync dependency minimum versions` commit.
+Dependabot runs its own uv, which can write `uv.lock` in a newer format than ours (a higher `revision`, simplified markers), changing lines that have nothing to do with the bump; `uv lock` alone never rewrites a lock that's already satisfied.
+So `just dependabot-relock origin/<base>` (`scripts/dependabot_relock.py`, stdlib-only) puts back the `uv.lock` the branch started from (at its merge base with the base branch, so the base branch's own later lock changes aren't undone) and re-locks it with our uv, passing `--upgrade-package <name>==<version>` for each package whose locked versions Dependabot changed, then fails, restoring Dependabot's lock, unless the result locks exactly Dependabot's versions (or if `uv lock` fails).
+The job checks out with `fetch-depth: 0` so the base branch and the merge base are there.
 It pushes with the `DEPENDABOT_FIX_TOKEN` secret (a token with `contents: write` on the repo; it must be a Dependabot secret, as Dependabot runs don't get Actions secrets, and the job fails if it's unset), not `GITHUB_TOKEN`, because pushes made with `GITHUB_TOKEN` don't trigger new workflow runs.
-As the branch's bumped dependency isn't trusted, only the final push step sees the token: checkout runs with `persist-credentials: false`, and the job never syncs or installs anything (`requirements-check`/`requirements-fix` use `uv run --no-project`, as the script needs only the standard library).
+As the branch's bumped dependency isn't trusted, only the final push step sees the token: checkout runs with `persist-credentials: false`, and the job never syncs or installs anything (`requirements-check`/`requirements-fix` and `dependabot-relock` use `uv run --no-project`, as the scripts need only the standard library).
+Its `uv lock` runs can still build a dependency's sdist to read its metadata, running that package's build backend, but no step before the push has the token.
 `test` waits on it and runs only if it was skipped or pushed nothing; if it pushed, that run's `test` is skipped and the run the push triggers tests the fixed commit.
 
 ```bash
@@ -68,6 +72,7 @@ uv run lifetracker-cli --help
 ## Architecture
 
 **Stack:** Django 6.x, Python 3.14, SQLite, `uv` for package management.
+`pyproject.toml`'s `[tool.uv] required-version` sets the oldest uv allowed (older ones write `uv.lock` in an older format); the `version:` of each `setup-uv` step in `ci.yml` and the `ghcr.io/astral-sh/uv` image tag in the `Dockerfile` pin one exact uv, so raise all three together.
 The entire UI is the Django admin — there are no custom non-admin views (except file serving), and `/` redirects to `/admin/`.
 No frontend framework.
 
