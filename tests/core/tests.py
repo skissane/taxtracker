@@ -1845,7 +1845,7 @@ class DockerEntrypointTests(TestCase):
         ),
     }
 
-    def _run_entrypoint(self, *args, env=None, returncode=0):
+    def _run_entrypoint(self, *args, env=None, returncode=0, fakes=None):
         """Run the entrypoint with fake `python`, `envoy` and `gunicorn` on PATH.
 
         Returns the completed process, the logged lines, the path the
@@ -1863,7 +1863,7 @@ class DockerEntrypointTests(TestCase):
             temp_path = Path(tempdir)
             log_path = temp_path / "commands.log"
             log_path.touch()
-            for name, body in self.FAKES.items():
+            for name, body in {**self.FAKES, **(fakes or {})}.items():
                 fake_path = temp_path / name
                 fake_path.write_text(
                     "#!/usr/bin/env sh\n" + body.replace("{name}", name)
@@ -1970,6 +1970,46 @@ class DockerEntrypointTests(TestCase):
                     )
                     self.assertEqual(log_lines, self.STARTUP)
                     self.assertIsNone(envoy_config)
+
+    def test_entrypoint_stops_gunicorn_when_envoy_keeps_failing(self):
+        # Envoy exits at once every time. Gunicorn waits (up to 20 seconds)
+        # for SIGTERM, then logs whether the failure file exists.
+        result, log_lines, envoy_config_path, _ = self._run_entrypoint(
+            fakes={
+                "envoy": self.LOG_COMMAND + "exit 3\n",
+                "gunicorn": (
+                    self.LOG_COMMAND
+                    + 'trap \'if [ -e "$LIFETRACKER_ENVOY_FAILED_FILE" ]; then'
+                    ' echo gunicorn TERM, failed file >> "$COMMANDS_LOG_PATH"; fi;'
+                    " exit 0' TERM\n"
+                    "i=0\n"
+                    'while [ "$i" -lt 200 ]; do\n'
+                    "  sleep 0.1\n"
+                    "  i=$((i + 1))\n"
+                    "done\n"
+                    "exit 1\n"
+                ),
+            }
+        )
+
+        self.assertEqual(
+            [line for line in log_lines if line.startswith("envoy ")],
+            [
+                f"envoy --config-path {envoy_config_path} --concurrency 1"
+                " --disable-hot-restart --log-level warn"
+            ]
+            * 5,
+        )
+        self.assertEqual(log_lines[-1], "gunicorn TERM, failed file")
+        self.assertEqual(
+            result.stderr.count("docker-entrypoint.sh: envoy exited with status 3\n"),
+            5,
+        )
+        self.assertIn(
+            "docker-entrypoint.sh: envoy exited within a minute of starting"
+            " 5 times in a row; stopping gunicorn\n",
+            result.stderr,
+        )
 
     def test_entrypoint_rejects_same_port_for_envoy_and_gunicorn(self):
         result, log_lines, _, envoy_config = self._run_entrypoint(
@@ -3387,6 +3427,27 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
             r'^203\.0\.113\.7 172\.16\.1\.2 - - \[.*\] "GET /admin/ HTTP/1\.1" 200',
         )
         self.assertRegex(logged([]), r"^- 172\.16\.1\.2 ")
+
+    def test_gunicorn_on_exit_exits_1_if_envoy_failed(self):
+        server = mock.Mock()
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "envoy-failed"
+            env = {"LIFETRACKER_ENVOY_FAILED_FILE": str(path)}
+            with mock.patch.dict(os.environ, env):
+                self.assertIsNone(gunicorn_conf.on_exit(server))
+                path.touch()
+                with self.assertRaises(SystemExit) as cm:
+                    gunicorn_conf.on_exit(server)
+
+        self.assertEqual(cm.exception.code, 1)
+        server.log.error.assert_called_once_with(
+            "Exiting with status 1, as Envoy kept failing"
+        )
+
+    def test_gunicorn_on_exit_without_envoy_failed_file_setting(self):
+        with mock.patch.dict(os.environ):
+            os.environ.pop("LIFETRACKER_ENVOY_FAILED_FILE", None)
+            self.assertIsNone(gunicorn_conf.on_exit(mock.Mock()))
 
     def test_gunicorn_when_ready_spawns_for_master(self):
         server = mock.Mock(pid=1234)

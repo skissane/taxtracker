@@ -86,8 +86,19 @@ sed \
 # while (see envoy/envoy.yaml), so requests that arrive meanwhile wait.
 # One worker thread (--concurrency) is plenty on a shared-cpu-1x Machine.
 # Hot restart is off, as nothing uses it and it needs shared memory.
+#
+# If Envoy exits within a minute of starting 5 times in a row (e.g. a bad
+# config), restarting it won't help, and nothing can reach gunicorn, so give
+# up: create the file below and stop gunicorn, whose on_exit hook
+# (lifetracker/gunicorn_conf.py) then makes it exit 1 instead of 0. Fly's
+# on-failure restart policy then restarts the Machine (up to 10 times), and
+# the failure shows in the Machine's exit events, unlike an idle stop.
+export LIFETRACKER_ENVOY_FAILED_FILE="${TMPDIR:-/tmp}/lifetracker-envoy-failed"
+rm -f "$LIFETRACKER_ENVOY_FAILED_FILE"
 (
+  failures=0
   while :; do
+    started="$(date +%s)"
     envoy \
       --config-path "$envoy_config" \
       --concurrency 1 \
@@ -95,6 +106,18 @@ sed \
       --log-level warn &&
       status=0 || status=$?
     echo "docker-entrypoint.sh: envoy exited with status $status" >&2
+    if [ "$(($(date +%s) - started))" -lt 60 ]; then
+      failures=$((failures + 1))
+    else
+      failures=1
+    fi
+    if [ "$failures" -ge 5 ]; then
+      echo "docker-entrypoint.sh: envoy exited within a minute of starting" \
+        "5 times in a row; stopping gunicorn" >&2
+      : >"$LIFETRACKER_ENVOY_FAILED_FILE"
+      kill -TERM "$$"
+      exit 1
+    fi
     sleep 1
   done
 ) &

@@ -86,6 +86,7 @@ The database is still separate: the container's lives in the `lifetracker-data` 
 The container startup path runs `upgrade_legacy_db`, then `migrate`, then `ensure_superuser`, then `ensure_jwt_key` (see [Front proxy JWT](#front-proxy-jwt)), then starts the Gunicorn WSGI server on `127.0.0.1:8001` behind an [Envoy](https://www.envoyproxy.io/) reverse proxy on `0.0.0.0:${PORT:-8000}`.
 Envoy passes every request through unchanged for now; it's there for the planned [front proxy](#front-proxy-jwt), and as Gunicorn listens only on the container's loopback interface, nothing outside the container can get to it without going through Envoy.
 If Envoy exits, it's restarted a second later; Gunicorn is the container's main process, so the container ends when Gunicorn does.
+If Envoy keeps failing (5 exits in a row, each within a minute of starting), the container stops Gunicorn and exits with status 1, so Fly records a failure and restarts the Machine.
 Requests that arrive while Gunicorn is still starting wait for it (for up to about 10 seconds).
 Envoy puts no time limit on a request, so long downloads and uploads aren't cut off.
 `LIFETRACKER_HOST` (an IP address) and `PORT` set where Envoy listens, and `LIFETRACKER_GUNICORN_PORT` Gunicorn's port on loopback.
