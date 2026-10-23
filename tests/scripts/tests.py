@@ -752,7 +752,11 @@ class DependabotRelockTests(SimpleTestCase):
         return code, stderr.getvalue(), uv_calls, result
 
     def test_relocks_changed_packages_from_base(self):
-        branch = "revision = 5\n" + _lock(("certifi", "2.0"), ("click", "8.0"))
+        # A virtual project has no version, and is never upgraded.
+        virtual = '[[package]]\nname = "virtual"\nsource = { virtual = "." }\n\n'
+        branch = (
+            "revision = 5\n" + _lock(("certifi", "2.0"), ("click", "8.0")) + virtual
+        )
         relocked = _lock(("certifi", "2.0"), ("click", "8.0"))
         code, _, uv_calls, result = self._run(branch, relocked)
         self.assertEqual(code, 0)
