@@ -93,21 +93,25 @@
           </tr>
           <tr>
             <th class="lt-label">Idle Timeout</th>
-            <td>
-              {{ status.idle_timeout }}:
-              {% if status.state == "stopping" %}
-                reached
-              {% elif status.stop_overdue %}
-                {% if status.mode == "stop" %}
-                  due {{ status.stop_due_in }} ago
-                {% else %}
-                  reached {{ status.stop_due_in }} ago (monitor mode: not stopping)
-                {% endif %}
-              {% elif status.mode == "stop" %}
-                stops in {{ status.stop_due_in }} if nothing happens ({{ status.stop_due_at|date:"Y-m-d H:i:s T" }})
+            <td>{{ status.idle_timeout }}</td>
+          </tr>
+          <tr>
+            <th class="lt-label">
+              {% if status.mode == "stop" %}
+                Stops At
               {% else %}
-                would stop in {{ status.stop_due_in }} if nothing happens ({{ status.stop_due_at|date:"Y-m-d H:i:s T" }})
+                Would Stop At
               {% endif %}
+            </th>
+            <td>
+              {% if status.state == "stopping" %}
+                Now: the idle timeout was reached
+              {% elif status.state == "active" %}
+                Not while connections are open; {{ status.idle_timeout }} after the last one closes
+              {% else %}
+                {{ status.stop_at|date:"Y-m-d H:i:s T" }} if nothing else happens ({{ status.idle_timeout }} after this page load)
+              {% endif %}
+              {% if status.mode != "stop" %}(monitor mode: never stops){% endif %}
             </td>
           </tr>
           <tr>
