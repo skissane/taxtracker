@@ -33,7 +33,7 @@ from django.contrib.staticfiles import finders
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.files.base import ContentFile
 from django.core.management import CommandError, call_command
-from django.db import IntegrityError, connection, transaction
+from django.db import DatabaseError, IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.db.utils import ConnectionHandler
 from django.forms import inlineformset_factory
@@ -4448,6 +4448,9 @@ class AuthWhitelistTests(SimpleTestCase):
             ("GET", "/static/admin/css/login.css", True),
             ("POST", "/static/admin/css/login.css", False),
             ("GET", reverse("admin:index"), False),
+            ("GET", "/healthz/", True),
+            ("HEAD", "/healthz/", True),
+            ("POST", "/healthz/", False),
             ("GET", "/", False),
         ]:
             with self.subTest(method=method, path=path):
@@ -4469,6 +4472,69 @@ class AuthWhitelistTests(SimpleTestCase):
             {"path": "/static/", "methods": ["GET", "HEAD"], "prefix": True}, entries
         )
         self.assertEqual(len(entries), len(auth_whitelist()))
+
+
+class HealthCheckTests(TestCase):
+    """The unauthenticated /healthz/ endpoint CI checks after a deploy."""
+
+    url = "/healthz/"
+
+    @override_settings(LIFETRACKER_COMMIT_ID="abc123")
+    def test_healthy(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok", "commit": "abc123"})
+        self.assertIn("no-cache", response["Cache-Control"])
+        self.assertNotIn("Set-Cookie", response.headers)
+
+    def test_head_allowed_post_not(self):
+        self.assertEqual(self.client.head(self.url).status_code, 200)
+        self.assertEqual(self.client.post(self.url).status_code, 405)
+
+    @override_settings(LIFETRACKER_COMMIT_ID="abc123")
+    def test_unapplied_migrations(self):
+        migration = mock.Mock(app_label="core", name="0099_new")
+        migration.name = "0099_new"
+        with (
+            mock.patch.object(
+                MigrationExecutor, "migration_plan", return_value=[(migration, False)]
+            ),
+            self.assertLogs("lifetracker.core.health", "ERROR") as logs,
+        ):
+            response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {"status": "error", "problem": "unapplied migrations", "commit": "abc123"},
+        )
+        self.assertIn("core.0099_new", logs.output[0])
+
+    def test_database_error(self):
+        with (
+            mock.patch.object(
+                MigrationExecutor,
+                "__init__",
+                side_effect=DatabaseError("disk I/O error"),
+            ),
+            self.assertLogs("lifetracker.core.health", "ERROR") as logs,
+        ):
+            response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["problem"], "database error")
+        self.assertNotIn("disk I/O", response.content.decode())
+        self.assertIn("disk I/O error", logs.output[0])
+
+    def test_other_error(self):
+        with (
+            mock.patch.object(
+                MigrationExecutor, "__init__", side_effect=RuntimeError("boom")
+            ),
+            self.assertLogs("lifetracker.core.health", "ERROR") as logs,
+        ):
+            response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["problem"], "unhealthy")
+        self.assertIn("boom", logs.output[0])
 
 
 class JWTCookieMiddlewareTests(TestCase):
