@@ -2,6 +2,9 @@
 ``--config python:lifetracker.gunicorn_conf``. Its other settings are on that
 command line."""
 
+import os
+import sys
+
 from lifetracker.core import idle_watchdog
 
 # Gunicorn's default access log format, with the client's IP first. The
@@ -29,3 +32,14 @@ def post_request(worker, req, environ, resp):
     # requests count as activity although the watchdog's checks rarely catch
     # their connections open.
     idle_watchdog.record_request(_REQUEST_FILE)
+
+
+def on_exit(server):
+    # Runs in the master as gunicorn shuts down. docker-entrypoint.sh creates
+    # this file before stopping gunicorn when Envoy keeps failing, so the
+    # container exits 1, a failure Fly restarts it after, rather than 0, which
+    # Fly takes as a clean stop (as when the idle watchdog stops it).
+    path = os.environ.get("LIFETRACKER_ENVOY_FAILED_FILE")
+    if path and os.path.exists(path):
+        server.log.error("Exiting with status 1, as Envoy kept failing")
+        sys.exit(1)

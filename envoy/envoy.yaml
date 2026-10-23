@@ -1,0 +1,140 @@
+# Envoy, in front of gunicorn in the container (issue #178): Fly Proxy ->
+# Envoy on $PORT -> gunicorn on 127.0.0.1. Plain pass-through for now; checking
+# the JWT (issue #179) is to be added here.
+#
+# This is a template: Envoy can't read environment variables, so
+# docker-entrypoint.sh replaces @LISTEN_HOST@, @LISTEN_PORT@ and
+# @UPSTREAM_PORT@ and runs Envoy with the result. There's no admin interface,
+# as nothing uses it.
+
+overload_manager:
+  resource_monitors:
+    # Envoy warns at startup without a limit. Fly Proxy sends one Machine far
+    # fewer connections than this (http_service's default hard limit is 25).
+    - name: envoy.resource_monitors.global_downstream_max_connections
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.resource_monitors.downstream_connections.v3.DownstreamConnectionsConfig
+        max_active_downstream_connections: 1000
+
+static_resources:
+  listeners:
+    - name: http
+      address:
+        socket_address:
+          address: "@LISTEN_HOST@"
+          port_value: @LISTEN_PORT@
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ingress_http
+                # Fly Proxy is the one trusted hop: it terminates TLS and sets
+                # X-Forwarded-Proto and X-Forwarded-For. With this, Envoy
+                # passes its X-Forwarded-Proto on (Django trusts it with
+                # LIFETRACKER_TRUST_X_FORWARDED_PROTO; without a trusted hop
+                # Envoy would overwrite it with "http") and appends the proxy's
+                # address to X-Forwarded-For. Without a proxy in front (e.g.
+                # `just docker-run`), a missing X-Forwarded-Proto is set to
+                # "http".
+                use_remote_address: true
+                xff_num_trusted_hops: 1
+                # No client is internal, so Envoy strips any x-envoy-* request
+                # headers a client sends (e.g. x-envoy-upstream-rq-timeout-ms)
+                # rather than obeying them. An empty list means Envoy's
+                # defaults (RFC 1918 and loopback, which would include Fly
+                # Proxy's address), so it lists only the unspecified address,
+                # which no client can connect from.
+                internal_address_config:
+                  cidr_ranges:
+                    - address_prefix: 0.0.0.0
+                      prefix_len: 32
+                # Pass-through: no x-request-id, and gunicorn's Server header
+                # is left alone rather than replaced with "envoy".
+                generate_request_id: false
+                server_header_transformation: PASS_THROUGH
+                common_http_protocol_options:
+                  # Start closing a client connection after 5 idle seconds
+                  # (Envoy's default is an hour; it then takes its 5-second
+                  # drain_timeout to close it), as gunicorn closed one after 2.
+                  # The idle watchdog counts open connections to this port as
+                  # activity, so an idle keep-alive connection held open by
+                  # Fly Proxy would otherwise keep the Machine running.
+                  idle_timeout: 5s
+                access_log:
+                  # Gunicorn logs every request it gets, so Envoy logs only
+                  # the ones it answered itself or failed to pass on (any with
+                  # a response flag, e.g. UF: gunicorn refused the connection),
+                  # with the client's IP from Fly Proxy first, as gunicorn does.
+                  - name: envoy.access_loggers.stdout
+                    filter:
+                      response_flag_filter: {}
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        text_format_source:
+                          inline_string: "envoy: %REQ(FLY-CLIENT-IP)% [%START_TIME%] \"%REQ(:METHOD)% %REQ(:PATH)% %PROTOCOL%\" %RESPONSE_CODE% %RESPONSE_FLAGS% %RESPONSE_CODE_DETAILS% %BYTES_SENT% %DURATION%ms \"%REQ(USER-AGENT)%\"\n"
+                route_config:
+                  virtual_hosts:
+                    - name: app
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: gunicorn
+                            # No overall time limit (Envoy's default is 15
+                            # seconds): a DB backup download, ZIP export or
+                            # upload can take longer, and gunicorn never
+                            # limited them either. A stream that sends nothing
+                            # for Envoy's stream_idle_timeout (5 minutes) is
+                            # still reset.
+                            timeout: 0s
+                            # Both are safe for any method, as gunicorn never
+                            # saw the request. connect-failure covers gunicorn
+                            # still starting up (Envoy starts first) or
+                            # restarting; reset-before-request covers a
+                            # connection gunicorn closed as Envoy sent on it.
+                            # With the backoff, the retries span about 10
+                            # seconds.
+                            retry_policy:
+                              retry_on: connect-failure,reset-before-request
+                              num_retries: 20
+                              retry_back_off:
+                                base_interval: 0.1s
+                                max_interval: 1s
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+                      # No x-envoy-* headers on the responses.
+                      suppress_envoy_headers: true
+
+  clusters:
+    - name: gunicorn
+      type: STATIC
+      connect_timeout: 1s
+      # A new connection for each request: gunicorn closes a keep-alive
+      # connection after 2 idle seconds, and Envoy reusing one just as it does
+      # would fail the request. Connecting over loopback is cheap.
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          common_http_protocol_options:
+            max_requests_per_connection: 1
+          explicit_http_config:
+            http_protocol_options: {}
+      circuit_breakers:
+        thresholds:
+          # Envoy's default allows only 3 retries in progress at once, which a
+          # page's burst of requests at startup could exceed.
+          - max_retries: 100
+      load_assignment:
+        cluster_name: gunicorn
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 127.0.0.1
+                      port_value: @UPSTREAM_PORT@

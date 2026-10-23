@@ -83,7 +83,14 @@ It also mounts your host config directory (`~/.config/lifetracker`, or `$LIFETRA
 Before starting the container it runs `manage.py check` and `manage.py ensure_jwt_key` on the host, which create the directory, the secret key and the JWT key pair as you if they don't exist yet; that way Docker never creates them as root.
 The database is still separate: the container's lives in the `lifetracker-data` volume, not in the repo.
 
-The container startup path runs `upgrade_legacy_db`, then `migrate`, then `ensure_superuser`, then `ensure_jwt_key` (see [Front proxy JWT](#front-proxy-jwt)), then starts the Gunicorn WSGI server on `0.0.0.0:${PORT:-8000}`.
+The container startup path runs `upgrade_legacy_db`, then `migrate`, then `ensure_superuser`, then `ensure_jwt_key` (see [Front proxy JWT](#front-proxy-jwt)), then starts the Gunicorn WSGI server on `127.0.0.1:8001` behind an [Envoy](https://www.envoyproxy.io/) reverse proxy on `0.0.0.0:${PORT:-8000}`.
+Envoy passes every request through unchanged for now; it's there for the planned [front proxy](#front-proxy-jwt), and as Gunicorn listens only on the container's loopback interface, nothing outside the container can get to it without going through Envoy.
+If Envoy exits, it's restarted a second later; Gunicorn is the container's main process, so the container ends when Gunicorn does.
+If Envoy keeps failing (5 exits in a row, each within a minute of starting), the container stops Gunicorn and exits with status 1, so Fly records a failure and restarts the Machine.
+Requests that arrive while Gunicorn is still starting wait for it (for up to about 10 seconds).
+Envoy puts no time limit on a request, so long downloads and uploads aren't cut off.
+`LIFETRACKER_HOST` (an IP address) and `PORT` set where Envoy listens, and `LIFETRACKER_GUNICORN_PORT` Gunicorn's port on loopback.
+Envoy's config is the template `envoy/envoy.yaml`; Envoy logs only requests it answered itself, such as a 503 when Gunicorn couldn't be reached, as Gunicorn logs the rest.
 Gunicorn's worker timeout is 120 seconds rather than its default 30, since ZIP exports, DB backups and archive imports run in the request and can be slow for a large database.
 Change it with `LIFETRACKER_GUNICORN_TIMEOUT` (in seconds).
 It uses gthread workers with 8 threads (`LIFETRACKER_GUNICORN_THREADS`) rather than a single sync worker, which a browser's idle spare connection can tie up, leaving other requests waiting.
@@ -187,7 +194,8 @@ If the Machine isn't running, `./flyssh.sh` starts it first, waiting for it to f
 Fly's own auto-stop judges idleness by HTTP traffic through its proxy, not SSH sessions, so it could cut off a long session or command; `fly.toml` turns it off.
 
 Instead, the Machine is stopped by the idle watchdog (`src/lifetracker/core/idle_watchdog.py`), which gunicorn starts as a separate process.
-It counts established connections to the app's port and SSH's (port 22) in `/proc/net/tcp` and `/proc/net/tcp6`.
+It counts established connections to the app's port (Envoy's) and SSH's (port 22) in `/proc/net/tcp` and `/proc/net/tcp6`.
+Envoy closes a connection after it's been idle for 5 seconds (then waits up to 5 more for it to close), so Fly Proxy holding one open doesn't keep the Machine running.
 Most HTTP requests are over between two checks, so gunicorn's workers also touch a file after every request, which counts as activity too.
 Once there's been no activity for a while, the watchdog stops gunicorn gracefully.
 A clean exit leaves the Machine stopped until the next request starts it.
@@ -389,6 +397,7 @@ Serve it over HTTPS through a proxy that sets `X-Forwarded-Proto: https`, so the
 ## Front proxy JWT
 
 An authenticating proxy in front of the app is planned ([#176](https://github.com/skissane/taxtracker/issues/176)): it will turn away any request that doesn't carry a valid token from the app, apart from the few that logging in needs, so even a page accidentally left open without login couldn't be reached.
+The proxy, Envoy, is already in the Docker image, but doesn't check tokens yet ([#179](https://github.com/skissane/taxtracker/issues/179)).
 The app already issues that token.
 Whenever you're logged in (with a password or with Google), it sets a `lifetracker_jwt` cookie holding a signed token that expires when your session does, and renews it whenever the session's expiry moves forward; logging out deletes it.
 The app also checks the cookie itself: a logged-in session that comes back without its own token is logged out, so a stolen session cookie alone isn't enough.

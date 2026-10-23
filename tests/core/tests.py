@@ -1806,17 +1806,51 @@ class DockerEntrypointTests(TestCase):
     ]
 
     ENTRYPOINT_ENV = {
+        "LIFETRACKER_GUNICORN_PORT",
         "LIFETRACKER_GUNICORN_THREADS",
         "LIFETRACKER_GUNICORN_TIMEOUT",
         "LIFETRACKER_HOST",
         "PORT",
+        "TMPDIR",
     }
 
-    def _run_entrypoint(self, *args, env=None):
-        """Run the entrypoint with fake `python` and `gunicorn` on PATH.
+    # Each fake logs its name and arguments, one invocation per line.
+    LOG_COMMAND = (
+        "{\n"
+        "  printf '%s' {name}\n"
+        '  for arg in "$@"; do\n'
+        "    printf ' %s' \"$arg\"\n"
+        "  done\n"
+        "  printf '\\n'\n"
+        '} >> "$COMMANDS_LOG_PATH"\n'
+    )
 
-        Each fake logs its name and arguments, one invocation per line.
-        Returns the completed process and the logged lines.
+    # The entrypoint starts Envoy in the background just before execing
+    # gunicorn, so the fakes would race. The fake Envoy then blocks, as the
+    # real one does, and the fake gunicorn waits (up to 10 seconds) until
+    # Envoy has logged, then logs and kills the rest of the entrypoint's
+    # process group (Envoy and the loop that would restart it), which it runs
+    # in a session of its own, ignoring the signal itself.
+    FAKES = {
+        "python": LOG_COMMAND + "exit 0\n",
+        "envoy": LOG_COMMAND + "exec sleep 60\n",
+        "gunicorn": (
+            "i=0\n"
+            'while ! grep -q "^envoy" "$COMMANDS_LOG_PATH" && [ "$i" -lt 100 ]; do\n'
+            "  sleep 0.1\n"
+            "  i=$((i + 1))\n"
+            "done\n" + LOG_COMMAND + "trap '' TERM\n"
+            "kill -TERM 0\n"
+            "exit 0\n"
+        ),
+    }
+
+    def _run_entrypoint(self, *args, env=None, returncode=0, fakes=None):
+        """Run the entrypoint with fake `python`, `envoy` and `gunicorn` on PATH.
+
+        Returns the completed process, the logged lines, the path the
+        entrypoint was to write Envoy's config to and that config (None if it
+        wasn't written).
         """
         repo_root = next(
             parent
@@ -1828,18 +1862,11 @@ class DockerEntrypointTests(TestCase):
         with tempfile.TemporaryDirectory() as tempdir:
             temp_path = Path(tempdir)
             log_path = temp_path / "commands.log"
-            for name in ("python", "gunicorn"):
+            log_path.touch()
+            for name, body in {**self.FAKES, **(fakes or {})}.items():
                 fake_path = temp_path / name
                 fake_path.write_text(
-                    "#!/usr/bin/env sh\n"
-                    "{\n"
-                    f"  printf '%s' {name}\n"
-                    '  for arg in "$@"; do\n'
-                    "    printf ' %s' \"$arg\"\n"
-                    "  done\n"
-                    "  printf '\\n'\n"
-                    '} >> "$COMMANDS_LOG_PATH"\n'
-                    "exit 0\n"
+                    "#!/usr/bin/env sh\n" + body.replace("{name}", name)
                 )
                 fake_path.chmod(0o755)
 
@@ -1857,40 +1884,58 @@ class DockerEntrypointTests(TestCase):
                     "PATH": f"{tempdir}:{os.environ['PATH']}",
                     "COMMANDS_LOG_PATH": str(log_path),
                     "LIFETRACKER_APP_DIR": str(repo_root),
+                    "TMPDIR": tempdir,
                     **(env or {}),
                 },
                 check=False,
                 capture_output=True,
                 text=True,
+                start_new_session=True,
+                timeout=30,
             )
             log_lines = log_path.read_text().splitlines()
+            envoy_config_path = temp_path / "lifetracker-envoy.yaml"
+            envoy_config = (
+                envoy_config_path.read_text() if envoy_config_path.exists() else None
+            )
 
-        self.assertEqual(result.returncode, 0, result.stderr)
-        return result, log_lines
+        self.assertEqual(result.returncode, returncode, result.stderr)
+        return result, log_lines, str(envoy_config_path), envoy_config
 
     def test_entrypoint_runs_startup_commands_before_execing_arguments(self):
-        result, log_lines = self._run_entrypoint("sh", "-c", "printf ready")
+        result, log_lines, _, envoy_config = self._run_entrypoint(
+            "sh", "-c", "printf ready"
+        )
 
         self.assertEqual(result.stdout, "ready")
         self.assertEqual(log_lines, self.STARTUP)
+        self.assertIsNone(envoy_config)
 
-    def test_entrypoint_starts_gunicorn_by_default(self):
-        _, log_lines = self._run_entrypoint()
+    def test_entrypoint_starts_envoy_and_gunicorn_by_default(self):
+        _, log_lines, envoy_config_path, envoy_config = self._run_entrypoint()
 
         self.assertEqual(
             log_lines,
             [
                 *self.STARTUP,
+                f"envoy --config-path {envoy_config_path} --concurrency 1"
+                " --disable-hot-restart --log-level warn",
                 "gunicorn --config python:lifetracker.gunicorn_conf"
                 " --worker-class gthread --threads 8"
                 " --access-logfile - --error-logfile - --timeout 120"
-                " --bind 0.0.0.0:8000 lifetracker.wsgi",
+                " --bind 127.0.0.1:8001 lifetracker.wsgi",
             ],
         )
+        self.assertNotIn("@", envoy_config.replace('"@type"', ""))
+        self.assertIn('address: "0.0.0.0"\n          port_value: 8000\n', envoy_config)
+        self.assertIn(
+            "address: 127.0.0.1\n                      port_value: 8001\n", envoy_config
+        )
 
-    def test_entrypoint_gunicorn_settings_come_from_env(self):
-        _, log_lines = self._run_entrypoint(
+    def test_entrypoint_settings_come_from_env(self):
+        _, log_lines, _, envoy_config = self._run_entrypoint(
             env={
+                "LIFETRACKER_GUNICORN_PORT": "9001",
                 "LIFETRACKER_GUNICORN_THREADS": "2",
                 "LIFETRACKER_GUNICORN_TIMEOUT": "600",
                 "LIFETRACKER_HOST": "127.0.0.1",
@@ -1903,8 +1948,94 @@ class DockerEntrypointTests(TestCase):
             "gunicorn --config python:lifetracker.gunicorn_conf"
             " --worker-class gthread --threads 2"
             " --access-logfile - --error-logfile - --timeout 600"
-            " --bind 127.0.0.1:9000 lifetracker.wsgi",
+            " --bind 127.0.0.1:9001 lifetracker.wsgi",
         )
+        self.assertIn(
+            'address: "127.0.0.1"\n          port_value: 9000\n', envoy_config
+        )
+        self.assertIn(
+            "address: 127.0.0.1\n                      port_value: 9001\n", envoy_config
+        )
+
+    def test_entrypoint_rejects_invalid_port(self):
+        for name in ("PORT", "LIFETRACKER_GUNICORN_PORT"):
+            for value in ("80a", "8000/", "0", "08000", "65536", "123456"):
+                with self.subTest(name=name, value=value):
+                    result, log_lines, _, envoy_config = self._run_entrypoint(
+                        env={name: value}, returncode=1
+                    )
+                    self.assertIn(
+                        f"docker-entrypoint.sh: invalid port: {value}\n",
+                        result.stderr,
+                    )
+                    self.assertEqual(log_lines, self.STARTUP)
+                    self.assertIsNone(envoy_config)
+
+    def test_entrypoint_stops_gunicorn_when_envoy_keeps_failing(self):
+        # Envoy exits at once every time. Gunicorn waits (up to 20 seconds)
+        # for SIGTERM, then logs whether the failure file exists.
+        result, log_lines, envoy_config_path, _ = self._run_entrypoint(
+            fakes={
+                "envoy": self.LOG_COMMAND + "exit 3\n",
+                "gunicorn": (
+                    self.LOG_COMMAND
+                    + 'trap \'if [ -e "$LIFETRACKER_ENVOY_FAILED_FILE" ]; then'
+                    ' echo gunicorn TERM, failed file >> "$COMMANDS_LOG_PATH"; fi;'
+                    " exit 0' TERM\n"
+                    "i=0\n"
+                    'while [ "$i" -lt 200 ]; do\n'
+                    "  sleep 0.1\n"
+                    "  i=$((i + 1))\n"
+                    "done\n"
+                    "exit 1\n"
+                ),
+            }
+        )
+
+        self.assertEqual(
+            [line for line in log_lines if line.startswith("envoy ")],
+            [
+                f"envoy --config-path {envoy_config_path} --concurrency 1"
+                " --disable-hot-restart --log-level warn"
+            ]
+            * 5,
+        )
+        self.assertEqual(log_lines[-1], "gunicorn TERM, failed file")
+        self.assertEqual(
+            result.stderr.count("docker-entrypoint.sh: envoy exited with status 3\n"),
+            5,
+        )
+        self.assertIn(
+            "docker-entrypoint.sh: envoy exited within a minute of starting"
+            " 5 times in a row; stopping gunicorn\n",
+            result.stderr,
+        )
+
+    def test_entrypoint_rejects_same_port_for_envoy_and_gunicorn(self):
+        result, log_lines, _, envoy_config = self._run_entrypoint(
+            env={"PORT": "8001", "LIFETRACKER_GUNICORN_PORT": "8001"}, returncode=1
+        )
+        self.assertIn(
+            "docker-entrypoint.sh: PORT and LIFETRACKER_GUNICORN_PORT must differ:"
+            " 8001\n",
+            result.stderr,
+        )
+        self.assertEqual(log_lines, self.STARTUP)
+        self.assertIsNone(envoy_config)
+
+    def test_entrypoint_rejects_host_that_is_not_an_ip_address(self):
+        for value in ("localhost", "0.0.0.0/"):
+            with self.subTest(value=value):
+                result, log_lines, _, envoy_config = self._run_entrypoint(
+                    env={"LIFETRACKER_HOST": value}, returncode=1
+                )
+                self.assertIn(
+                    "docker-entrypoint.sh: LIFETRACKER_HOST must be an IP address:"
+                    f" {value}\n",
+                    result.stderr,
+                )
+                self.assertEqual(log_lines, self.STARTUP)
+                self.assertIsNone(envoy_config)
 
 
 class SQLiteFileDatabaseTests(TestCase):
@@ -3296,6 +3427,27 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
             r'^203\.0\.113\.7 172\.16\.1\.2 - - \[.*\] "GET /admin/ HTTP/1\.1" 200',
         )
         self.assertRegex(logged([]), r"^- 172\.16\.1\.2 ")
+
+    def test_gunicorn_on_exit_exits_1_if_envoy_failed(self):
+        server = mock.Mock()
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "envoy-failed"
+            env = {"LIFETRACKER_ENVOY_FAILED_FILE": str(path)}
+            with mock.patch.dict(os.environ, env):
+                self.assertIsNone(gunicorn_conf.on_exit(server))
+                path.touch()
+                with self.assertRaises(SystemExit) as cm:
+                    gunicorn_conf.on_exit(server)
+
+        self.assertEqual(cm.exception.code, 1)
+        server.log.error.assert_called_once_with(
+            "Exiting with status 1, as Envoy kept failing"
+        )
+
+    def test_gunicorn_on_exit_without_envoy_failed_file_setting(self):
+        with mock.patch.dict(os.environ):
+            os.environ.pop("LIFETRACKER_ENVOY_FAILED_FILE", None)
+            self.assertIsNone(gunicorn_conf.on_exit(mock.Mock()))
 
     def test_gunicorn_when_ready_spawns_for_master(self):
         server = mock.Mock(pid=1234)
