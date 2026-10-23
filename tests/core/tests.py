@@ -1802,7 +1802,6 @@ class DockerEntrypointTests(TestCase):
         "python manage.py upgrade_legacy_db",
         "python manage.py migrate",
         "python manage.py ensure_superuser",
-        "python manage.py ensure_jwt_key",
     ]
 
     ENTRYPOINT_ENV = {
@@ -1848,9 +1847,8 @@ class DockerEntrypointTests(TestCase):
     def _run_entrypoint(self, *args, env=None, returncode=0, fakes=None):
         """Run the entrypoint with fake `python`, `envoy` and `gunicorn` on PATH.
 
-        Returns the completed process, the logged lines, the path the
-        entrypoint was to write Envoy's config to and that config (None if it
-        wasn't written).
+        Returns the completed process, the logged lines and the path the
+        entrypoint was to write Envoy's config to.
         """
         repo_root = next(
             parent
@@ -1894,30 +1892,31 @@ class DockerEntrypointTests(TestCase):
                 timeout=30,
             )
             log_lines = log_path.read_text().splitlines()
-            envoy_config_path = temp_path / "lifetracker-envoy.yaml"
-            envoy_config = (
-                envoy_config_path.read_text() if envoy_config_path.exists() else None
-            )
 
         self.assertEqual(result.returncode, returncode, result.stderr)
-        return result, log_lines, str(envoy_config_path), envoy_config
+        return result, log_lines, str(temp_path / "lifetracker-envoy.yaml")
 
-    def test_entrypoint_runs_startup_commands_before_execing_arguments(self):
-        result, log_lines, _, envoy_config = self._run_entrypoint(
-            "sh", "-c", "printf ready"
+    @staticmethod
+    def _envoy_config_command(config_path, host="0.0.0.0", port=8000, upstream=8001):
+        return (
+            f"python manage.py envoy_config envoy/envoy.yaml {config_path}"
+            f" --listen-host {host} --listen-port {port} --upstream-port {upstream}"
         )
 
+    def test_entrypoint_runs_startup_commands_before_execing_arguments(self):
+        result, log_lines, _ = self._run_entrypoint("sh", "-c", "printf ready")
+
         self.assertEqual(result.stdout, "ready")
-        self.assertEqual(log_lines, self.STARTUP)
-        self.assertIsNone(envoy_config)
+        self.assertEqual(log_lines, [*self.STARTUP, "python manage.py ensure_jwt_key"])
 
     def test_entrypoint_starts_envoy_and_gunicorn_by_default(self):
-        _, log_lines, envoy_config_path, envoy_config = self._run_entrypoint()
+        _, log_lines, envoy_config_path = self._run_entrypoint()
 
         self.assertEqual(
             log_lines,
             [
                 *self.STARTUP,
+                self._envoy_config_command(envoy_config_path),
                 f"envoy --config-path {envoy_config_path} --concurrency 1"
                 " --disable-hot-restart --log-level warn",
                 "gunicorn --config python:lifetracker.gunicorn_conf"
@@ -1926,14 +1925,9 @@ class DockerEntrypointTests(TestCase):
                 " --bind 127.0.0.1:8001 lifetracker.wsgi",
             ],
         )
-        self.assertNotIn("@", envoy_config.replace('"@type"', ""))
-        self.assertIn('address: "0.0.0.0"\n          port_value: 8000\n', envoy_config)
-        self.assertIn(
-            "address: 127.0.0.1\n                      port_value: 8001\n", envoy_config
-        )
 
     def test_entrypoint_settings_come_from_env(self):
-        _, log_lines, _, envoy_config = self._run_entrypoint(
+        _, log_lines, envoy_config_path = self._run_entrypoint(
             env={
                 "LIFETRACKER_GUNICORN_PORT": "9001",
                 "LIFETRACKER_GUNICORN_THREADS": "2",
@@ -1950,31 +1944,15 @@ class DockerEntrypointTests(TestCase):
             " --access-logfile - --error-logfile - --timeout 600"
             " --bind 127.0.0.1:9001 lifetracker.wsgi",
         )
-        self.assertIn(
-            'address: "127.0.0.1"\n          port_value: 9000\n', envoy_config
+        self.assertEqual(
+            log_lines[len(self.STARTUP)],
+            self._envoy_config_command(envoy_config_path, "127.0.0.1", 9000, 9001),
         )
-        self.assertIn(
-            "address: 127.0.0.1\n                      port_value: 9001\n", envoy_config
-        )
-
-    def test_entrypoint_rejects_invalid_port(self):
-        for name in ("PORT", "LIFETRACKER_GUNICORN_PORT"):
-            for value in ("80a", "8000/", "0", "08000", "65536", "123456"):
-                with self.subTest(name=name, value=value):
-                    result, log_lines, _, envoy_config = self._run_entrypoint(
-                        env={name: value}, returncode=1
-                    )
-                    self.assertIn(
-                        f"docker-entrypoint.sh: invalid port: {value}\n",
-                        result.stderr,
-                    )
-                    self.assertEqual(log_lines, self.STARTUP)
-                    self.assertIsNone(envoy_config)
 
     def test_entrypoint_stops_gunicorn_when_envoy_keeps_failing(self):
         # Envoy exits at once every time. Gunicorn waits (up to 20 seconds)
         # for SIGTERM, then logs whether the failure file exists.
-        result, log_lines, envoy_config_path, _ = self._run_entrypoint(
+        result, log_lines, envoy_config_path = self._run_entrypoint(
             fakes={
                 "envoy": self.LOG_COMMAND + "exit 3\n",
                 "gunicorn": (
@@ -2011,31 +1989,14 @@ class DockerEntrypointTests(TestCase):
             result.stderr,
         )
 
-    def test_entrypoint_rejects_same_port_for_envoy_and_gunicorn(self):
-        result, log_lines, _, envoy_config = self._run_entrypoint(
-            env={"PORT": "8001", "LIFETRACKER_GUNICORN_PORT": "8001"}, returncode=1
+    def test_entrypoint_stops_if_envoy_config_fails(self):
+        _, log_lines, envoy_config_path = self._run_entrypoint(
+            fakes={"python": self.LOG_COMMAND + '[ "$2" != envoy_config ] || exit 1\n'},
+            returncode=1,
         )
-        self.assertIn(
-            "docker-entrypoint.sh: PORT and LIFETRACKER_GUNICORN_PORT must differ:"
-            " 8001\n",
-            result.stderr,
+        self.assertEqual(
+            log_lines, [*self.STARTUP, self._envoy_config_command(envoy_config_path)]
         )
-        self.assertEqual(log_lines, self.STARTUP)
-        self.assertIsNone(envoy_config)
-
-    def test_entrypoint_rejects_host_that_is_not_an_ip_address(self):
-        for value in ("localhost", "0.0.0.0/"):
-            with self.subTest(value=value):
-                result, log_lines, _, envoy_config = self._run_entrypoint(
-                    env={"LIFETRACKER_HOST": value}, returncode=1
-                )
-                self.assertIn(
-                    "docker-entrypoint.sh: LIFETRACKER_HOST must be an IP address:"
-                    f" {value}\n",
-                    result.stderr,
-                )
-                self.assertEqual(log_lines, self.STARTUP)
-                self.assertIsNone(envoy_config)
 
 
 class SQLiteFileDatabaseTests(TestCase):

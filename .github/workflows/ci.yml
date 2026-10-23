@@ -60,8 +60,16 @@ jobs:
       - name: Check formatting with djlint
         run: just fmt-check-templates
 
+      # For tests/core/test_envoy.py, which runs the real Envoy, and fails
+      # rather than being skipped without it when LIFETRACKER_REQUIRE_ENVOY is
+      # set.
+      - name: Copy Envoy out of its Docker image
+        run: just envoy-bin
+
       - name: Run tests with coverage
         run: just coverage
+        env:
+          LIFETRACKER_REQUIRE_ENVOY: "1"
 
       # Codecov Test Analytics. Runs even if the tests failed, as that's when the
       # results matter most; placed straight after them so a later step's failure

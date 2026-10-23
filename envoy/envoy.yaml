@@ -1,11 +1,16 @@
 # Envoy, in front of gunicorn in the container (issue #178): Fly Proxy ->
-# Envoy on $PORT -> gunicorn on 127.0.0.1. Plain pass-through for now; checking
-# the JWT (issue #179) is to be added here.
+# Envoy on $PORT -> gunicorn on 127.0.0.1. It rejects every request without a
+# valid JWT from Django (lifetracker/core/jwt_auth.py), except the few in
+# lifetracker/core/auth_whitelist.py (issue #179), so nothing unauthenticated
+# reaches Django even if a view is ever exposed without login.
 #
-# This is a template: Envoy can't read environment variables, so
-# docker-entrypoint.sh replaces @LISTEN_HOST@, @LISTEN_PORT@ and
-# @UPSTREAM_PORT@ and runs Envoy with the result. There's no admin interface,
-# as nothing uses it.
+# This is a template: Envoy can't read environment variables, and the
+# whitelist, the JWT's issuer, audience and cookie, and where the public key
+# is all come from Django, so docker-entrypoint.sh runs `manage.py
+# envoy_config` (lifetracker/core/envoy_config.py), which replaces each
+# placeholder (a capitalised name between at signs) with a JSON value (JSON
+# is YAML too), and runs Envoy with the result.
+# There's no admin interface, as nothing uses it.
 
 overload_manager:
   resource_monitors:
@@ -21,7 +26,7 @@ static_resources:
     - name: http
       address:
         socket_address:
-          address: "@LISTEN_HOST@"
+          address: @LISTEN_HOST@
           port_value: @LISTEN_PORT@
       filter_chains:
         - filters:
@@ -29,6 +34,17 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: ingress_http
+                # The JWT rules below match the path after this, as does the
+                # route, and it's what gunicorn gets: dot segments ("/./",
+                # "/../", "%2e") removed, percent-encoded unreserved
+                # characters decoded, repeated slashes merged, and a request
+                # with an escaped slash ("%2F", "%5C") rejected with a 400,
+                # since Django would decode it into a separator. So no
+                # spelling of a path can match a whitelist entry but reach a
+                # different view, or the reverse.
+                normalize_path: true
+                merge_slashes: true
+                path_with_escaped_slashes_action: REJECT_REQUEST
                 # Fly Proxy is the one trusted hop: it terminates TLS and sets
                 # X-Forwarded-Proto and X-Forwarded-For. With this, Envoy
                 # passes its X-Forwarded-Proto on (Django trusts it with
@@ -61,14 +77,67 @@ static_resources:
                   # activity, so an idle keep-alive connection held open by
                   # Fly Proxy would otherwise keep the Machine running.
                   idle_timeout: 5s
+                # jwt_authn answers a request without a valid JWT with a 401
+                # (or a 403).
+                # Turn that into a redirect to the login page, with the
+                # request's path and query string as `next` (the Lua filter
+                # below percent-encodes it), as Django's admin would, so an
+                # expired session still lands somewhere usable. A request with
+                # an Authorization header isn't from a browser, so gets the
+                # 401. This applies only to replies from Envoy itself, never to
+                # gunicorn's.
+                local_reply_config:
+                  mappers:
+                    - filter:
+                        and_filter:
+                          filters:
+                            # 403 for a valid token for another audience.
+                            - or_filter:
+                                filters:
+                                  - status_code_filter:
+                                      comparison:
+                                        op: EQ
+                                        value:
+                                          default_value: 401
+                                          runtime_key: lifetracker.jwt_401
+                                  - status_code_filter:
+                                      comparison:
+                                        op: EQ
+                                        value:
+                                          default_value: 403
+                                          runtime_key: lifetracker.jwt_403
+                            - header_filter:
+                                header:
+                                  name: authorization
+                                  present_match: true
+                                  invert_match: true
+                      status_code: 302
+                      headers_to_add:
+                        - header:
+                            key: location
+                            value: @LOGIN_REDIRECT@
+                          append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                      body:
+                        inline_string: ""
                 access_log:
                   # Gunicorn logs every request it gets, so Envoy logs only
-                  # the ones it answered itself or failed to pass on (any with
-                  # a response flag, e.g. UF: gunicorn refused the connection),
-                  # with the client's IP from Fly Proxy first, as gunicorn does.
+                  # the ones it answered itself or failed to pass on: any with
+                  # a response flag (e.g. UF: gunicorn refused the connection)
+                  # or that jwt_authn turned away (it records why in its
+                  # metadata, which sets no flag), with the client's IP from
+                  # Fly Proxy first, as gunicorn does.
                   - name: envoy.access_loggers.stdout
                     filter:
-                      response_flag_filter: {}
+                      or_filter:
+                        filters:
+                          - response_flag_filter: {}
+                          - metadata_filter:
+                              matcher:
+                                filter: envoy.filters.http.jwt_authn
+                                path:
+                                  - key: jwt_failure
+                                value:
+                                  present_match: true
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
                       log_format:
@@ -104,6 +173,58 @@ static_resources:
                                 base_interval: 0.1s
                                 max_interval: 1s
                 http_filters:
+                  # Percent-encodes the (normalised) path and query string for
+                  # the login redirect's `next`, as nothing in Envoy's own
+                  # formatters can. Everything but unreserved characters and
+                  # "/" is encoded, as Django's redirect_to_login does.
+                  - name: envoy.filters.http.lua
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+                      default_source_code:
+                        inline_string: |
+                          function envoy_on_request(handle)
+                            local encoded = string.gsub(
+                              handle:headers():get(":path"),
+                              "[^A-Za-z0-9%-._~/]",
+                              function(c)
+                                return string.format("%%%02X", string.byte(c))
+                              end
+                            )
+                            handle:streamInfo():dynamicMetadata():set(
+                              "lifetracker", "next", encoded
+                            )
+                          end
+                  # Checks the JWT from the cookie Django sets or, for a future
+                  # API or MCP client, an Authorization: Bearer header: its
+                  # Ed25519 signature against the public key Django writes
+                  # (read once, at startup: Django only makes a new key when
+                  # the old one is missing, which only happens before Envoy
+                  # starts), its exp (with jwt_authn's default 60 seconds'
+                  # leeway), issuer and audience. Django also checks the cookie
+                  # against the session, so this needn't. The cookie is passed
+                  # on to Django either way.
+                  - name: envoy.filters.http.jwt_authn
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                      providers:
+                        django:
+                          issuer: @JWT_ISSUER@
+                          audiences: [@JWT_AUDIENCE@]
+                          local_jwks:
+                            filename: @JWKS_FILE@
+                          from_cookies: [@JWT_COOKIE@]
+                          from_headers:
+                            - name: authorization
+                              value_prefix: "Bearer "
+                          forward: true
+                          # For the access log's filter.
+                          failed_status_in_metadata: jwt_failure
+                      # The first rule whose match fits applies. The whitelist
+                      # comes first, one rule per path and method, needing no
+                      # JWT (one that's there isn't checked, so a stale cookie
+                      # can't keep anyone from the login page). The last rule
+                      # matches every path the route does, needing the JWT.
+                      rules: @JWT_RULES@
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

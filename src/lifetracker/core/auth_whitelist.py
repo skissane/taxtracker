@@ -1,10 +1,10 @@
 """Requests that need no login, for the authenticating front proxy.
 
-The authenticating front proxy (issue #176) is to let these through without
+The authenticating front proxy (issue #176), Envoy, lets these through without
 the JWT that ``jwt_auth`` issues, so someone without a session can still log in.
-Everything else needs one. The proxy's config is to be generated from
+Everything else needs one. ``envoy_config`` generates the proxy's rules from
 ``auth_whitelist()`` (the ``auth_whitelist`` management command prints it as
-JSON), so it can't drift from the URLconf. ``jwt_auth.JWTCookieMiddleware``
+JSON), so they can't drift from the URLconf. ``jwt_auth.JWTCookieMiddleware``
 checks the cookie on these too, but only for a session that has a token, which
 it logs out if the cookie doesn't match; anyone else gets through.
 

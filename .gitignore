@@ -39,3 +39,6 @@ junit.xml
 
 # Docker image saved by CI for the publish job
 lifetracker-image.tar
+
+# Envoy copied from its Docker image by `just envoy-bin`, for its tests
+.envoy/

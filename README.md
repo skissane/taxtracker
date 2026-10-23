@@ -83,14 +83,14 @@ It also mounts your host config directory (`~/.config/lifetracker`, or `$LIFETRA
 Before starting the container it runs `manage.py check` and `manage.py ensure_jwt_key` on the host, which create the directory, the secret key and the JWT key pair as you if they don't exist yet; that way Docker never creates them as root.
 The database is still separate: the container's lives in the `lifetracker-data` volume, not in the repo.
 
-The container startup path runs `upgrade_legacy_db`, then `migrate`, then `ensure_superuser`, then `ensure_jwt_key` (see [Front proxy JWT](#front-proxy-jwt)), then starts the Gunicorn WSGI server on `127.0.0.1:8001` behind an [Envoy](https://www.envoyproxy.io/) reverse proxy on `0.0.0.0:${PORT:-8000}`.
-Envoy passes every request through unchanged for now; it's there for the planned [front proxy](#front-proxy-jwt), and as Gunicorn listens only on the container's loopback interface, nothing outside the container can get to it without going through Envoy.
+The container startup path runs `upgrade_legacy_db`, then `migrate`, then `ensure_superuser`, then `envoy_config` (which writes Envoy's config and creates the JWT key pair if it's missing; see [Front proxy JWT](#front-proxy-jwt)), then starts the Gunicorn WSGI server on `127.0.0.1:8001` behind an [Envoy](https://www.envoyproxy.io/) reverse proxy on `0.0.0.0:${PORT:-8000}`.
+Envoy turns away requests without a valid login token (see [Front proxy JWT](#front-proxy-jwt)), and as Gunicorn listens only on the container's loopback interface, nothing outside the container can get to it without going through Envoy.
 If Envoy exits, it's restarted a second later; Gunicorn is the container's main process, so the container ends when Gunicorn does.
 If Envoy keeps failing (5 exits in a row, each within a minute of starting), the container stops Gunicorn and exits with status 1, so Fly records a failure and restarts the Machine.
 Requests that arrive while Gunicorn is still starting wait for it (for up to about 10 seconds).
 Envoy puts no time limit on a request, so long downloads and uploads aren't cut off.
 `LIFETRACKER_HOST` (an IP address) and `PORT` set where Envoy listens, and `LIFETRACKER_GUNICORN_PORT` Gunicorn's port on loopback.
-Envoy's config is the template `envoy/envoy.yaml`; Envoy logs only requests it answered itself, such as a 503 when Gunicorn couldn't be reached, as Gunicorn logs the rest.
+Envoy's config is the template `envoy/envoy.yaml`, filled in at startup; Envoy logs only requests it answered itself, such as a 503 when Gunicorn couldn't be reached or a redirect to the login page for want of a valid token (with the reason), as Gunicorn logs the rest.
 Gunicorn's worker timeout is 120 seconds rather than its default 30, since ZIP exports, DB backups and archive imports run in the request and can be slow for a large database.
 Change it with `LIFETRACKER_GUNICORN_TIMEOUT` (in seconds).
 It uses gthread workers with 8 threads (`LIFETRACKER_GUNICORN_THREADS`) rather than a single sync worker, which a browser's idle spare connection can tie up, leaving other requests waiting.
@@ -197,6 +197,7 @@ Instead, the Machine is stopped by the idle watchdog (`src/lifetracker/core/idle
 It counts established connections to the app's port (Envoy's) and SSH's (port 22) in `/proc/net/tcp` and `/proc/net/tcp6`.
 Envoy closes a connection after it's been idle for 5 seconds (then waits up to 5 more for it to close), so Fly Proxy holding one open doesn't keep the Machine running.
 Most HTTP requests are over between two checks, so gunicorn's workers also touch a file after every request, which counts as activity too.
+Requests Envoy turns away for want of a login token never reach gunicorn, so they don't touch it; a scanner probing the site doesn't keep the Machine up beyond the connections it holds open.
 Once there's been no activity for a while, the watchdog stops gunicorn gracefully.
 A clean exit leaves the Machine stopped until the next request starts it.
 It's off unless `LIFETRACKER_IDLE_STOP` is set:
@@ -396,9 +397,12 @@ Serve it over HTTPS through a proxy that sets `X-Forwarded-Proto: https`, so the
 
 ## Front proxy JWT
 
-An authenticating proxy in front of the app is planned ([#176](https://github.com/skissane/taxtracker/issues/176)): it will turn away any request that doesn't carry a valid token from the app, apart from the few that logging in needs, so even a page accidentally left open without login couldn't be reached.
-The proxy, Envoy, is already in the Docker image, but doesn't check tokens yet ([#179](https://github.com/skissane/taxtracker/issues/179)).
-The app already issues that token.
+In the Docker image (so on Fly.io too), an authenticating proxy, Envoy, sits in front of the app ([#176](https://github.com/skissane/taxtracker/issues/176)): it turns away any request that doesn't carry a valid token from the app, apart from the few that logging in needs and the health check, so even a page accidentally left open without login couldn't be reached.
+A browser without a valid token is redirected to the login page, which then sends it back to the page it asked for, as the app itself would; a request with an `Authorization` header gets a 401 instead.
+Envoy checks the token's signature, expiry, issuer and audience; it takes it from the cookie below or from an `Authorization: Bearer` header.
+Paths are normalised first (`..`, `.` and repeated slashes resolved, and requests with an encoded `/` or `\` rejected), so no spelling of a path gets past the check that its plain form wouldn't.
+`./run.sh` runs the app without Envoy.
+
 Whenever you're logged in (with a password or with Google), it sets a `lifetracker_jwt` cookie holding a signed token that expires when your session does, and renews it whenever the session's expiry moves forward; logging out deletes it.
 The app also checks the cookie itself: a logged-in session that comes back without its own token is logged out, so a stolen session cookie alone isn't enough.
 Sessions from before this, which have no token yet, just get one.
@@ -411,6 +415,9 @@ The requests that need no login are listed by:
 ```bash
 uv run python manage.py auth_whitelist
 ```
+
+Envoy's config is generated from the same list at startup, by `manage.py envoy_config`, so the two can't drift apart.
+Envoy reads the public key when it starts, so a new key only takes effect when the container restarts (which a new key needs anyway, as it's only created at startup).
 
 ## Command-line utilities
 
@@ -436,6 +443,7 @@ The main ones:
 | `just check` | Runs the whitespace, `screenshots/`, ruff and djlint checks, without fixing anything. |
 | `just fix` | Fixes lint issues and reformats code and templates. |
 | `just coverage` | Runs the tests and prints a coverage report. |
+| `just envoy-bin` | Copies the `envoy` binary out of the Envoy Docker image to `.envoy/envoy`, for the tests that run requests through Envoy, which are skipped without it (Linux only). |
 | `just screenshots` | Saves light and dark mode screenshots of admin pages to `screenshots/`, using a headless Chromium it installs with Playwright. |
 | `just ci` | Runs everything CI runs, including building the Docker image. |
 
