@@ -127,10 +127,12 @@ jobs:
         with:
           just-version: "1.58.0"
 
-      # --with-deps also installs Chromium's system libraries, which the runner
-      # may lack; just screenshots' own `playwright install` is then a no-op.
+      # No --with-deps: the runner image already has the system libraries
+      # headless Chromium needs, and installing them with apt sometimes took
+      # minutes when the Ubuntu mirror was slow. A step of its own so its time
+      # shows separately; just screenshots' `playwright install` is a no-op.
       - name: Install Playwright Chromium
-        run: uv run --group screenshots playwright install --with-deps chromium
+        run: uv run --group screenshots playwright install chromium
 
       # On a PR, the checkout is a merge commit; show the PR's head commit in
       # the admin header instead, the one the screenshot comment names.
