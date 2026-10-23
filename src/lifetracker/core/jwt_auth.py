@@ -1,10 +1,11 @@
 """A JWT cookie for logged-in sessions, for the authenticating front proxy.
 
-The proxy (issue #176) is to reject every request without a valid JWT, except
-the few in ``auth_whitelist``, so nothing unauthenticated reaches Django even if
-a view is ever exposed without login. ``JWTCookieMiddleware`` issues that JWT:
-whenever there's a logged-in session (password or Google SSO login alike), it
-sets the ``JWT_COOKIE_NAME`` cookie, and clears the cookie when there isn't one.
+The proxy (issue #176), Envoy, rejects every request without a valid JWT,
+except the few in ``auth_whitelist`` (see ``envoy_config``), so nothing
+unauthenticated reaches Django even if a view is ever exposed without login.
+``JWTCookieMiddleware`` issues that JWT: whenever there's a logged-in session
+(password or Google SSO login alike), it sets the ``JWT_COOKIE_NAME`` cookie,
+and clears the cookie when there isn't one.
 
 The token is signed with an Ed25519 key (``EdDSA``), generated on first use and
 kept in ``LIFETRACKER_JWT_PRIVATE_KEY_FILE`` (by default in the config

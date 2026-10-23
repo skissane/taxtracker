@@ -101,9 +101,11 @@ docker-build:
 
 # docker-smoke runs the image as production does (DEBUG off), with a throwaway
 # data volume, waits up to a minute for the login page through the published
-# port, then checks from inside the container that Envoy's port answers on the
-# container's own address and gunicorn's (8001) doesn't. It prints the
-# container's log if anything fails.
+# port, checks that /healthz/ answers without a login and that Envoy, not
+# Django (which would 404), redirects a request for any other page without a
+# JWT to the login page, then checks from inside the container that Envoy's
+# port answers on the container's own address and gunicorn's (8001) doesn't.
+# It prints the container's log if anything fails.
 
 # Start the image from docker-build and check requests reach Django through Envoy
 docker-smoke:
@@ -112,7 +114,8 @@ docker-smoke:
     name=lifetracker-smoke
     docker run -d --rm --name "$name" -p 127.0.0.1::8000 -e LIFETRACKER_ALLOWED_HOSTS=127.0.0.1 -e LIFETRACKER_INITIAL_ADMIN_PASSWORD=smoke-test lifetracker >/dev/null
     trap 'status=$?; [ "$status" -eq 0 ] || docker logs "$name"; docker rm -f "$name" >/dev/null' EXIT
-    url="http://$(docker port "$name" 8000/tcp | head -n 1)/admin/login/"
+    base="http://$(docker port "$name" 8000/tcp | head -n 1)"
+    url="$base/admin/login/"
     i=0
     until curl -fs -o /dev/null "$url"; do
       i=$((i + 1))
@@ -122,6 +125,12 @@ docker-smoke:
       fi
       sleep 1
     done
+    curl -fs -o /dev/null "$base/healthz/"
+    redirect="$(curl -s -o /dev/null -w '%{http_code} %header{location}' "$base/no-such-page/?a=b")"
+    if [ "$redirect" != "302 /admin/login/?next=/no-such-page/%3Fa%3Db" ]; then
+      echo "docker-smoke: expected Envoy's login redirect, got: $redirect" >&2
+      exit 1
+    fi
     docker exec "$name" python -c 'import socket; ip = socket.gethostbyname(socket.gethostname()); socket.create_connection((ip, 8000)).close(); s = socket.socket(); assert s.connect_ex((ip, 8001)) != 0, "gunicorn is reachable from outside the container"'
     echo "docker-smoke: OK"
 

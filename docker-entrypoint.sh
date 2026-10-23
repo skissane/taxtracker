@@ -35,49 +35,26 @@ cd "${LIFETRACKER_APP_DIR:-/app}"
 python manage.py upgrade_legacy_db
 python manage.py migrate
 python manage.py ensure_superuser
-python manage.py ensure_jwt_key
 
 if [ "$#" -gt 0 ]; then
+  python manage.py ensure_jwt_key
   exec "$@"
 fi
 
 # Envoy listens on $PORT and passes requests on to gunicorn, which listens
 # only on loopback, so nothing outside the container reaches it directly (issue
-# #178; envoy/envoy.yaml). Envoy can't read environment variables, so fill in
-# its config template here.
-listen_host="${LIFETRACKER_HOST:-0.0.0.0}"
-listen_port="${PORT:-8000}"
+# #178). It rejects requests without a valid JWT from Django, except a few
+# that need no login (issue #179; envoy/envoy.yaml). Envoy can't read
+# environment variables, and its config needs Django's settings and URLconf,
+# so `manage.py envoy_config` writes it from the template, after checking the
+# settings below. It also creates the JWT signing key and the JWKS Envoy reads
+# if they're missing, as ensure_jwt_key does when there are arguments.
 gunicorn_port="${LIFETRACKER_GUNICORN_PORT:-8001}"
-for port in "$listen_port" "$gunicorn_port"; do
-  # 1 to 65535: digits only, no leading zero (Envoy's YAML parser could take
-  # one as octal), and at most 5 of them, so the shell can compare it.
-  case "$port" in
-    0* | *[!0-9]* | ??????*)
-      echo "docker-entrypoint.sh: invalid port: $port" >&2
-      exit 1
-      ;;
-  esac
-  if [ "$port" -gt 65535 ]; then
-    echo "docker-entrypoint.sh: invalid port: $port" >&2
-    exit 1
-  fi
-done
-if [ "$listen_port" -eq "$gunicorn_port" ]; then
-  echo "docker-entrypoint.sh: PORT and LIFETRACKER_GUNICORN_PORT must differ: $listen_port" >&2
-  exit 1
-fi
-case "$listen_host" in
-  *[!0-9A-Fa-f.:]*)
-    echo "docker-entrypoint.sh: LIFETRACKER_HOST must be an IP address: $listen_host" >&2
-    exit 1
-    ;;
-esac
 envoy_config="${TMPDIR:-/tmp}/lifetracker-envoy.yaml"
-sed \
-  -e "s/@LISTEN_HOST@/$listen_host/" \
-  -e "s/@LISTEN_PORT@/$listen_port/" \
-  -e "s/@UPSTREAM_PORT@/$gunicorn_port/" \
-  envoy/envoy.yaml >"$envoy_config"
+python manage.py envoy_config envoy/envoy.yaml "$envoy_config" \
+  --listen-host "${LIFETRACKER_HOST:-0.0.0.0}" \
+  --listen-port "${PORT:-8000}" \
+  --upstream-port "$gunicorn_port"
 
 # Run Envoy in the background, restarting it a second after it exits. This
 # process becomes gunicorn below, the container's main process, so gunicorn
