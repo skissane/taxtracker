@@ -10,8 +10,10 @@ dependencies = [
     "django>=6.1.2",
     "django-google-sso>=10.0.0",
     "gunicorn>=26.2.0",
+    "maxminddb>=3.2.0",
     "pdfkit>=1.0.0",
     "pyjwt[crypto]>=2.15.1",
+    "requests>=2.34.2",
     "whitenoise>=6.12.0",
 ]
 

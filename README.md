@@ -420,6 +420,28 @@ uv run python manage.py auth_whitelist
 Envoy's config is generated from the same list at startup, by `manage.py envoy_config`, so the two can't drift apart.
 Envoy reads the public key when it starts, so a new key only takes effect when the container restarts (which a new key needs anyway, as it's only created at startup).
 
+## Client IPs
+
+In the Docker image, the app keeps a lasting record of where requests come from ([#201](https://github.com/skissane/taxtracker/issues/201)), so unexpected access stands out; `fly logs` keeps only a short window.
+Envoy writes a line for every request, including the ones it turns away, which never reach the app.
+A small process started with gunicorn reads those every few seconds and adds them up per client IP: when it was first and last seen, how many requests it made, how many Envoy turned away for want of a login token, how many had a valid token (so came from a logged-in browser), its last request, and its country and network (ASN).
+The IP is the one Fly Proxy reports in its `Fly-Client-IP` header (Envoy's peer without it, e.g. under `just docker-run`).
+`./run.sh` runs no Envoy, so records nothing.
+
+The record is a SQLite file of its own, `client_ips.sqlite3` in `LIFETRACKER_DATA_DIR` (so `/data` on the Fly volume), not part of the main database or its backups.
+Set `LIFETRACKER_CLIENT_IP_DB` to put it somewhere else, or to `off` to stop recording.
+
+Countries and networks come from [DB-IP](https://db-ip.com)'s free Lite databases (CC BY 4.0), which need no account.
+At startup, the process downloads this month's into `geoip/` beside the record (`LIFETRACKER_GEOIP_DIR` to change that) unless it already has them, falling back to last month's early in a month before the new ones are out, and deletes older ones.
+Each IP is looked up when first seen, and keeps that location; IPs seen while the databases were missing are looked up once they're there.
+`LIFETRACKER_GEOIP_DOWNLOAD=0` turns the download off; to download them by hand:
+
+```bash
+./flyssh.sh python manage.py update_geoip
+```
+
+Superusers can see the record in the admin, from the **Client IPs** link in the top bar: the networks that logged-in requests came from, then the IPs seen most recently, optionally only those with logged-in requests.
+
 ## Command-line utilities
 
 The `lifetracker-cli` command has a few standalone helpers for preparing files to attach, separate from the web app: extracting attachments from `.eml` files and PDFs from Fidelity `.har` files, filtering ZIPs, converting ZIPs of `.eml` files to PDF or text, and grouping lists of dates by financial year.

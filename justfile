@@ -104,7 +104,10 @@ docker-build:
 # port, checks that /healthz/ answers without a login and that Envoy, not
 # Django (which would 404), redirects a request for any other page without a
 # JWT to the login page, then checks from inside the container that Envoy's
-# port answers on the container's own address and gunicorn's (8001) doesn't.
+# port answers on the container's own address and gunicorn's (8001) doesn't,
+# and waits up to 30 seconds for the client IP collector to record the
+# requests (without downloading the DB-IP databases, to spare db-ip.com a
+# download every CI run).
 # It prints the container's log if anything fails.
 
 # Start the image from docker-build and check requests reach Django through Envoy
@@ -112,7 +115,7 @@ docker-smoke:
     #!/usr/bin/env sh
     set -eu
     name=lifetracker-smoke
-    docker run -d --rm --name "$name" -p 127.0.0.1::8000 -e LIFETRACKER_ALLOWED_HOSTS=127.0.0.1 -e LIFETRACKER_INITIAL_ADMIN_PASSWORD=smoke-test lifetracker >/dev/null
+    docker run -d --rm --name "$name" -p 127.0.0.1::8000 -e LIFETRACKER_ALLOWED_HOSTS=127.0.0.1 -e LIFETRACKER_INITIAL_ADMIN_PASSWORD=smoke-test -e LIFETRACKER_GEOIP_DOWNLOAD=0 lifetracker >/dev/null
     trap 'status=$?; [ "$status" -eq 0 ] || docker logs "$name"; docker rm -f "$name" >/dev/null' EXIT
     base="http://$(docker port "$name" 8000/tcp | head -n 1)"
     url="$base/admin/login/"
@@ -132,6 +135,15 @@ docker-smoke:
       exit 1
     fi
     docker exec "$name" python -c 'import socket; ip = socket.gethostbyname(socket.gethostname()); socket.create_connection((ip, 8000)).close(); s = socket.socket(); assert s.connect_ex((ip, 8001)) != 0, "gunicorn is reachable from outside the container"'
+    i=0
+    until docker exec -u lifetracker "$name" python -c 'import sqlite3, sys; sys.exit(not sqlite3.connect("file:/data/client_ips.sqlite3?mode=ro", uri=True).execute("SELECT count(*) FROM client_ip").fetchone()[0])' 2>/dev/null; do
+      i=$((i + 1))
+      if [ "$i" -ge 30 ]; then
+        echo "docker-smoke: no client IPs recorded" >&2
+        exit 1
+      fi
+      sleep 1
+    done
     echo "docker-smoke: OK"
 
 # Host config directory (secret key, initial admin password) that `just

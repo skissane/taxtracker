@@ -1,0 +1,149 @@
+{% extends "admin/base_site.html" %}
+
+{% load i18n static %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'core/admin_pages.css' %}">
+  <style>
+  .lt-client-ips .lt-num {
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .lt-client-ips .lt-nowrap {
+    white-space: nowrap;
+  }
+
+  .lt-client-ips .lt-detail {
+    overflow-wrap: anywhere;
+  }
+  </style>
+{% endblock extrastyle %}
+{% block extrahead %}
+  {{ block.super }}
+  <script src="{% static 'core/local_times.js' %}" defer></script>
+{% endblock extrahead %}
+{% block breadcrumbs %}
+  <ol class="breadcrumbs">
+    <li><a href="{% url 'admin:index' %}">{% trans "Home" %}</a></li>
+    <li aria-current="page">Client IPs</li>
+  </ol>
+{% endblock breadcrumbs %}
+{% block content %}
+  {% if config.db_path is None %}
+    <p class="errornote">
+      Client IPs aren't recorded: set <code>LIFETRACKER_CLIENT_IP_DB</code> or <code>LIFETRACKER_DATA_DIR</code>.
+    </p>
+  {% else %}
+    {% if error %}<p class="errornote">{{ error }}</p>{% endif %}
+    <p>
+      Every request Envoy got, by client IP, from <code>{{ config.db_path }}</code>.
+      Rejected requests had no valid JWT, so Envoy turned them away; logged-in ones had one.
+      <span data-lt-local-only
+            hidden>Times are in your browser's time zone, <span data-lt-time-zone>local time</span>.</span>
+    </p>
+    <p>
+      {% if geoip_files %}
+        Locations from {{ geoip_files|join:", " }} (<a href="https://db-ip.com">IP Geolocation by DB-IP</a>).
+      {% else %}
+        No DB-IP databases in <code>{{ config.geoip_dir }}</code> yet, so no locations: run <code>manage.py update_geoip</code>.
+      {% endif %}
+    </p>
+    {% if ips is None %}
+      {% if not error %}<p>Nothing recorded yet.</p>{% endif %}
+    {% else %}
+      <h2>Networks with logged-in requests</h2>
+      {% if networks %}
+        <table class="lt-client-ips">
+          <thead>
+            <tr>
+              <th scope="col">ASN</th>
+              <th scope="col">Network</th>
+              <th scope="col">Countries</th>
+              <th scope="col" class="lt-num">IPs</th>
+              <th scope="col" class="lt-num">Logged-in requests</th>
+              <th scope="col">First logged in</th>
+              <th scope="col">Last logged in</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for network in networks %}
+              <tr>
+                <td class="lt-nowrap">
+                  {% if network.asn is not None %}
+                    AS{{ network.asn }}
+                  {% else %}
+                    Unknown
+                  {% endif %}
+                </td>
+                <td>{{ network.as_org|default:"" }}</td>
+                <td>{{ network.countries|default:"" }}</td>
+                <td class="lt-num">{{ network.ips }}</td>
+                <td class="lt-num">{{ network.logged_in }}</td>
+                <td class="lt-nowrap">
+                  <time data-lt-local datetime="{{ network.first_logged_in }}">{{ network.first_logged_in }}</time>
+                </td>
+                <td class="lt-nowrap">
+                  <time data-lt-local datetime="{{ network.last_logged_in }}">{{ network.last_logged_in }}</time>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>None yet.</p>
+      {% endif %}
+      <h2>IPs</h2>
+      <p>
+        {% if logged_in_only %}
+          Only IPs with logged-in requests ({{ total }}; <a href="?">show all</a>).
+        {% else %}
+          All IPs ({{ total }}; <a href="?logged_in=1">only those with logged-in requests</a>).
+        {% endif %}
+        {% if total > limit %}Showing the {{ limit }} seen most recently.{% endif %}
+      </p>
+      {% if ips %}
+        <table class="lt-client-ips">
+          <thead>
+            <tr>
+              <th scope="col">IP</th>
+              <th scope="col">Country</th>
+              <th scope="col">Network</th>
+              <th scope="col" class="lt-num">Requests</th>
+              <th scope="col" class="lt-num">Rejected</th>
+              <th scope="col" class="lt-num">Logged in</th>
+              <th scope="col">First seen</th>
+              <th scope="col">Last seen</th>
+              <th scope="col">Last request</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ip in ips %}
+              <tr>
+                <td class="lt-nowrap">{{ ip.ip }}</td>
+                <td>
+                  {% if ip.country %}<abbr title="{{ ip.country_name|default:ip.country }}">{{ ip.country }}</abbr>{% endif %}
+                </td>
+                <td>{% if ip.asn is not None %}AS{{ ip.asn }} {{ ip.as_org|default:"" }}{% endif %}</td>
+                <td class="lt-num">{{ ip.requests }}</td>
+                <td class="lt-num">{{ ip.rejected }}</td>
+                <td class="lt-num">{{ ip.logged_in }}</td>
+                <td class="lt-nowrap">
+                  <time data-lt-local datetime="{{ ip.first_seen }}">{{ ip.first_seen }}</time>
+                </td>
+                <td class="lt-nowrap">
+                  <time data-lt-local datetime="{{ ip.last_seen }}">{{ ip.last_seen }}</time>
+                </td>
+                <td class="lt-detail">
+                  <code>{{ ip.last_request }}</code> {{ ip.last_status|default:"" }}
+                  {% if ip.last_user_agent %}<br>{{ ip.last_user_agent }}{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    {% endif %}
+  {% endif %}
+{% endblock content %}

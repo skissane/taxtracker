@@ -34,7 +34,7 @@ from django.test import SimpleTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from lifetracker.core import envoy_config, jwt_auth
+from lifetracker.core import client_ips, envoy_config, jwt_auth
 from lifetracker.core.auth_whitelist import auth_whitelist
 
 REPO_ROOT = next(
@@ -52,6 +52,7 @@ def _render(**kwargs):
             "listen_host": "0.0.0.0",
             "listen_port": 8000,
             "upstream_port": 8001,
+            "request_log": "/dev/null",
             **kwargs,
         },
     )
@@ -68,6 +69,10 @@ class EnvoyConfigRenderTests(SimpleTestCase):
         self.assertIn(f'issuer: "{jwt_auth.JWT_ISSUER}"', config)
         self.assertIn(f'audiences: ["{jwt_auth.JWT_AUDIENCE}"]', config)
         self.assertIn(f'from_cookies: ["{jwt_auth.JWT_COOKIE_NAME}"]', config)
+
+    def test_request_log(self):
+        config = _render(request_log=Path("/tmp/requests.jsonl"))
+        self.assertIn('path: "/tmp/requests.jsonl"', config)
 
     def test_jwks_file_comes_from_settings(self):
         with override_settings(LIFETRACKER_JWT_JWKS_FILE=Path('/keys/"odd".json')):
@@ -134,7 +139,11 @@ class EnvoyConfigRenderTests(SimpleTestCase):
     def test_rejects_unknown_placeholder(self):
         with self.assertRaisesMessage(ValueError, "@NOPE@"):
             envoy_config.render(
-                "x: @NOPE@\n", listen_host="::", listen_port=1, upstream_port=2
+                "x: @NOPE@\n",
+                listen_host="::",
+                listen_port=1,
+                upstream_port=2,
+                request_log="/dev/null",
             )
 
 
@@ -161,6 +170,29 @@ class EnvoyConfigCommandTests(SimpleTestCase):
                 )
             self.assertEqual(output.read_text(), expected)
             self.assertTrue(jwks.exists())
+
+    def test_request_log_when_recording_client_ips(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            temp = Path(tempdir)
+            request_log = temp / "requests.jsonl"
+            request_log.write_text("last run's\n")
+            output = temp / "envoy.yaml"
+            environ = {
+                "LIFETRACKER_CLIENT_IP_DB": str(temp / "client_ips.sqlite3"),
+                "LIFETRACKER_CLIENT_IP_REQUEST_LOG": str(request_log),
+            }
+            with mock.patch.dict(os.environ, environ):
+                call_command(
+                    "envoy_config",
+                    str(REPO_ROOT / "envoy" / "envoy.yaml"),
+                    str(output),
+                    "--listen-host=127.0.0.1",
+                    "--listen-port=9000",
+                    "--upstream-port=9001",
+                )
+            self.assertIn(f'path: "{request_log}"', output.read_text())
+            # Deleted, so the collector doesn't count last run's lines again.
+            self.assertFalse(request_log.exists())
 
     def test_reports_bad_settings(self):
         with tempfile.TemporaryDirectory() as tempdir:
@@ -260,6 +292,11 @@ class EnvoyAuthTests(SimpleTestCase):
         tempdir = tempfile.TemporaryDirectory()
         cls.addClassCleanup(tempdir.cleanup)
         temp = Path(tempdir.name)
+        # Separate from the read-only directory, as Envoy writes it.
+        log_tempdir = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(log_tempdir.cleanup)
+        log_dir = Path(log_tempdir.name)
+        cls.request_log = log_dir / "requests.jsonl"
         cls.key_settings = override_settings(
             LIFETRACKER_JWT_PRIVATE_KEY_FILE=temp / "jwt_private_key.pem",
             LIFETRACKER_JWT_JWKS_FILE=temp / "jwt_jwks.json",
@@ -280,6 +317,7 @@ class EnvoyAuthTests(SimpleTestCase):
                     listen_host="127.0.0.1",
                     listen_port=cls.port,
                     upstream_port=cls.upstream.server_address[1],
+                    request_log=cls.request_log,
                 )
             )
         args = [
@@ -310,6 +348,8 @@ class EnvoyAuthTests(SimpleTestCase):
                 f"{os.getuid()}:{os.getgid()}",
                 "--volume",
                 f"{temp}:{temp}:ro",
+                "--volume",
+                f"{log_dir}:{log_dir}",
                 "--entrypoint",
                 "/usr/local/bin/envoy",
                 image,
@@ -547,3 +587,56 @@ class EnvoyAuthTests(SimpleTestCase):
                 status, _, echoed = self._request("GET", path)
                 self.assertEqual(status, 400)
                 self.assertIsNone(echoed)
+
+    def _logged_requests(self, user_agent):
+        """The request log's entries for requests with ``user_agent``, once
+        Envoy has written them (it flushes every 10 seconds)."""
+        deadline = time.monotonic() + 20
+        while True:
+            try:
+                lines = self.request_log.read_text().splitlines()
+            except FileNotFoundError:
+                lines = []
+            parsed = [client_ips.parse_line(line) for line in lines]
+            found = [r for r in parsed if r and r.user_agent == user_agent]
+            if found or time.monotonic() > deadline:
+                return found
+            time.sleep(0.2)
+
+    def test_request_log(self):
+        user_agent = f"test-{uuid.uuid4().hex}"
+        headers = {"User-Agent": user_agent, "Fly-Client-IP": "203.0.113.7"}
+        self.assertRedirectsToLogin(
+            "GET", "/admin/?a=1", "/admin/%3Fa%3D1", headers=headers
+        )
+        self.assertPassedThrough("GET", "/admin/", token=self._token(), headers=headers)
+        self.assertPassedThrough(
+            "GET", reverse("admin:login"), headers={"User-Agent": user_agent}
+        )
+        deadline = time.monotonic() + 20
+        while len(found := self._logged_requests(user_agent)) < 3:
+            self.assertLess(time.monotonic(), deadline, found)
+            time.sleep(0.2)
+        found.sort(key=lambda request: request.time)
+        rejected, logged_in, whitelisted = found
+        self.assertEqual(
+            rejected,
+            client_ips.Request(
+                ip="203.0.113.7",
+                time=rejected.time,
+                request="GET /admin/?a=1",
+                status=302,
+                user_agent=user_agent,
+                rejected=True,
+                logged_in=False,
+            ),
+        )
+        self.assertAlmostEqual(rejected.time, time.time(), delta=60)
+        self.assertEqual(
+            (logged_in.ip, logged_in.request, logged_in.status),
+            ("203.0.113.7", "GET /admin/", 200),
+        )
+        self.assertEqual((logged_in.rejected, logged_in.logged_in), (False, True))
+        # Without Fly-Client-IP, the peer's address.
+        self.assertEqual(whitelisted.ip, "127.0.0.1")
+        self.assertEqual((whitelisted.rejected, whitelisted.logged_in), (False, False))

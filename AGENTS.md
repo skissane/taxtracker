@@ -52,7 +52,7 @@ uv run pytest tests/taxtracker/tests.py::ItemModelTests::test_str_root
 # Run tests under coverage, print a report, and write coverage.xml and junit.xml (no minimum enforced)
 just coverage
 
-# Screenshot the admin login, index, backups, cloud backup list, idle watchdog, uptime and uptime day pages, in light and dark mode, into screenshots/ (gitignored)
+# Screenshot the admin login, index, backups, cloud backup list, idle watchdog, uptime, uptime day and client IPs pages, in light and dark mode, into screenshots/ (gitignored)
 just screenshots
 
 # Post screenshots/ to PR 123 as a comment, or update it (as gh's logged-in user)
@@ -78,7 +78,7 @@ No frontend framework.
 
 **Package layout:** `src/lifetracker/` is the Django project (settings, urls).
 It contains three apps:
-- `src/lifetracker/core/` (label `core`) — generic infrastructure any future module can reuse: the file-type registry (`FileType`/`MimeType`/`FileExtension`), DB-backed file storage (`DBStoredFile`/`DatabaseStorage`) and the file-serving admin view, shared attachment behaviour (`core/attachments.py`: filename date/file-type autofill and stored-file cleanup on delete) and `FlexibleDateField` (`core/forms.py`), shared tree behaviour for self-referential models (`core/trees.py`'s `TreeNodeMixin`: pending/done status choices and `is_done`, the `A > B > C` path for `__str__` and `get_folder_path()`, and parent cycle detection for `clean()`), whole-database backups (DB download and cloud backup, `core/backup.py`, with `CloudBackupStatus`), the idle watchdog (`core/idle_watchdog.py`) and the uptime log it writes (`core/uptime_log.py`; see Deployment for both), the JWT cookie for the authenticating front proxy and that proxy's config (`core/jwt_auth.py`, `core/auth_whitelist.py` and `core/envoy_config.py`; see Auth front layer), and `core/admin_pages.css` for custom admin pages.
+- `src/lifetracker/core/` (label `core`) — generic infrastructure any future module can reuse: the file-type registry (`FileType`/`MimeType`/`FileExtension`), DB-backed file storage (`DBStoredFile`/`DatabaseStorage`) and the file-serving admin view, shared attachment behaviour (`core/attachments.py`: filename date/file-type autofill and stored-file cleanup on delete) and `FlexibleDateField` (`core/forms.py`), shared tree behaviour for self-referential models (`core/trees.py`'s `TreeNodeMixin`: pending/done status choices and `is_done`, the `A > B > C` path for `__str__` and `get_folder_path()`, and parent cycle detection for `clean()`), whole-database backups (DB download and cloud backup, `core/backup.py`, with `CloudBackupStatus`), the idle watchdog (`core/idle_watchdog.py`) and the uptime log it writes (`core/uptime_log.py`; see Deployment for both), the client IP record (`core/client_ips.py`; see Client IPs), the JWT cookie for the authenticating front proxy and that proxy's config (`core/jwt_auth.py`, `core/auth_whitelist.py` and `core/envoy_config.py`; see Auth front layer), and `core/admin_pages.css` for custom admin pages.
 - `src/lifetracker/taxtracker/` (label `taxtracker`) — the tax-tracking module: `FinancialYear`/`Item`/`Attachment`, archive import, and their admin views/templates.
   This was the original module; more modules (banking, portfolio, insurance, etc.) may be added as siblings of `taxtracker` under `lifetracker` in future.
 - `src/lifetracker/tasktracker/` (label `tasktracker`) — the task-tracking module: `TaskType`/`Task`/`TaskAttachment`, with plain admin views (no custom templates).
@@ -126,6 +126,7 @@ Gunicorn's access log (`--access-logfile -` in `docker-entrypoint.sh`) is separa
 The default's own `%(h)s` is the connection's peer, which in the container is always Envoy (`127.0.0.1`; see Deployment); gunicorn never takes it from `X-Forwarded-For`, and `forwarded_allow_ips` only affects the scheme.
 Django's `REMOTE_ADDR` is `127.0.0.1` too; nothing reads it yet, so nothing rewrites it from `Fly-Client-IP`.
 Envoy passes `Fly-Client-IP` through untouched, and its own access log, which covers only requests with a response flag (ones Envoy answered itself or failed to pass on, e.g. `UF` when gunicorn refused the connection) and ones `jwt_authn` turned away (found by the `jwt_failure` key its `failed_status_in_metadata` writes, as it sets no flag; the reason is in `%RESPONSE_CODE_DETAILS%`), so not duplicating gunicorn's, starts `envoy: ` and the same client IP.
+Envoy also logs every request as JSON to a file, for the client IP record (see Client IPs).
 
 **Auth front layer:** issue #176 puts an authenticating proxy (Envoy) in front of gunicorn, rejecting any request without a valid Django-issued JWT, except a small whitelist.
 Envoy is in the container (#178; see Deployment), Django issues the JWT (#177) and Envoy checks it (#179).
@@ -163,6 +164,23 @@ It's skipped without Docker (no `docker` command, or `docker info` failing) unle
 
 **Legacy database upgrade:** databases created before the `lifetracker`/`core`/`taxtracker` split still have the old `tracker_*` tables and `django_migrations`/`django_content_type` rows under app label `tracker`.
 `taxtracker`'s `upgrade_legacy_db` management command renames those tables and re-labels the content types in place; it is idempotent (no-op on fresh or already-upgraded databases) and `run.sh` runs it unconditionally before `migrate`.
+
+**Client IPs:** issue #201 keeps a lasting record of where requests come from, as `fly logs` keeps only a short window; alerting on it (e.g. a logged-in request from a new ASN) is #213, after #212 builds a way to send alerts.
+Envoy sees every request, including those `jwt_authn` turns away, which never reach gunicorn, so a second access log in `envoy/envoy.yaml` (a file logger with `json_format`) writes one JSON line per request to `@REQUEST_LOG@`: start time, `Fly-Client-IP`, the direct peer, method, path, status, user agent, `jwt_failure` (`failed_status_in_metadata`) and `jwt_sub` (the `sub` from `payload_in_metadata: jwt_payload`), each missing value `null`.
+The `envoy_config` command fills in `client_ips.config_from_env().request_log` (default `$TMPDIR/lifetracker-envoy-requests.jsonl`, `LIFETRACKER_CLIENT_IP_REQUEST_LOG`), deleting it first, or `/dev/null` if recording is off; Envoy restarting under the entrypoint's loop keeps appending to it.
+Envoy flushes file access logs every 10 seconds (its default).
+`core/client_ips.py` (no Django imports, like the idle watchdog) is a collector process that `gunicorn_conf.when_ready` starts with `client_ips.spawn` alongside the watchdog, and which exits when its parent stops being the master.
+Every 5 seconds it reads the complete lines added since last time (`RequestLogReader`), and once it has read the whole file and that's at least 1 MiB, truncates it (Envoy appends, so carries on at offset 0; a line written in between is lost, which is accepted).
+`parse_line` takes the IP from `Fly-Client-IP` if it's a valid IP address, else the peer (e.g. under `just docker-run`); nothing trusts it beyond this record.
+`record` adds each batch up per IP in one `BEGIN IMMEDIATE` transaction in its own SQLite file, `LIFETRACKER_CLIENT_IP_DB` (default `$LIFETRACKER_DATA_DIR/client_ips.sqlite3`, unset without `LIFETRACKER_DATA_DIR`; `off` turns it off), deliberately not the main database: table `client_ip`, one row per IP with first/last seen (POSIX times), request, rejected (`jwt_failure` set) and logged-in (`jwt_sub` set: a valid JWT, though only Django checks it against the session) counts, first/last logged-in times, the latest request line, status and user agent (cut to 500 characters), and country, country name, ASN and AS organisation; WAL mode, `user_version` 1.
+A row's location is looked up when first seen and kept; rows without one are looked up again when next seen, and by `fill_in_locations`.
+Locations come from DB-IP's Lite country and ASN `.mmdb` files (`maxminddb`), chosen over MaxMind GeoLite2 as they need no account or licence key; no city database, as it's over 100 MB and ASN is the more useful signal.
+`update_geoip` keeps `<name>-<YYYY-MM>.mmdb` for each in `LIFETRACKER_GEOIP_DIR` (default `geoip` beside the record): it downloads this month's (`https://download.db-ip.com/free/<name>-<YYYY-MM>.mmdb.gz`, via `requests`) unless it's there, falling back to last month's on a 404, checks it opens before renaming it into place, and deletes older months'.
+The collector runs it, then `fill_in_locations`, at startup unless `LIFETRACKER_GEOIP_DOWNLOAD=0`, logging any failure; so in production it's refreshed at the first boot each month (it isn't fetched in the Dockerfile, which would make builds depend on the date).
+Core's `update_geoip` management command does the same by hand.
+`GeoIP` opens the newest file for each and reopens when a newer one appears.
+`just docker-smoke` passes `LIFETRACKER_GEOIP_DOWNLOAD=0` (so CI doesn't download from db-ip.com every run) and waits for the smoke test's requests to show up in the record.
+`tests/core/mmdb_writer.py` writes small test databases, for `tests/core/test_client_ips.py` and the screenshot tests, and `EnvoyAuthTests.test_request_log` checks the real Envoy's lines parse as expected.
 
 ## Models
 
@@ -231,6 +249,10 @@ An invalid date or one after today is a 404; the page keeps the report's `days` 
 Both pages also show times in the browser's time zone: the drill-down each period's start and last second up (after the UTC time, as e.g. `(Fri 02:59 local)`) and the UTC day's span, the report page when today's UTC day began.
 The pages put UTC ISO 8601 times in `<time data-lt-local datetime="...Z">` elements, and `core/static/core/local_times.js` (loaded from the templates' `extrahead`) rewrites each as `YYYY-MM-DD HH:MM` local time, without seconds as they match UTC's (or `Fri 02:59` with `data-lt-local="weekday"`), fills each `[data-lt-time-zone]` with the zone's IANA name and unhides each `[data-lt-local-only]` element, which the page renders `hidden` so nothing shows empty without JavaScript.
 The screenshot tests set the browser's time zone to `Australia/Sydney`, so their local times differ from UTC.
+
+The superuser-only **Client IPs** page (`/admin/client-ips/`, URL name `admin:client_ips`) is served and linked the same way, by `core.admin.client_ips_view`, reading the client IP record read-only (`client_ips.connect_read_only`): a table of the networks (ASNs) requests with a valid JWT came from (`logged_in_networks`), then the `_CLIENT_IPS_LIMIT` (500) IPs seen most recently (`recent_ips`), or only those with logged-in requests with `?logged_in=1`.
+Times are UTC in the HTML, shown in the browser's time zone by `local_times.js`.
+It links db-ip.com, as DB-IP Lite's CC BY 4.0 licence asks of anything showing its data.
 
 Every admin page's footer shows how long the page took to generate ("Page generated in 0.042 seconds").
 `core/timing.py`'s `RequestTimingMiddleware`, first in `MIDDLEWARE` so it covers the others, records when Django started on the request; `base_site.html`'s `footer` block shows the time so far via the `page_generation_time` tag (`core/templatetags/page_timing.py`, empty without the middleware or a request in the context), styled by its `extrastyle` block.
