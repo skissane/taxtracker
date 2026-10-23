@@ -54,12 +54,6 @@
         <tr>
           <th scope="col" class="lt-num">Start (UTC)</th>
           <th scope="col" class="lt-num">Last Second Up (UTC)</th>
-          <th scope="col" class="lt-num" data-lt-local-only hidden>
-            Start (<span data-lt-time-zone>local</span>)
-          </th>
-          <th scope="col" class="lt-num" data-lt-local-only hidden>
-            Last Second Up (<span data-lt-time-zone>local</span>)
-          </th>
           <th scope="col" class="lt-num">Duration</th>
           <th scope="col">Notes</th>
         </tr>
@@ -67,13 +61,15 @@
       <tbody>
         {% for period in periods %}
           <tr>
-            <td class="lt-num">{{ period.start }}</td>
-            <td class="lt-num">{{ period.end }}</td>
-            <td class="lt-num" data-lt-local-only hidden>
-              <time data-lt-local datetime="{{ period.start_iso }}">{{ period.start_iso }}</time>
+            <td class="lt-num">
+              {{ period.start }}
+              <span data-lt-local-only hidden>(local: <time data-lt-local="weekday"
+       datetime="{{ period.start_iso }}">{{ period.start_iso }}</time>)</span>
             </td>
-            <td class="lt-num" data-lt-local-only hidden>
-              <time data-lt-local datetime="{{ period.end_iso }}">{{ period.end_iso }}</time>
+            <td class="lt-num">
+              {{ period.end }}
+              <span data-lt-local-only hidden>(local: <time data-lt-local="weekday"
+       datetime="{{ period.end_iso }}">{{ period.end_iso }}</time>)</span>
             </td>
             <td class="lt-num">{{ period.duration }}</td>
             <td>

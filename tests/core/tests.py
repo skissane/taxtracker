@@ -4019,10 +4019,10 @@ class UptimeDayAdminViewTests(TestCase):
 
     def _rows(self, response):
         """The table's cells, as for the uptime page, but as text: the local
-        time cells' ``<time>`` elements hold the UTC time until
-        ``local_times.js`` replaces it."""
+        times' ``<time>`` elements hold the UTC time until ``local_times.js``
+        replaces it."""
         return [
-            [re.sub(r"\s*<[^>]+>\s*", "", cell) for cell in row]
+            [re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", cell)).strip() for cell in row]
             for row in UptimeReportAdminViewTests._rows(self, response)
         ]
 
@@ -4076,26 +4076,20 @@ class UptimeDayAdminViewTests(TestCase):
             self._rows(response),
             [
                 [
-                    "00:00:00",
-                    "00:29:59",
-                    "2026-10-20T00:00:00Z",
-                    "2026-10-20T00:29:59Z",
+                    "00:00:00 (local: 2026-10-20T00:00:00Z)",
+                    "00:29:59 (local: 2026-10-20T00:29:59Z)",
                     "00:30:00",
                     "Began the day before.",
                 ],
                 [
-                    "09:05:03",
-                    "11:05:02",
-                    "2026-10-20T09:05:03Z",
-                    "2026-10-20T11:05:02Z",
+                    "09:05:03 (local: 2026-10-20T09:05:03Z)",
+                    "11:05:02 (local: 2026-10-20T11:05:02Z)",
                     "02:00:00",
                     "",
                 ],
                 [
-                    "23:59:59",
-                    "23:59:59",
-                    "2026-10-20T23:59:59Z",
-                    "2026-10-20T23:59:59Z",
+                    "23:59:59 (local: 2026-10-20T23:59:59Z)",
+                    "23:59:59 (local: 2026-10-20T23:59:59Z)",
                     "00:00:01",
                     "",
                 ],
@@ -4117,10 +4111,8 @@ class UptimeDayAdminViewTests(TestCase):
             self._rows(response),
             [
                 [
-                    "11:59:00",
-                    "11:59:59",
-                    "2026-10-22T11:59:00Z",
-                    "2026-10-22T11:59:59Z",
+                    "11:59:00 (local: 2026-10-22T11:59:00Z)",
+                    "11:59:59 (local: 2026-10-22T11:59:59Z)",
                     "00:01:00",
                     "Still up.",
                 ]
@@ -4142,10 +4134,8 @@ class UptimeDayAdminViewTests(TestCase):
             self._rows(response),
             [
                 [
-                    "23:59:50",
-                    "23:59:59",
-                    "2026-10-20T23:59:50Z",
-                    "2026-10-20T23:59:59Z",
+                    "23:59:50 (local: 2026-10-20T23:59:50Z)",
+                    "23:59:59 (local: 2026-10-20T23:59:59Z)",
                     "00:00:10",
                     "Continued into the next day.",
                 ]
@@ -4158,15 +4148,15 @@ class UptimeDayAdminViewTests(TestCase):
         response = self.client.get(self.URL)
 
         # local_times.js shows them in the browser's time zone, and unhides
-        # the local columns and the day's local range, hidden without it.
+        # them and the day's local range, hidden without it.
         self.assertContains(response, "/static/core/local_times.js")
         self.assertContains(
             response,
-            '<time data-lt-local datetime="2026-10-20T09:05:03Z">'
-            "2026-10-20T09:05:03Z</time>",
+            '<span data-lt-local-only hidden>(local: <time data-lt-local="weekday"'
+            ' datetime="2026-10-20T09:05:03Z">2026-10-20T09:05:03Z</time>)</span>',
             html=True,
         )
-        self.assertContains(response, "data-lt-local-only hidden", count=9)
+        self.assertContains(response, "data-lt-local-only hidden", count=7)
         self.assertContains(
             response,
             '<time data-lt-local datetime="2026-10-20T00:00:00Z">'
