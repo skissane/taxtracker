@@ -489,7 +489,8 @@ def idle_watchdog_page_context(now=None):
         )
     # Not the status file's stop_due_at, which predates this page's own
     # request: that counts as activity, so the next check restarts the timer
-    # from when it finishes, about now.
+    # from when it finishes, about now. It only stops at a check, so up to one
+    # check interval later.
     status["stop_at"] = now + datetime.timedelta(seconds=idle_timeout)
     for port in status["ports"]:
         seen = port["last_connection_at"]

@@ -104,7 +104,9 @@
               {% endif %}
             </th>
             <td>
-              {% if status.state == "stopping" %}
+              {% if status.stale %}
+                Unknown: the watchdog doesn't seem to be running
+              {% elif status.state == "stopping" %}
                 Now: the idle timeout was reached
               {% elif status.state == "active" %}
                 Not while connections are open; {{ status.idle_timeout }} after the last one closes
