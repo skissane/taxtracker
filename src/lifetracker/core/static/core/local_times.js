@@ -1,6 +1,6 @@
 // Shows UTC times in the browser's time zone, for custom admin pages.
-// Each <time data-lt-local datetime="...Z"> gets its time as YYYY-MM-DD
-// HH:MM:SS in the browser's time zone (or as e.g. "Fri 02:59:59" with
+// Each <time data-lt-local datetime="...Z"> gets its time as YYYY-MM-DD HH:MM
+// in the browser's time zone (or as e.g. "Fri 02:59" with
 // data-lt-local="weekday"), each [data-lt-time-zone] the zone's name,
 // and each [data-lt-local-only], hidden in the page so nothing shows empty
 // without JavaScript, is shown.
@@ -13,14 +13,10 @@
     return String(number).padStart(2, "0");
   }
 
+  // No seconds: they're the same as the UTC time's, as no time zone in use
+  // has an offset that isn't a whole number of minutes.
   function formatTime(date) {
-    return (
-      pad(date.getHours()) +
-      ":" +
-      pad(date.getMinutes()) +
-      ":" +
-      pad(date.getSeconds())
-    );
+    return pad(date.getHours()) + ":" + pad(date.getMinutes());
   }
 
   function format(date, style) {
