@@ -1,4 +1,5 @@
 import contextlib
+import http.client
 import io
 import subprocess
 import tempfile
@@ -907,6 +908,10 @@ class CheckDeployTests(SimpleTestCase):
             "request failed: timed out",
         )
         self.assertEqual(self._check(TimeoutError("slow")), "request failed: slow")
+        self.assertEqual(
+            self._check(http.client.IncompleteRead(b"")),
+            "request failed: IncompleteRead(0 bytes read)",
+        )
 
     def _main(self, problems, *args):
         now = [0.0]
@@ -945,3 +950,28 @@ class CheckDeployTests(SimpleTestCase):
         self.assertEqual(sleeps, [4, 4])
         self.assertEqual(out.count("down"), 3)
         self.assertIn("not healthy after 10 seconds", err)
+
+    def test_request_timeout_capped_by_deadline(self):
+        now = [0.0]
+        timeouts = []
+
+        def check(url, commit, timeout):
+            timeouts.append(timeout)
+            now[0] += 8
+            return "down"
+
+        def sleep(seconds):
+            now[0] += seconds
+
+        with (
+            mock.patch("scripts.check_deploy.check_once", side_effect=check),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            code = check_deploy_main(
+                [self.URL, self.COMMIT, "--timeout", "20", "--interval", "1"],
+                clock=lambda: now[0],
+                sleep=sleep,
+            )
+        self.assertEqual(code, 1)
+        self.assertEqual(timeouts, [20, 11, 2])

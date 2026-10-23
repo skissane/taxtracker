@@ -14,6 +14,7 @@ Standard library only, run with ``uv run --no-project``.
 """
 
 import argparse
+import http.client
 import json
 import sys
 import time
@@ -30,7 +31,9 @@ def check_once(url: str, commit: str, timeout: float) -> str | None:
     except urllib.error.HTTPError as e:
         with e:
             status, raw = e.code, e.read()
-    except (urllib.error.URLError, OSError) as e:
+    except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
+        # HTTPException covers a connection dropped mid-response, e.g. by Fly
+        # Proxy while the Machine boots (IncompleteRead, RemoteDisconnected).
         reason = getattr(e, "reason", e)
         return f"request failed: {reason}"
     try:
@@ -74,7 +77,11 @@ def main(argv=None, *, clock=time.monotonic, sleep=time.sleep) -> int:
     attempt = 0
     while True:
         attempt += 1
-        problem = check_once(args.url, args.commit, args.request_timeout)
+        # Don't let one slow request run far past the deadline.
+        remaining = max(deadline - clock(), 1)
+        problem = check_once(
+            args.url, args.commit, min(args.request_timeout, remaining)
+        )
         if problem is None:
             print(f"Attempt {attempt}: healthy, running {args.commit}")
             return 0

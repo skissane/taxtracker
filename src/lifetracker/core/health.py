@@ -38,6 +38,11 @@ def health_problem():
     except DatabaseError:
         logger.exception("Health check: database error")
         return "database error"
+    except Exception:
+        # E.g. the migration loader's InconsistentMigrationHistory: still a
+        # fixed JSON answer rather than a 500 page.
+        logger.exception("Health check failed")
+        return "unhealthy"
     if unapplied:
         logger.error(
             "Health check: unapplied migrations: %s",

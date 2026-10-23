@@ -4524,6 +4524,18 @@ class HealthCheckTests(TestCase):
         self.assertNotIn("disk I/O", response.content.decode())
         self.assertIn("disk I/O error", logs.output[0])
 
+    def test_other_error(self):
+        with (
+            mock.patch.object(
+                MigrationExecutor, "__init__", side_effect=RuntimeError("boom")
+            ),
+            self.assertLogs("lifetracker.core.health", "ERROR") as logs,
+        ):
+            response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["problem"], "unhealthy")
+        self.assertIn("boom", logs.output[0])
+
 
 class JWTCookieMiddlewareTests(TestCase):
     """Issuing, re-issuing, clearing and checking the JWT cookie."""
