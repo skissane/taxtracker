@@ -49,13 +49,23 @@ listen_host="${LIFETRACKER_HOST:-0.0.0.0}"
 listen_port="${PORT:-8000}"
 gunicorn_port="${LIFETRACKER_GUNICORN_PORT:-8001}"
 for port in "$listen_port" "$gunicorn_port"; do
+  # 1 to 65535: digits only, no leading zero (Envoy's YAML parser could take
+  # one as octal), and at most 5 of them, so the shell can compare it.
   case "$port" in
-    *[!0-9]*)
+    0* | *[!0-9]* | ??????*)
       echo "docker-entrypoint.sh: invalid port: $port" >&2
       exit 1
       ;;
   esac
+  if [ "$port" -gt 65535 ]; then
+    echo "docker-entrypoint.sh: invalid port: $port" >&2
+    exit 1
+  fi
 done
+if [ "$listen_port" -eq "$gunicorn_port" ]; then
+  echo "docker-entrypoint.sh: PORT and LIFETRACKER_GUNICORN_PORT must differ: $listen_port" >&2
+  exit 1
+fi
 case "$listen_host" in
   *[!0-9A-Fa-f.:]*)
     echo "docker-entrypoint.sh: LIFETRACKER_HOST must be an IP address: $listen_host" >&2

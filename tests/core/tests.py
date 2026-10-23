@@ -1959,7 +1959,7 @@ class DockerEntrypointTests(TestCase):
 
     def test_entrypoint_rejects_invalid_port(self):
         for name in ("PORT", "LIFETRACKER_GUNICORN_PORT"):
-            for value in ("80a", "8000/"):
+            for value in ("80a", "8000/", "0", "08000", "65536", "123456"):
                 with self.subTest(name=name, value=value):
                     result, log_lines, _, envoy_config = self._run_entrypoint(
                         env={name: value}, returncode=1
@@ -1970,6 +1970,18 @@ class DockerEntrypointTests(TestCase):
                     )
                     self.assertEqual(log_lines, self.STARTUP)
                     self.assertIsNone(envoy_config)
+
+    def test_entrypoint_rejects_same_port_for_envoy_and_gunicorn(self):
+        result, log_lines, _, envoy_config = self._run_entrypoint(
+            env={"PORT": "8001", "LIFETRACKER_GUNICORN_PORT": "8001"}, returncode=1
+        )
+        self.assertIn(
+            "docker-entrypoint.sh: PORT and LIFETRACKER_GUNICORN_PORT must differ:"
+            " 8001\n",
+            result.stderr,
+        )
+        self.assertEqual(log_lines, self.STARTUP)
+        self.assertIsNone(envoy_config)
 
     def test_entrypoint_rejects_host_that_is_not_an_ip_address(self):
         for value in ("localhost", "0.0.0.0/"):
