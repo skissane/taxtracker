@@ -554,6 +554,9 @@ def uptime_report_page_context(days_param, now=None):
     if context["directory"] is None:
         return context
     now = now if now is not None else time.time()
+    # For the page's note of when today's UTC day began in the browser's time
+    # zone.
+    context["today_start"] = _utc_iso(uptime_log.day_date(uptime_log.day_of(now)))
     # Newest first, as on the cloud backup list.
     context["report"] = [
         {
@@ -589,6 +592,16 @@ def _format_clock(second_of_day):
     return f"{hours:02}:{rest // 60:02}:{rest % 60:02}"
 
 
+def _utc_iso(date, second_of_day=0):
+    """E.g. "2026-10-20T09:05:03Z" for a second of a UTC day, for a ``<time>``
+    element's ``datetime``, which ``core/local_times.js`` shows in the browser's
+    time zone."""
+    moment = datetime.datetime.combine(date, datetime.time()) + datetime.timedelta(
+        seconds=second_of_day
+    )
+    return f"{moment.isoformat()}Z"
+
+
 def uptime_day_page_context(date_param, days_param, now=None):
     """The context of the uptime page's drill-down into one UTC day
     (``date_param``, YYYY-MM-DD), listing its up periods. Raises Http404 for an
@@ -611,6 +624,8 @@ def uptime_day_page_context(date_param, days_param, now=None):
         "next_date": None,
         "day": None,
         "periods": None,
+        "day_start": _utc_iso(date),
+        "day_end": _utc_iso(date, uptime_log.SECONDS_PER_DAY - 1),
     }
     # No day before date.min, nor any date for it to be.
     if date > datetime.date.min:
@@ -627,6 +642,8 @@ def uptime_day_page_context(date_param, days_param, now=None):
             {
                 "start": _format_clock(period.start),
                 "end": _format_clock(period.end),
+                "start_iso": _utc_iso(date, period.start),
+                "end_iso": _utc_iso(date, period.end),
                 "duration": _format_clock(period.seconds),
                 "from_previous_day": index == 0 and result.from_previous_day,
                 "into_next_day": index == last and result.into_next_day,

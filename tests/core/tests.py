@@ -3989,6 +3989,16 @@ class UptimeReportAdminViewTests(TestCase):
         self.assertContains(response, "Uptime isn't recorded")
         self.assertNotContains(response, 'lt-uptime"')
 
+    def test_today_start_in_local_time(self):
+        response = self.client.get(self.URL)
+
+        self.assertContains(response, "/static/core/local_times.js")
+        self.assertContains(
+            response,
+            "today's UTC day began at <time data-lt-local datetime=\""
+            '2026-10-22T00:00:00Z">2026-10-22T00:00:00Z</time>.',
+        )
+
 
 class UptimeDayAdminViewTests(TestCase):
     NOW = UptimeReportCommandTests.NOW  # 2026-10-22T11:59:59.5Z
@@ -4007,7 +4017,14 @@ class UptimeDayAdminViewTests(TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    _rows = UptimeReportAdminViewTests._rows
+    def _rows(self, response):
+        """The table's cells, as for the uptime page, but as text: the local
+        time cells' ``<time>`` elements hold the UTC time until
+        ``local_times.js`` replaces it."""
+        return [
+            [re.sub(r"\s*<[^>]+>\s*", "", cell) for cell in row]
+            for row in UptimeReportAdminViewTests._rows(self, response)
+        ]
 
     def _record(self):
         log = uptime_log.UptimeLog(self.directory)
@@ -4058,9 +4075,30 @@ class UptimeDayAdminViewTests(TestCase):
         self.assertEqual(
             self._rows(response),
             [
-                ["00:00:00", "00:29:59", "00:30:00", "Began the day before."],
-                ["09:05:03", "11:05:02", "02:00:00", ""],
-                ["23:59:59", "23:59:59", "00:00:01", ""],
+                [
+                    "00:00:00",
+                    "00:29:59",
+                    "2026-10-20T00:00:00Z",
+                    "2026-10-20T00:29:59Z",
+                    "00:30:00",
+                    "Began the day before.",
+                ],
+                [
+                    "09:05:03",
+                    "11:05:02",
+                    "2026-10-20T09:05:03Z",
+                    "2026-10-20T11:05:02Z",
+                    "02:00:00",
+                    "",
+                ],
+                [
+                    "23:59:59",
+                    "23:59:59",
+                    "2026-10-20T23:59:59Z",
+                    "2026-10-20T23:59:59Z",
+                    "00:00:01",
+                    "",
+                ],
             ],
         )
         self.assertContains(response, "3 periods, 02:30:01 in all")
@@ -4076,7 +4114,17 @@ class UptimeDayAdminViewTests(TestCase):
         response = self.client.get("/admin/uptime/2026-10-22/")
 
         self.assertEqual(
-            self._rows(response), [["11:59:00", "11:59:59", "00:01:00", "Still up."]]
+            self._rows(response),
+            [
+                [
+                    "11:59:00",
+                    "11:59:59",
+                    "2026-10-22T11:59:00Z",
+                    "2026-10-22T11:59:59Z",
+                    "00:01:00",
+                    "Still up.",
+                ]
+            ],
         )
         self.assertContains(response, "so far")
         # No next day yet, and no days parameter to keep.
@@ -4092,8 +4140,47 @@ class UptimeDayAdminViewTests(TestCase):
 
         self.assertEqual(
             self._rows(response),
-            [["23:59:50", "23:59:59", "00:00:10", "Continued into the next day."]],
+            [
+                [
+                    "23:59:50",
+                    "23:59:59",
+                    "2026-10-20T23:59:50Z",
+                    "2026-10-20T23:59:59Z",
+                    "00:00:10",
+                    "Continued into the next day.",
+                ]
+            ],
         )
+
+    def test_local_times(self):
+        self._record()
+
+        response = self.client.get(self.URL)
+
+        # local_times.js shows them in the browser's time zone, and unhides
+        # the local columns and the day's local range, hidden without it.
+        self.assertContains(response, "/static/core/local_times.js")
+        self.assertContains(
+            response,
+            '<time data-lt-local datetime="2026-10-20T09:05:03Z">'
+            "2026-10-20T09:05:03Z</time>",
+            html=True,
+        )
+        self.assertContains(response, "data-lt-local-only hidden", count=9)
+        self.assertContains(
+            response,
+            '<time data-lt-local datetime="2026-10-20T00:00:00Z">'
+            '2026-10-20T00:00:00Z</time> to <time data-lt-local datetime="'
+            '2026-10-20T23:59:59Z">2026-10-20T23:59:59Z</time>',
+        )
+
+    def test_first_possible_date_local_range(self):
+        uptime_log.UptimeLog(self.directory).record(self.NOW)
+
+        response = self.client.get("/admin/uptime/0001-01-01/")
+
+        self.assertEqual(response.context["day_start"], "0001-01-01T00:00:00Z")
+        self.assertEqual(response.context["day_end"], "0001-01-01T23:59:59Z")
 
     def test_no_periods_and_no_data(self):
         uptime_log.UptimeLog(self.directory).record(20_746 * 86_400)

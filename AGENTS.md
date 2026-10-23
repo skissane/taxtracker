@@ -210,6 +210,9 @@ Dates are UTC days, as the files are.
 Each day's Starts count (unless it's "No data") links to that day's drill-down page (`/admin/uptime/<YYYY-MM-DD>/`, URL name `admin:uptime_day`, `core.admin.uptime_day_view`; not in the top bar).
 It lists the day's up periods (`uptime_log.day_periods`, from `up_periods`, one `UpPeriod` per start) with start, last second up and duration (all `HH:MM:SS`), noting a period that began the day before (up at midnight, and the previous day's last second up), continued into the next day, or may still be going (today's, if it ended within `MAX_FILLED_GAP_SECONDS` of now).
 An invalid date or one after today is a 404; the page keeps the report's `days` for its links back and to the days either side.
+Both pages also show times in the browser's time zone: the drill-down each period's start and last second up (in two more columns) and the UTC day's span, the report page when today's UTC day began.
+The pages put UTC ISO 8601 times in `<time data-lt-local datetime="...Z">` elements, and `core/static/core/local_times.js` (loaded from the templates' `extrahead`) rewrites each as `YYYY-MM-DD HH:MM:SS` local time, fills each `[data-lt-time-zone]` with the zone's IANA name and unhides each `[data-lt-local-only]` element, which the page renders `hidden` so nothing shows empty without JavaScript.
+The screenshot tests set the browser's time zone to `Australia/Sydney`, so their local times differ from UTC.
 
 Every admin page's footer shows how long the page took to generate ("Page generated in 0.042 seconds").
 `core/timing.py`'s `RequestTimingMiddleware`, first in `MIDDLEWARE` so it covers the others, records when Django started on the request; `base_site.html`'s `footer` block shows the time so far via the `page_generation_time` tag (`core/templatetags/page_timing.py`, empty without the middleware or a request in the context), styled by its `extrastyle` block.
