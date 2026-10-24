@@ -1462,6 +1462,22 @@ class AdjustNotesHeadingsTests(TestCase):
         self.assertIn("Some **bold** text.", result)
         self.assertIn("- item", result)
 
+    def test_headings_in_fenced_code_blocks_ignored(self):
+        notes = (
+            "```bash\n"
+            "# comment inside shell block\n"
+            'echo "hi"\n'
+            "```\n"
+            "# Real heading\n"
+            "~~~\n"
+            "## also ignored\n"
+            "~~~\n"
+        )
+        result = _adjust_notes_headings(notes, 2)
+        self.assertIn("# comment inside shell block", result)
+        self.assertIn("### Real heading", result)
+        self.assertIn("## also ignored", result)
+
     def test_hash_in_body_not_treated_as_heading(self):
         # Only lines where # is at the start are headings
         notes = "# Real heading\nThis has a # in the middle"

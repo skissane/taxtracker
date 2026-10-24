@@ -718,18 +718,57 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
 
 def _adjust_notes_headings(notes: str, item_heading_level: int) -> str:
     """Re-level ATX headings in *notes* so shallowest becomes item_heading_level+1."""
-    atx_re = re.compile(r"^(#{1,6}) (.+)", re.MULTILINE)
-    matches = list(atx_re.finditer(notes))
-    if not matches:
+    atx_re = re.compile(r"^(#{1,6}) (.+)$")
+    fence_re = re.compile(r"^\s*(`{3,}|~{3,})")
+    lines = notes.splitlines(keepends=True)
+    heading_matches = []
+    fence_char = None
+    in_fence = False
+
+    for line_index, line in enumerate(lines):
+        fence_match = fence_re.match(line)
+        if fence_match:
+            fence = fence_match.group(1)
+            if in_fence:
+                if fence.startswith(fence_char):
+                    in_fence = False
+                    fence_char = None
+            elif not in_fence:
+                in_fence = True
+                fence_char = fence[0]
+            continue
+        if in_fence:
+            continue
+        match = atx_re.match(line.rstrip("\r\n"))
+        if match:
+            heading_matches.append((line_index, match))
+
+    if not heading_matches:
         return notes
-    min_level = min(len(m.group(1)) for m in matches)
+
+    min_level = min(len(match.group(1)) for _, match in heading_matches)
     target_base = item_heading_level + 1
 
-    def _reheader(m):
-        new_level = len(m.group(1)) - min_level + target_base
-        return "#" * min(new_level, 6) + " " + m.group(2)
+    def _reheader(match):
+        new_level = len(match.group(1)) - min_level + target_base
+        return "#" * min(new_level, 6) + " " + match.group(2)
 
-    return atx_re.sub(_reheader, notes)
+    rewritten = []
+    for line_index, line in enumerate(lines):
+        match = None
+        for target_index, target_match in heading_matches:
+            if target_index == line_index:
+                match = target_match
+                break
+        if match is not None:
+            replacement = _reheader(match)
+            suffix = "\n" if line.endswith("\n") else ""
+            if line.endswith("\r\n"):
+                suffix = "\r\n"
+            rewritten.append(replacement + suffix)
+            continue
+        rewritten.append(line)
+    return "".join(rewritten)
 
 
 def _safe_component(title):
