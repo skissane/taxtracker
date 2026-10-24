@@ -753,9 +753,9 @@ def _tree_rows_and_unreachable_items(items):
 
     visited = set()
 
+    # Each item has one parent, so a walk down from the roots can't revisit an
+    # item; items in a parent cycle (and their descendants) are never reached.
     def item_tree(item, depth=0):
-        if item.pk in visited:
-            return []
         visited.add(item.pk)
         rows = [{"item": item, "depth": depth}]
         for child in children_map.get(item.pk, []):
