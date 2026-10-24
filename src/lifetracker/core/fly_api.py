@@ -4,11 +4,12 @@ On a Fly Machine, ``/.fly/api`` is a Unix socket that forwards HTTP requests
 to the Machines API, authenticated as the Machine itself, so no API token is
 needed (see Fly's suspend/resume docs). It's root-only by default, and
 ``docker-entrypoint.sh`` gives the ``lifetracker`` group access (issue #211).
-``lifetracker-cli fly-api`` (``lifetracker.cli.fly_api``) wraps ``get``, for
-use over ``./flyssh.sh``. GET only for now. It doesn't import Django.
+``lifetracker-cli fly-api`` (``lifetracker.cli.fly_api``) wraps ``get`` and
+``post``, for use over ``./flyssh.sh``. It doesn't import Django.
 """
 
 import http.client
+import json
 import os
 import socket
 from dataclasses import dataclass
@@ -70,9 +71,32 @@ def get(
     Raises ``OSError`` if the socket can't be reached (``FileNotFoundError``
     off a Fly Machine, ``PermissionError`` without access to it) and
     ``http.client.HTTPException`` on a malformed response."""
+    return _request("GET", path, None, socket_path, timeout)
+
+
+def post(
+    path: str,
+    json_body: dict | None = None,
+    socket_path: str = SOCKET_PATH,
+    timeout: float = TIMEOUT_SECONDS,
+) -> Response:
+    """POST ``path`` (e.g. ``/v1/apps/<app>/machines/<id>/suspend``) through the
+    socket, with ``json_body`` as an ``application/json`` body, or with an empty
+    body (``Content-Length: 0``) if it's ``None``. Raises as ``get`` does."""
+    body = None
+    if json_body is not None:
+        body = json.dumps(json_body, ensure_ascii=False).encode()
+    return _request("POST", path, body, socket_path, timeout)
+
+
+def _request(
+    method: str, path: str, body: bytes | None, socket_path: str, timeout: float
+) -> Response:
+    headers = {} if body is None else {"Content-Type": "application/json"}
     conn = _UnixHTTPConnection(socket_path, timeout)
     try:
-        conn.request("GET", path)
+        # With no body, http.client still sends Content-Length: 0 for a POST.
+        conn.request(method, path, body=body, headers=headers)
         resp = conn.getresponse()
         return Response(
             status=resp.status,
