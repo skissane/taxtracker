@@ -199,6 +199,13 @@ To query the Fly Machines API from the Machine itself, without an API token, use
 ./flyssh.sh lifetracker-cli fly-api /v1/apps/{app}/machines/{machine}
 ```
 
+`--post` sends a POST instead, with an empty body, or with `--json`'s JSON object as the body; `./flyssh.sh` passes the argument through intact, quotes and all:
+
+```bash
+./flyssh.sh lifetracker-cli fly-api --post /v1/apps/{app}/machines/{machine}/metadata/note --json '{"value": "hello"}'
+./flyssh.sh lifetracker-cli fly-api --post /v1/apps/{app}/machines/{machine}/stop  # stops the Machine, ending the session
+```
+
 If the Machine isn't running, `./flyssh.sh` starts it first, waiting for it to finish stopping if need be (this needs `jq`).
 Fly's own auto-stop judges idleness by HTTP traffic through its proxy, not SSH sessions, so it could cut off a long session or command; `fly.toml` turns it off.
 

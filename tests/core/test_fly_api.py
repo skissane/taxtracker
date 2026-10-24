@@ -16,12 +16,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         server = self.server
         server.requests.append((self.command, self.path, self.headers["Host"]))
+        if self.command == "POST":
+            length = self.headers["Content-Length"]
+            body = self.rfile.read(int(length)) if length is not None else None
+            server.posts.append((length, self.headers["Content-Type"], body))
         status, content_type, body = server.response
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    do_POST = do_GET
 
     def address_string(self):
         # A Unix socket's client address is "", not (host, port).
@@ -37,7 +43,8 @@ class _UnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer
 
 class FakeFlyApiMixin:
     """Serves ``self.response`` on a Unix socket at ``self.socket_path``,
-    recording each request's method, path and Host in ``self.requests``."""
+    recording each request's method, path and Host in ``self.requests``, and
+    each POST's Content-Length, Content-Type and body in ``self.posts``."""
 
     def setUp(self):
         super().setUp()
@@ -47,6 +54,7 @@ class FakeFlyApiMixin:
         self.socket_path = os.path.join(tmp.name, "api")
         self.server = _UnixHTTPServer(self.socket_path, _Handler)
         self.server.requests = []
+        self.server.posts = []
         self.server.response = (200, "application/json", b'{"ok": true}')
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         thread.start()
@@ -57,6 +65,10 @@ class FakeFlyApiMixin:
     @property
     def requests(self):
         return self.server.requests
+
+    @property
+    def posts(self):
+        return self.server.posts
 
 
 class GetTests(FakeFlyApiMixin, SimpleTestCase):
@@ -76,6 +88,29 @@ class GetTests(FakeFlyApiMixin, SimpleTestCase):
     def test_missing_socket(self):
         with self.assertRaises(FileNotFoundError):
             fly_api.get("/", socket_path=self.socket_path + "-missing")
+
+
+class PostTests(FakeFlyApiMixin, SimpleTestCase):
+    def test_post_without_body(self):
+        response = fly_api.post(
+            "/v1/apps/x/machines/m/stop", socket_path=self.socket_path
+        )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(
+            self.requests, [("POST", "/v1/apps/x/machines/m/stop", "flaps")]
+        )
+        self.assertEqual(self.posts, [("0", None, b"")])
+
+    def test_post_json(self):
+        fly_api.post("/x", {"name": "café", "n": 1}, socket_path=self.socket_path)
+        self.assertEqual(
+            self.posts,
+            [("25", "application/json", '{"name": "café", "n": 1}'.encode())],
+        )
+
+    def test_post_empty_object_is_a_body(self):
+        fly_api.post("/x", {}, socket_path=self.socket_path)
+        self.assertEqual(self.posts, [("2", "application/json", b"{}")])
 
 
 class ExpandPathTests(SimpleTestCase):
@@ -129,6 +164,48 @@ class FlyApiCommandTests(FakeFlyApiMixin, SimpleTestCase):
         self.assertEqual(result.exit_code, 1)
         self.assertEqual(result.stdout, '{\n  "error": "no"\n}\n')
         self.assertEqual(result.stderr, "HTTP 403 Forbidden\n")
+
+    def test_get_by_default(self):
+        self.invoke("/x")
+        self.assertEqual(self.requests, [("GET", "/x", "flaps")])
+        self.assertEqual(self.posts, [])
+
+    def test_post_without_body(self):
+        env = {"FLY_APP_NAME": "a", "FLY_MACHINE_ID": "m"}
+        result = self.invoke(
+            "--post", "/v1/apps/{app}/machines/{machine}/stop", env=env
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(result.stdout, '{\n  "ok": true\n}\n')
+        self.assertEqual(
+            self.requests, [("POST", "/v1/apps/a/machines/m/stop", "flaps")]
+        )
+        self.assertEqual(self.posts, [("0", None, b"")])
+
+    def test_post_json(self):
+        result = self.invoke("/x", "--post", "--json", '{"signal": "SIGHUP"}')
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(
+            self.posts, [("20", "application/json", b'{"signal": "SIGHUP"}')]
+        )
+
+    def test_json_needs_post(self):
+        result = self.invoke("/x", "--json", "{}")
+        self.assertEqual(result.exit_code, 2)
+        self.assertIn("--json needs --post", result.stderr)
+        self.assertEqual(self.requests, [])
+
+    def test_invalid_json(self):
+        for text, message in (
+            ("{nope", "--json isn't valid JSON"),
+            ("[1]", "--json must be a JSON object"),
+            ('"x"', "--json must be a JSON object"),
+        ):
+            with self.subTest(text=text):
+                result = self.invoke("/x", "--post", "--json", text)
+                self.assertEqual(result.exit_code, 2)
+                self.assertIn(message, result.stderr)
+        self.assertEqual(self.requests, [])
 
     def test_missing_placeholder_variable(self):
         result = self.invoke("/v1/apps/{app}", env={"FLY_APP_NAME": ""})
