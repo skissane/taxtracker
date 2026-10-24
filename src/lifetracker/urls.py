@@ -4,6 +4,7 @@ from django.contrib import admin
 from django.urls import include, path
 from django.views.generic import RedirectView
 
+from lifetracker.core.app_icon import app_icon
 from lifetracker.core.health import healthz
 from lifetracker.core.web_manifest import web_manifest
 
@@ -21,4 +22,6 @@ urlpatterns = [
     # Unauthenticated, as browsers fetch it without cookies (see
     # core/web_manifest.py).
     path("manifest.webmanifest", web_manifest, name="web_manifest"),
+    # Unauthenticated likewise: the uploaded app icon (see core/app_icon.py).
+    path("app-icon.png", app_icon, name="app_icon"),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

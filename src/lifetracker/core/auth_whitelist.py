@@ -9,7 +9,7 @@ checks the cookie on these too, but only for a session that has a token, which
 it logs out if the cookie doesn't match; anyone else gets through.
 
 Paths come from ``reverse()``, so they follow the URLconf. Keep the list to what
-logging in and out needs, plus the health check and the web app manifest.
+logging in and out needs, plus the health check, the web app manifest and the app icon.
 """
 
 import dataclasses
@@ -53,6 +53,9 @@ def auth_whitelist():
         # Browsers fetch the web app manifest without cookies
         # (core/web_manifest.py).
         WhitelistEntry(reverse("web_manifest"), _GET),
+        # Likewise the uploaded app icon (core/app_icon.py); the default is a
+        # static file.
+        WhitelistEntry(reverse("app_icon"), _GET),
     ]
 
 

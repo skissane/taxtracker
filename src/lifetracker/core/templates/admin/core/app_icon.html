@@ -1,0 +1,74 @@
+{% extends "admin/base_site.html" %}
+
+{% load i18n static %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'core/admin_pages.css' %}">
+  <style>
+    .lt-app-icon {
+      display: block;
+      width: 180px;
+      height: 180px;
+      border-radius: 40px;
+    }
+  </style>
+{% endblock extrastyle %}
+{% block breadcrumbs %}
+  <ol class="breadcrumbs">
+    <li><a href="{% url 'admin:index' %}">{% trans "Home" %}</a></li>
+    <li aria-current="page">App Icon</li>
+  </ol>
+{% endblock breadcrumbs %}
+{% block content %}
+  <p>
+    The icon for the app on a phone's home screen (via "Add to Home Screen" on iOS, or "Install app" in Chrome), and the browser tab's icon.
+    It's public: anyone can fetch it without logging in, so don't use anything that gives away what the site holds.
+    iOS copies the icon when the app is added, so to see a new one there, remove the app and add it again.
+  </p>
+  <div class="lt-info-box">
+    <table class="lt-table">
+      <tr>
+        <th class="lt-label">Current Icon</th>
+        <td>
+          <img class="lt-app-icon"
+               src="{{ icon.url }}"
+               alt="The current app icon"
+               width="180"
+               height="180">
+        </td>
+      </tr>
+      <tr>
+        <th class="lt-label">Source</th>
+        <td>
+          {% if icon.uploaded_at %}
+            Uploaded {{ icon.uploaded_at }}
+          {% else %}
+            The default
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <th class="lt-label">Size</th>
+        <td>{{ icon.width }}x{{ icon.height }} pixels</td>
+      </tr>
+    </table>
+  </div>
+  <h2>Upload a new icon</h2>
+  <p>
+    A square PNG.
+    Make it opaque, as iOS fills in transparency with black, and keep anything important away from the edges, which iOS and Android round off.
+  </p>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <input type="submit" class="default" value="Upload">
+  </form>
+  {% if icon.uploaded_at %}
+    <h2>Reset</h2>
+    <form method="post">
+      {% csrf_token %}
+      <input type="submit" name="reset" value="Reset to Default">
+    </form>
+  {% endif %}
+{% endblock content %}

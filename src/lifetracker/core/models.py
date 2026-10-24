@@ -259,3 +259,38 @@ class CloudBackupStatus(models.Model):
         if self.last_backup_at is None:
             return "Cloud backup status: never backed up"
         return f"Cloud backup status: last backup at {self.last_backup_at}"
+
+
+# The only allowed primary key for AppIcon, which is a single row.
+APP_ICON_PK = 1
+
+
+class AppIcon(models.Model):
+    """An uploaded replacement for the default app icon (see core/app_icon.py).
+
+    No row means the default. Replacing the icon deletes the row and creates a
+    new one, so the old file goes with it (``delete_stored_files``).
+    """
+
+    image = models.FileField(storage=database_storage)
+    width = models.PositiveIntegerField()
+    height = models.PositiveIntegerField()
+    # Of the image's bytes; its start versions the icon's URL.
+    sha256 = models.CharField(max_length=64)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "App Icon"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(pk=APP_ICON_PK),
+                name="appicon_singleton",
+            ),
+        ]
+
+    def __str__(self):
+        return f"App icon uploaded at {self.uploaded_at}"
+
+    @property
+    def version(self):
+        return self.sha256[:16]

@@ -1,6 +1,6 @@
 {% extends "admin/base_site.html" %}
 
-{% load page_timing static %}
+{% load app_icon page_timing %}
 
 {% comment %}
   Extends the admin's own base_site.html (Django skips this file when resolving
@@ -8,16 +8,17 @@
   so have no admin index entry, and (on Fly) to the Machine's page in Fly's
   dashboard. If these grow numerous, make them a menu. Also
   adds the page generation time (see core/timing.py) to every page's footer,
-  and links the web app manifest and icon (see core/web_manifest.py) from every
-  page's head.
+  and links the web app manifest and icon (see core/web_manifest.py and
+  core/app_icon.py) from every page's head.
 {% endcomment %}
 {% block extrahead %}
   {{ block.super }}
   <link rel="manifest" href="{% url 'web_manifest' %}">
+  {% app_icon as icon %}
   <link rel="icon"
-        type="image/svg+xml"
-        href="{% static 'core/app_icon.svg' %}">
-  <link rel="apple-touch-icon" href="{% static 'core/app_icon.png' %}">
+        type="{{ icon.favicon_type }}"
+        href="{{ icon.favicon_url }}">
+  <link rel="apple-touch-icon" href="{{ icon.url }}">
   {% if site_title %}<meta name="apple-mobile-web-app-title" content="{{ site_title }}">{% endif %}
 {% endblock extrahead %}
 {% block extrastyle %}
@@ -36,6 +37,7 @@
     <a href="{% url 'admin:idle_watchdog' %}">Idle Watchdog</a> /
     <a href="{% url 'admin:uptime_report' %}">Uptime</a> /
     <a href="{% url 'admin:client_ips' %}">Client IPs</a> /
+    <a href="{% url 'admin:app_icon_page' %}">App Icon</a> /
     {% if fly_machine_url %}
       <a href="{{ fly_machine_url }}"
          target="_blank"
