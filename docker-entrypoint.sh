@@ -24,6 +24,15 @@ if [ "$(id -u)" = 0 ]; then
   find "$data_dir" /home/lifetracker \( ! -user lifetracker -o ! -group lifetracker \) \
     -exec chown -h lifetracker:lifetracker {} +
 
+  # On a Fly Machine, the Machines API is a Unix socket only root can use; let
+  # the lifetracker group use it too, so the app and `./flyssh.sh` sessions
+  # don't need root for it (issue #211). After groupmod, so the group ID is
+  # the final one. Off Fly there's no socket, so nothing to do.
+  if [ -S /.fly/api ]; then
+    chgrp lifetracker /.fly/api
+    chmod g+rw /.fly/api
+  fi
+
   # setpriv leaves HOME as /root, which lifetracker can't write to (gunicorn
   # puts its control socket there). usermod -u above re-owns the home directory.
   HOME=/home/lifetracker exec setpriv \

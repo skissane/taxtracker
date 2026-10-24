@@ -435,7 +435,8 @@ This is cosmetic only — Django never looks up indexes by name at runtime — d
 Use `uv run python -c '...'` not `python -c` or `python3 -c` — the bare commands won't use the project's virtualenv and may not even exist on the system.
 
 **The Docker container starts as root on purpose, then drops to `lifetracker`.**
-`docker-entrypoint.sh` needs root only to renumber the `lifetracker` user/group to `LIFETRACKER_UID`/`LIFETRACKER_GID` and re-own `/data`, then re-runs itself via `setpriv`.
+`docker-entrypoint.sh` needs root only to renumber the `lifetracker` user/group to `LIFETRACKER_UID`/`LIFETRACKER_GID`, re-own `/data` and, if `/.fly/api` is a socket (the Fly Machines API, otherwise root-only; issue #211), `chgrp lifetracker` and `chmod g+rw` it, then re-runs itself via `setpriv`.
+The socket step comes after `groupmod`, so it gets the final GID, and is a no-op off Fly (`just docker-run`, `just docker-smoke`).
 Don't replace this with a Dockerfile `USER` line: the UID/GID couldn't then change at runtime, which `just docker-run` relies on to read the host's mode-0600 `secret_key`.
 Use `docker exec -u lifetracker` (or `just docker-shell`) so commands don't run as root and leave root-owned files in `/data`.
 
