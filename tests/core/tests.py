@@ -76,6 +76,8 @@ from lifetracker.core.auth_whitelist import auth_whitelist, is_whitelisted
 from lifetracker.core.backup import (
     CLOUD_BACKUP_S3_CONFIG,
     backup_database,
+    check_backup_file,
+    restore_database,
     run_cloud_backup,
 )
 from lifetracker.core.forms import FlexibleDateField
@@ -2798,6 +2800,293 @@ class CloudBackupCommandTests(TransactionTestCase):
             "but failed to record backup status.",
         )
         self.assertIsInstance(cm.exception.__cause__.__cause__, IntegrityError)
+
+
+class RestoreDatabaseTests(TestCase):
+    """restore_database() and check_backup_file(), on file-backed databases."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        handler = ConnectionHandler(
+            {
+                "default": {
+                    **settings.DATABASES["default"],
+                    "NAME": self.tmp / "db.sqlite3",
+                }
+            }
+        )
+        self.addCleanup(handler.close_all)
+        self.connection = handler["default"]
+        with self.connection.cursor() as cursor:
+            cursor.execute("CREATE TABLE t (v TEXT)")
+            cursor.execute("INSERT INTO t VALUES ('old')")
+        patcher = mock.patch(
+            "lifetracker.core.backup.connections", {"default": self.connection}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def make_backup(self, *statements, name="backup.sqlite3"):
+        path = self.tmp / name
+        conn = sqlite3.connect(path)
+        for statement in statements:
+            conn.execute(statement)
+        conn.commit()
+        conn.close()
+        return path
+
+    def live_rows(self):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT v FROM t")
+            return cursor.fetchall()
+
+    def test_restore_replaces_contents_and_keeps_wal(self):
+        path = self.make_backup(
+            "CREATE TABLE t (v TEXT)",
+            "INSERT INTO t VALUES ('restored')",
+            "CREATE TABLE django_migrations (id INTEGER)",
+        )
+        # Another connection, as a web request would have, holding a read
+        # snapshot: it sees the old contents until it ends, then the new.
+        reader = sqlite3.connect(self.tmp / "db.sqlite3", isolation_level=None)
+        self.addCleanup(reader.close)
+        reader.execute("BEGIN")
+        self.assertEqual(reader.execute("SELECT v FROM t").fetchall(), [("old",)])
+        restore_database(path)
+        self.assertEqual(reader.execute("SELECT v FROM t").fetchall(), [("old",)])
+        reader.execute("COMMIT")
+        self.assertEqual(reader.execute("SELECT v FROM t").fetchall(), [("restored",)])
+        self.assertEqual(self.live_rows(), [("restored",)])
+        with self.connection.cursor() as cursor:
+            cursor.execute("PRAGMA journal_mode")
+            self.assertEqual(cursor.fetchone(), ("wal",))
+
+    def test_restore_refuses_different_page_size(self):
+        path = self.make_backup("PRAGMA page_size = 8192", "CREATE TABLE t (v TEXT)")
+        with self.assertRaisesMessage(RuntimeError, "page size (8192 bytes)"):
+            restore_database(path)
+        self.assertEqual(self.live_rows(), [("old",)])
+
+    def test_restore_refuses_inside_transaction(self):
+        path = self.make_backup("CREATE TABLE t (v TEXT)")
+        with mock.patch.object(self.connection, "in_atomic_block", True):
+            with self.assertRaisesMessage(
+                RuntimeError, "Can't restore the database inside a transaction."
+            ):
+                restore_database(path)
+        self.assertEqual(self.live_rows(), [("old",)])
+
+    def test_check_accepts_django_database(self):
+        check_backup_file(self.make_backup("CREATE TABLE django_migrations (id)"))
+
+    def test_check_rejects_database_without_migrations(self):
+        with self.assertRaisesMessage(
+            RuntimeError, "The backup has no django_migrations table."
+        ):
+            check_backup_file(self.make_backup("CREATE TABLE t (v TEXT)"))
+
+    def test_check_rejects_corrupt_database(self):
+        path = self.make_backup(
+            "CREATE TABLE django_migrations (id)",
+            "CREATE TABLE t (v TEXT)",
+            *["INSERT INTO t VALUES ('" + "x" * 100 + "')"] * 500,
+        )
+        data = bytearray(path.read_bytes())
+        # Point page 4's (a leaf of t's) first freeblock past the page's end.
+        offset = 4096 * 3 + 1
+        data[offset : offset + 2] = b"\x0f\xf0"
+        path.write_bytes(data)
+        with self.assertRaisesMessage(
+            RuntimeError, "The backup failed SQLite's integrity check: "
+        ):
+            check_backup_file(path)
+
+    def test_check_rejects_non_database(self):
+        path = self.tmp / "junk.sqlite3"
+        path.write_bytes(b"not a database" * 100)
+        with self.assertRaisesMessage(
+            RuntimeError, "The backup isn't a valid database"
+        ):
+            check_backup_file(path)
+
+
+@override_settings(
+    LIFETRACKER_BACKUP_S3_ENDPOINT_URL="https://example.invalid",
+    LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+    LIFETRACKER_BACKUP_S3_REGION_NAME="auto",
+    LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+    LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
+)
+class RestoreCloudBackupCommandTests(TransactionTestCase):
+    # Not TestCase: backup_database() refuses to run inside a transaction.
+
+    """Tests for the restore_cloud_backup management command.
+
+    ``restore_database`` is replaced, as copying over the in-memory test
+    database would destroy it; ``RestoreDatabaseTests`` tests the real one.
+    """
+
+    KEY = "other-host/db-backup.2026-10-01.00.00.00.sqlite3"
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "backup.sqlite3"
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE django_migrations (id INTEGER)")
+        conn.commit()
+        conn.close()
+        self.backup_bytes = path.read_bytes()
+        client_patcher = mock.patch("lifetracker.core.backup.boto3.client")
+        self.mock_client = client_patcher.start()
+        self.addCleanup(client_patcher.stop)
+        self.uploads = _record_uploads(self.mock_client)
+        self.downloads = []
+
+        def download_fileobj(bucket, key, fileobj):
+            self.downloads.append((bucket, key))
+            fileobj.write(self.backup_bytes)
+
+        self.mock_client.return_value.download_fileobj.side_effect = download_fileobj
+        self.restored = []
+
+        def fake_restore(path):
+            self.restored.append(Path(path).read_bytes())
+            # As restoring would, replace the status row with the backup's.
+            CloudBackupStatus.objects.update_or_create(
+                pk=CLOUD_BACKUP_STATUS_PK,
+                defaults={
+                    "last_backup_at": timezone.now(),
+                    "last_backup_object_key": "from-the-backup",
+                    "last_backup_size": 1,
+                },
+            )
+
+        restore_patcher = mock.patch(
+            "lifetracker.core.management.commands.restore_cloud_backup"
+            ".restore_database",
+            side_effect=fake_restore,
+        )
+        restore_patcher.start()
+        self.addCleanup(restore_patcher.stop)
+        migrate_patcher = mock.patch(
+            "lifetracker.core.management.commands.restore_cloud_backup.call_command"
+        )
+        self.mock_migrate = migrate_patcher.start()
+        self.addCleanup(migrate_patcher.stop)
+
+    def call(self, *args):
+        out = io.StringIO()
+        call_command("restore_cloud_backup", self.KEY, *args, stdout=out)
+        return out.getvalue()
+
+    def test_backs_up_then_restores(self):
+        output = self.call("--no-input")
+        self.assertEqual(self.downloads, [("test-bucket", self.KEY)])
+        [upload] = self.uploads
+        current_key = upload["Key"]
+        self.assertRegex(current_key, r"^test-host\.local/db-backup\.")
+        self.assertEqual(self.restored, [self.backup_bytes])
+        # The status describes the backup just made, not the restored one's.
+        status = CloudBackupStatus.objects.get(pk=CLOUD_BACKUP_STATUS_PK)
+        self.assertEqual(status.last_backup_object_key, current_key)
+        self.mock_migrate.assert_called_once_with(
+            "migrate", interactive=False, stdout=mock.ANY
+        )
+        self.assertIn(f"Backed up the current database as {current_key}.", output)
+        self.assertIn(
+            f"Restored {self.KEY}. To undo, restore {current_key}, which holds",
+            output,
+        )
+
+    def test_confirmed(self):
+        with mock.patch("builtins.input", return_value="yes") as mock_input:
+            self.call()
+        mock_input.assert_called_once()
+        self.assertEqual(len(self.restored), 1)
+
+    def test_cancelled(self):
+        for kwargs in [{"return_value": "no"}, {"side_effect": EOFError}]:
+            with self.subTest(**kwargs):
+                with mock.patch("builtins.input", **kwargs):
+                    with self.assertRaisesMessage(CommandError, "Restore cancelled."):
+                        self.call()
+        self.assertEqual(self.uploads, [])
+        self.assertEqual(self.restored, [])
+
+    def test_download_error_changes_nothing(self):
+        self.mock_client.return_value.download_fileobj.side_effect = ClientError(
+            {"Error": {"Code": "404", "Message": "Not Found"}}, "HeadObject"
+        )
+        with self.assertRaisesMessage(CommandError, f"Downloading {self.KEY} failed: "):
+            self.call("--no-input")
+        self.assertEqual(self.uploads, [])
+        self.assertEqual(self.restored, [])
+
+    @override_settings(LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="")
+    def test_missing_settings_fail(self):
+        with self.assertRaisesMessage(
+            CommandError,
+            f"Downloading {self.KEY} failed: Cloud backup settings are incomplete. "
+            "Missing: LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY.",
+        ):
+            self.call("--no-input")
+        self.mock_client.assert_not_called()
+
+    def test_invalid_backup_changes_nothing(self):
+        self.backup_bytes = b"not a database" * 100
+        with self.assertRaisesMessage(
+            CommandError, f"Not restoring {self.KEY}: The backup isn't a valid"
+        ):
+            self.call("--no-input")
+        self.assertEqual(self.uploads, [])
+        self.assertEqual(self.restored, [])
+
+    def test_backup_error_changes_nothing(self):
+        self.mock_client.return_value.upload_fileobj.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
+            "PutObject",
+        )
+        with self.assertRaisesMessage(
+            CommandError, "Not restoring: backing up the current database failed: "
+        ):
+            self.call("--no-input")
+        self.assertEqual(self.restored, [])
+
+    def test_restores_when_only_recording_backup_status_fails(self):
+        with (
+            mock.patch.object(
+                CloudBackupStatus.objects,
+                "update_or_create",
+                side_effect=IntegrityError("boom"),
+            ),
+            mock.patch(
+                "lifetracker.core.management.commands.restore_cloud_backup"
+                ".restore_database",
+                side_effect=lambda path: self.restored.append(Path(path).read_bytes()),
+            ),
+        ):
+            output = self.call("--no-input")
+        [upload] = self.uploads
+        self.assertIn(f"Backed up the current database as {upload['Key']}.", output)
+        self.assertEqual(self.restored, [self.backup_bytes])
+
+    def test_restore_error_reported(self):
+        with mock.patch(
+            "lifetracker.core.management.commands.restore_cloud_backup"
+            ".restore_database",
+            side_effect=RuntimeError("page sizes differ"),
+        ):
+            with self.assertRaisesMessage(
+                CommandError,
+                f"Restoring {self.KEY} failed, so the database should be unchanged: "
+                "page sizes differ",
+            ):
+                self.call("--no-input")
+        self.mock_migrate.assert_not_called()
 
 
 class CloudBackupStatusMoveMigrationTests(TransactionTestCase):
