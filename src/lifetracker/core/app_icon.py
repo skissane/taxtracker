@@ -75,7 +75,7 @@ def png_info(data):
         chunk_type = data[offset + 4 : offset + 8]
         body = data[offset + 8 : offset + 8 + length]
         # The chunk's data, then a 4-byte CRC.
-        if len(body) < length or offset + 12 + length > len(data):
+        if offset + 12 + length > len(data):
             raise InvalidIcon("The PNG image is cut off.")
         if header is None:
             if chunk_type != b"IHDR" or length != 13:

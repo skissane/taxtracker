@@ -54,6 +54,8 @@ class PngCheckTests(SimpleTestCase):
             (b"GIF89a" + png, "isn't a PNG"),
             (png[:40], "cut off"),
             (png[:-12], "cut off"),
+            # Within the IDAT chunk's CRC.
+            (png[:-14], "cut off"),
             (png[:8] + _chunk(b"IDAT", b"") + png[8:], "no valid header"),
             (make_png(600, 512), "600x512, not square"),
             (make_png(511), "smaller than 512x512"),
@@ -81,6 +83,7 @@ class AppIconTests(TestCase):
         first = make_png(512)
         app_icon.save_icon(first)
         stored = AppIcon.objects.get()
+        self.assertEqual(str(stored), f"App icon uploaded at {stored.uploaded_at}")
         self.assertEqual(stored.sha256, hashlib.sha256(first).hexdigest())
         icon = app_icon.current_icon()
         self.assertEqual(icon.url, f"/app-icon.png?v={stored.sha256[:16]}")
