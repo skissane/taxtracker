@@ -441,6 +441,21 @@ def _parse_status_time(value):
     return datetime.datetime.fromisoformat(value) if value else None
 
 
+def _auto_backup_status(raw):
+    """The status file's automatic backup section, for the page, or None if
+    automatic backups are off."""
+    if raw is None:
+        return None
+    return {
+        "running": bool(raw["running"]),
+        "reason": raw["reason"],
+        "last_started_at": _parse_status_time(raw["last_started_at"]),
+        "last_finished_at": _parse_status_time(raw["last_finished_at"]),
+        "last_exit_status": raw["last_exit_status"],
+        "next_run_at": _parse_status_time(raw["next_run_at"]),
+    }
+
+
 def idle_watchdog_page_context(now=None):
     """The idle watchdog page's context, from the environment (the same as the
     watchdog's) and its status file."""
@@ -451,6 +466,7 @@ def idle_watchdog_page_context(now=None):
         "status": None,
         "status_error": None,
         "system_uptime": None,
+        "auto_backup_interval": None,
     }
     try:
         config = idle_watchdog.config_from_env()
@@ -458,6 +474,10 @@ def idle_watchdog_page_context(now=None):
         context["config_error"] = str(exc)
         return context
     context["config"] = config
+    if config.auto_backup_interval_seconds is not None:
+        context["auto_backup_interval"] = _format_duration(
+            config.auto_backup_interval_seconds
+        )
     uptime = idle_watchdog.system_uptime()
     if uptime is not None:
         context["system_uptime"] = _format_duration(uptime)
@@ -494,6 +514,7 @@ def idle_watchdog_page_context(now=None):
                 }
                 for port in raw["ports"]
             ],
+            "auto_backup": _auto_backup_status(raw.get("auto_backup")),
         }
     except (KeyError, TypeError, ValueError) as exc:
         context["status_error"] = (
@@ -528,6 +549,10 @@ def idle_watchdog_page_context(now=None):
     # from when it finishes, about now. It only stops at a check, so up to one
     # check interval later.
     status["stop_at"] = now + datetime.timedelta(seconds=idle_timeout)
+    if status["auto_backup"] and status["auto_backup"]["last_started_at"]:
+        status["auto_backup"]["last_started_ago"] = _format_duration(
+            (now - status["auto_backup"]["last_started_at"]).total_seconds()
+        )
     for port in status["ports"]:
         seen = port["last_connection_at"]
         port["last_connection_ago"] = (

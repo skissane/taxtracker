@@ -28,6 +28,10 @@ primary_region = "syd"
   # once nothing has used it for a while. Unlike Fly Proxy's auto-stop, which
   # is off below, it counts SSH sessions as activity (issue #135).
   LIFETRACKER_IDLE_STOP = "stop"
+  # The same process backs the database up to the cloud backup bucket at
+  # startup, every 6 hours while up and before stopping, skipping each when
+  # nothing has changed since the last backup (issue #83).
+  LIFETRACKER_AUTO_BACKUP = "on"
   # Fly timestamps every log line itself, so don't add a second one.
   LIFETRACKER_LOG_TIMESTAMPS = "0"
 
