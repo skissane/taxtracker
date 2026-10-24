@@ -849,7 +849,12 @@ class RunTests(TempDirMixin, SimpleTestCase):
         self.assertEqual(args.kwargs["env"], environ)
 
     def test_main(self):
-        environ = {"LIFETRACKER_CLIENT_IP_DB": str(self.temp / "x.sqlite3")}
+        # TMPDIR too, as the request log's default depends on it and
+        # patch.dict leaves the rest of os.environ (e.g. macOS's TMPDIR) in place.
+        environ = {
+            "LIFETRACKER_CLIENT_IP_DB": str(self.temp / "x.sqlite3"),
+            "TMPDIR": str(self.temp),
+        }
         with (
             mock.patch.dict(os.environ, environ),
             mock.patch("signal.signal") as signal_,
