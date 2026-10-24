@@ -30,6 +30,10 @@ The same process also records which seconds the app was up, one bit per second
 in a file per UTC day (``uptime_log``), if there's an uptime directory
 (``uptime_log.uptime_dir_from_env``), even with ``LIFETRACKER_IDLE_STOP`` off.
 So it wakes every second, and checks for idleness every check interval.
+
+It also runs automatic cloud backups (``auto_backup``) if
+``LIFETRACKER_AUTO_BACKUP`` is ``on``: at startup, every few hours, and in
+``stop`` mode before stopping gunicorn, which waits for that backup to finish.
 """
 
 import dataclasses
@@ -45,13 +49,15 @@ import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
-from lifetracker.core import uptime_log
+from lifetracker.core import auto_backup, uptime_log
 
 MODES = ("off", "monitor", "stop")
 DEFAULT_IDLE_MINUTES = 10
 DEFAULT_INTERVAL_SECONDS = 30
 DEFAULT_STATUS_FILE = "/tmp/lifetracker-idle-watchdog.json"
 DEFAULT_REQUEST_FILE = "/tmp/lifetracker-last-request"
+AUTO_BACKUP_MODES = ("off", "on")
+DEFAULT_AUTO_BACKUP_INTERVAL_HOURS = 6
 SSH_PORT = 22
 PROC_NET_TCP_FILES = (Path("/proc/net/tcp"), Path("/proc/net/tcp6"))
 PROC_UPTIME_FILE = Path("/proc/uptime")
@@ -69,6 +75,16 @@ class Config:
     request_file: Path
     # Where to record uptime (see ``uptime_log``), or None not to.
     uptime_dir: Path | None = None
+    # Time between automatic backups (see ``auto_backup``), or None for none.
+    auto_backup_interval_seconds: float | None = None
+
+    @property
+    def has_work(self) -> bool:
+        return (
+            self.mode != "off"
+            or self.uptime_dir is not None
+            or self.auto_backup_interval_seconds is not None
+        )
 
 
 def _positive_number(environ: Mapping[str, str], name: str, default: float) -> float:
@@ -99,6 +115,10 @@ def config_from_env(environ: Mapping[str, str] = os.environ) -> Config:
     - ``LIFETRACKER_IDLE_STOP_REQUEST_FILE``: the file gunicorn's workers touch
       after each request (default ``/tmp/lifetracker-last-request``).
     - ``LIFETRACKER_UPTIME_DIR``: see ``uptime_log.uptime_dir_from_env``.
+    - ``LIFETRACKER_AUTO_BACKUP``: ``off`` (the default, also when blank) or
+      ``on``, for automatic cloud backups (see ``auto_backup``).
+    - ``LIFETRACKER_AUTO_BACKUP_INTERVAL_HOURS``: time between automatic
+      backups while the app is up (default 6).
     """
     mode = environ.get("LIFETRACKER_IDLE_STOP", "").strip().lower() or "off"
     if mode not in MODES:
@@ -131,6 +151,19 @@ def config_from_env(environ: Mapping[str, str] = os.environ) -> Config:
         environ.get("LIFETRACKER_IDLE_STOP_REQUEST_FILE", "").strip()
         or DEFAULT_REQUEST_FILE
     )
+    auto_backup_mode = (
+        environ.get("LIFETRACKER_AUTO_BACKUP", "").strip().lower() or "off"
+    )
+    if auto_backup_mode not in AUTO_BACKUP_MODES:
+        raise ValueError(
+            "LIFETRACKER_AUTO_BACKUP must be one of"
+            f" {', '.join(AUTO_BACKUP_MODES)}, not {auto_backup_mode!r}"
+        )
+    auto_backup_hours = _positive_number(
+        environ,
+        "LIFETRACKER_AUTO_BACKUP_INTERVAL_HOURS",
+        DEFAULT_AUTO_BACKUP_INTERVAL_HOURS,
+    )
     return Config(
         mode=mode,
         idle_seconds=idle_minutes * 60,
@@ -139,6 +172,9 @@ def config_from_env(environ: Mapping[str, str] = os.environ) -> Config:
         status_file=status_file,
         request_file=request_file,
         uptime_dir=uptime_log.uptime_dir_from_env(environ),
+        auto_backup_interval_seconds=(
+            auto_backup_hours * 3600 if auto_backup_mode == "on" else None
+        ),
     )
 
 
@@ -223,6 +259,9 @@ class Watchdog:
         self.last_seen: dict[int, float | None] = dict.fromkeys(config.ports)
         self.last_request: float | None = None
         self.stopping = False
+        # Waiting for the backup before stopping to finish.
+        self.backing_up = False
+        self.auto_backup: auto_backup.AutoBackup | None = None
 
     def check(
         self, now: float, counts: Mapping[int, int], last_request: float | None
@@ -253,6 +292,8 @@ class Watchdog:
         mode nothing happens then)."""
         if self.stopping:
             state = "stopping"
+        elif self.backing_up:
+            state = "backing up"
         elif any(self.counts.values()):
             state = "active"
         else:
@@ -277,6 +318,9 @@ class Watchdog:
                 }
                 for port in self.config.ports
             ],
+            "auto_backup": (
+                self.auto_backup.status(_iso) if self.auto_backup else None
+            ),
         }
 
 
@@ -334,12 +378,13 @@ def run(
     getppid=os.getppid,
     kill=os.kill,
     uptime=system_uptime,
+    popen=subprocess.Popen,
 ) -> int:
-    """Record uptime every second (if there's an uptime directory) and check
+    """Record uptime every second (if there's an uptime directory), check
     for idleness every ``config.interval_seconds`` (unless the mode is
-    ``off``), until it's time to stop (in ``stop`` mode) or gunicorn's master
-    has gone; returns the exit status."""
-    if config.mode == "off" and config.uptime_dir is None:
+    ``off``) and run automatic backups (if on), until it's time to stop (in
+    ``stop`` mode) or gunicorn's master has gone; returns the exit status."""
+    if not config.has_work:
         return 0
     started_at = clock()
     watchdog = Watchdog(config, master_pid, started_at=started_at)
@@ -359,6 +404,19 @@ def run(
         booted = uptime()
         if booted is not None and booted <= uptime_log.MAX_BOOT_BACKFILL_SECONDS:
             since = started_at - booted
+    backup = None
+    if config.auto_backup_interval_seconds is not None:
+        backup = auto_backup.AutoBackup(
+            config.auto_backup_interval_seconds, started_at, log=log, popen=popen
+        )
+        watchdog.auto_backup = backup
+        log(
+            "automatic backups at startup, every"
+            f" {config.auto_backup_interval_seconds / 3600:g} hours"
+            + (" and before stopping" if config.mode == "stop" else "")
+        )
+    # Whether the backup before stopping has started, for this idle stretch.
+    pre_stop_backup = False
     uptime_failing = False
     next_check = started_at
     # Uptime is fsynced every check interval, even when not checking.
@@ -389,12 +447,27 @@ def run(
                     log("recording uptime again")
                 uptime_failing = False
                 since = None
+        if backup is not None:
+            backup.tick(now)
         if check_due:
             due = watchdog.check(
                 now, count(config.ports), request_time(config.request_file)
             )
-            if due and config.mode == "stop":
-                watchdog.stopping = True
+            stop = due and config.mode == "stop"
+            backing_up = False
+            if not due:
+                pre_stop_backup = False
+            if stop and backup is not None:
+                # Back up first, waiting for any backup already running, and
+                # then for this one; stop anyway if it fails (the next startup
+                # backs up). Activity meanwhile calls off the stop.
+                if not pre_stop_backup and not backup.running:
+                    backup.start(now, "before stopping")
+                    pre_stop_backup = True
+                stop = pre_stop_backup and not backup.running
+                backing_up = not stop
+            watchdog.stopping = stop
+            watchdog.backing_up = backing_up
             try:
                 write_status(config.status_file, watchdog.status())
             except OSError as exc:
@@ -407,7 +480,7 @@ def run(
                 )
                 kill(master_pid, signal.SIGTERM)
                 return 0
-            if due and not reported_due:
+            if due and config.mode == "monitor" and not reported_due:
                 log(
                     f"no activity for {idle_minutes:g} minutes"
                     " (monitor mode: not stopping)"
@@ -420,12 +493,15 @@ def run(
         wake = math.floor(now) + 1 if uptime_recorder is not None else math.inf
         if checking:
             wake = min(wake, next_check)
+        if backup is not None:
+            wake = min(wake, backup.wake_time(now))
         sleep(max(wake - clock(), 0))
 
 
 def spawn(master_pid: int, environ: Mapping[str, str] = os.environ):
-    """Start the watchdog for gunicorn master ``master_pid`` unless it's off
-    and there's no uptime directory.
+    """Start the watchdog for gunicorn master ``master_pid`` unless it has
+    nothing to do: it's off, there's no uptime directory and automatic backups
+    are off.
 
     Returns the ``Popen``, or None if it has nothing to do, is misconfigured
     (logged; better to keep serving than fail to start over this) or
@@ -436,7 +512,7 @@ def spawn(master_pid: int, environ: Mapping[str, str] = os.environ):
     except ValueError as exc:
         log(f"not starting: {exc}")
         return None
-    if config.mode == "off" and config.uptime_dir is None:
+    if not config.has_work:
         return None
     if not PROC_NET_TCP_FILES[0].exists():
         log(f"not starting: {PROC_NET_TCP_FILES[0]} is missing (Linux only)")
