@@ -58,7 +58,7 @@
     </p>
     <p>
       {% if geoip_files %}
-        Locations from {{ geoip_files|join:", " }} (<a href="https://db-ip.com">IP Geolocation by DB-IP</a>).
+        Locations from {% for name in geoip_files %}<code>{{ name }}</code>{% if not forloop.last %}, {% endif %}{% endfor %} (<a href="https://db-ip.com">IP Geolocation by DB-IP</a>).
       {% else %}
         No DB-IP databases in <code>{{ config.geoip_dir }}</code> yet, so no locations: run <code>manage.py update_geoip</code>.
       {% endif %}
