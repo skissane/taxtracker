@@ -1484,6 +1484,11 @@ class ClientIPsAdminViewTests(TempDirMixin, TestCase):
             "2025-10-23T06:13:20Z</time>",
             html=True,
         )
+        self.assertContains(
+            response,
+            "Locations from <code>dbip-country-lite-2026-10.mmdb</code>, "
+            "<code>dbip-asn-lite-2026-10.mmdb</code> (",
+        )
         self.assertContains(response, "IP Geolocation by DB-IP")
         networks = response.content.decode().split("<h2>IPs</h2>")[0]
         self.assertIn("AS64500", networks)
