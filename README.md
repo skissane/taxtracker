@@ -450,6 +450,11 @@ Browsers fetch the manifest without cookies, so it needs no login, and the name 
 On iOS the label under the icon is the page's own site name when you add it, which you can edit then.
 A home screen app on iOS has its own cookies, separate from Safari's, so you log in once inside it.
 
+The default icon is a gold check in a box on the admin's blue.
+To use your own, open **App Icon** in the admin's top bar (superusers only) and upload a square PNG of at least 512x512 pixels; the same page resets it to the default.
+The icon is stored in the database, so backups include it, and like the manifest it's public, so pick one that doesn't give away what the site holds.
+iOS copies the icon when you add the app, so to see a new one there, remove the app and add it again.
+
 
 
 The `lifetracker-cli` command has a few standalone helpers for preparing files to attach, separate from the web app: extracting attachments from `.eml` files and PDFs from Fidelity `.har` files, filtering ZIPs, converting ZIPs of `.eml` files to PDF or text, and grouping lists of dates by financial year.

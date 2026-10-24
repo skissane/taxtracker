@@ -297,3 +297,9 @@ def test_client_ips(admin_user, page, monkeypatch, tmp_path):
     page.goto("/admin/client-ips/")
     page.locator("details summary").first.click()
     _screenshot(page, "client-ips")
+
+
+def test_app_icon(admin_user, page):
+    _log_in(page, admin_user)
+    page.goto("/admin/app-icon/")
+    _screenshot(page, "app-icon")

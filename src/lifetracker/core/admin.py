@@ -5,6 +5,7 @@ import sqlite3
 import time
 from urllib.parse import quote
 
+from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -17,7 +18,7 @@ from django.utils.html import format_html_join
 from django.utils.safestring import mark_safe
 from django.utils.timesince import timesince
 
-from lifetracker.core import client_ips, idle_watchdog, uptime_log
+from lifetracker.core import app_icon, client_ips, idle_watchdog, uptime_log
 from lifetracker.core.backup import (
     CLOUD_BACKUP_ERRORS,
     CloudBackupStatusUpdateError,
@@ -791,3 +792,59 @@ def client_ips_view(request):
         "title": "Client IPs",
     }
     return render(request, "admin/core/client_ips.html", context)
+
+
+# ---------------------------------------------------------------------------
+# App icon page
+# ---------------------------------------------------------------------------
+
+
+class AppIconForm(forms.Form):
+    image = forms.FileField(
+        label="PNG image",
+        help_text=(
+            f"Square, at least {app_icon.MIN_SIZE}x{app_icon.MIN_SIZE} pixels "
+            f"and at most {app_icon.MAX_BYTES // 1024} KiB."
+        ),
+        widget=forms.ClearableFileInput(attrs={"accept": "image/png"}),
+    )
+
+
+def app_icon_view(request):
+    """The superuser-only app icon page (see ``core/app_icon.py``), served and
+    linked like the idle watchdog page (see ``idle_watchdog_view``): it shows
+    the current icon, and uploads a replacement or resets it to the default."""
+    if not request.user.is_superuser:
+        raise PermissionDenied
+
+    form = AppIconForm()
+    if request.method == "POST":
+        if "reset" in request.POST:
+            app_icon.reset_icon()
+            messages.success(request, "The app icon is the default again.")
+            return redirect("admin:app_icon_page")
+        form = AppIconForm(request.POST, request.FILES)
+        if form.is_valid():
+            upload = form.cleaned_data["image"]
+            try:
+                # One byte more than allowed is enough for check_icon to refuse
+                # it, without reading all of a big file into memory.
+                info = app_icon.save_icon(upload.read(app_icon.MAX_BYTES + 1))
+            except app_icon.InvalidIcon as exc:
+                form.add_error("image", str(exc))
+            else:
+                messages.success(request, "The new app icon is in place.")
+                if info.has_transparency:
+                    messages.warning(
+                        request,
+                        "The image has transparency, which iOS fills in with black.",
+                    )
+                return redirect("admin:app_icon_page")
+
+    context = {
+        **admin.site.each_context(request),
+        "title": "App Icon",
+        "icon": app_icon.current_icon(),
+        "form": form,
+    }
+    return render(request, "admin/core/app_icon.html", context)

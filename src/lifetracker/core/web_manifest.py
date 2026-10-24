@@ -8,26 +8,26 @@ login page does to a visitor who isn't logged in
 than a static file. ``templates/admin/base_site.html`` links it, and the icon,
 from every admin page, the login page included.
 
-The icon is ``core/static/core/app_icon.png``, rendered at 512x512 from
-``app_icon.svg`` beside it. It's opaque, as iOS fills transparency with black.
-It's served for every size, as iOS and Android scale it down themselves.
+Its one icon is ``app_icon.current_icon()``, the default or an uploaded one,
+served for every size, as iOS and Android scale it down themselves.
 """
 
 from django.conf import settings
 from django.http import JsonResponse
-from django.templatetags.static import static
 from django.urls import reverse
 from django.views.decorators.cache import cache_control
 from django.views.decorators.http import require_safe
 
+from lifetracker.core.app_icon import current_icon
+
 # The admin's header background (its stylesheet's --header-bg).
 THEME_COLOR = "#417690"
-APP_ICON = "core/app_icon.png"
 
 
 def manifest():
     """The manifest, as a dict."""
     name = settings.LIFETRACKER_UNAUTHENTICATED_SITE_NAME
+    icon = current_icon()
     return {
         # Fixed, so a later change to start_url doesn't make it another app.
         "id": "/",
@@ -39,7 +39,11 @@ def manifest():
         "background_color": THEME_COLOR,
         "theme_color": THEME_COLOR,
         "icons": [
-            {"src": static(APP_ICON), "sizes": "512x512", "type": "image/png"},
+            {
+                "src": icon.url,
+                "sizes": f"{icon.width}x{icon.height}",
+                "type": "image/png",
+            },
         ],
     }
 
