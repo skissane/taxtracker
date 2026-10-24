@@ -224,8 +224,10 @@ class DBStoredFileAdmin(admin.ModelAdmin):
     def serve_file_view(self, request, pk):
         obj = get_object_or_404(DBStoredFile, pk=pk)
         content = bytes(obj.content)
-        content_type, _ = mimetypes.guess_type(obj.filename)
-        if not content_type:
+        content_type, encoding = mimetypes.guess_type(obj.filename)
+        # A compressed file (e.g. "x.txt.gz" guesses as text/plain, gzip) isn't
+        # the guessed type as served, so it's just bytes to download.
+        if not content_type or encoding:
             content_type = "application/octet-stream"
         # Attachments can come from anywhere, and one rendered as a page on
         # this origin (HTML, SVG, XML...) could run script with the viewer's

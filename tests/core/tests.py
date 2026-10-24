@@ -712,6 +712,18 @@ class ServeFileViewTests(TestCase):
                     "sandbox; default-src 'none'",
                 )
 
+    def test_compressed_files_are_downloaded_as_bytes(self):
+        """ "x.txt.gz" guesses as text/plain with gzip encoding; showing it as
+        text would show the compressed bytes."""
+        for filename in ["notes.txt.gz", "doc.pdf.bz2", "page.html.xz"]:
+            with self.subTest(filename=filename):
+                response = self._get_as_superuser(self._stored_file(filename))
+                self.assertEqual(response["Content-Type"], "application/octet-stream")
+                self.assertTrue(
+                    response["Content-Disposition"].startswith("attachment;"),
+                    response["Content-Disposition"],
+                )
+
     def test_inline_images_and_text_are_sandboxed(self):
         for filename in ["photo.png", "notes.txt"]:
             with self.subTest(filename=filename):
