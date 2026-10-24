@@ -232,6 +232,7 @@ Superusers can see the status in the admin, from the **Idle Watchdog** link in t
 - when the watchdog last checked, with a warning if it's gone quiet for more than three check intervals, which probably means it has stopped running;
 - the last request, and how long until the idle timeout runs out;
 - the watchdog's and the Machine's uptimes;
+- whether [automatic backups](#automatic-backups) are on, how the last one went and when the next is due;
 - for each port, its open connections and when it last saw one.
 
 Loading the page is itself a request, so it restarts the idle timer.
@@ -307,7 +308,20 @@ UV_ENV_FILE=.env uv run python manage.py cloud_backup   # locally, with .env's s
 ./flyssh.sh python manage.py cloud_backup               # on the Fly.io Machine
 ```
 
-Backups only run when you click the button or run the command; nothing schedules them.
+### Automatic backups
+
+With `LIFETRACKER_AUTO_BACKUP=on` (as `fly.toml` sets), the idle watchdog's process (see [Fly.io](#flyio)) also backs up the database automatically:
+
+- when the app starts;
+- every 6 hours while it's up (`LIFETRACKER_AUTO_BACKUP_INTERVAL_HOURS` changes that);
+- with `LIFETRACKER_IDLE_STOP=stop`, just before stopping the Machine, which waits for the backup to finish (or to fail; a backup that fails is logged and the next start tries again).
+
+Each runs `manage.py cloud_backup --if-changed`, which uploads nothing if the database hasn't changed since the last cloud backup, so a Machine that's started and stopped again without anyone changing anything adds no backups.
+Nothing can change the database while the Machine is stopped, so there's no need to wake it on a timetable.
+The backup at startup catches changes from before a stop that skipped the one before stopping, such as a crash or a deploy restarting the Machine.
+Logging in counts as a change, as sessions are stored in the database.
+To tell, every cloud backup records the database file's size and modification time in `db.sqlite3-backup-state.json` beside it (`LIFETRACKER_BACKUP_STATE_FILE` moves it).
+Nothing deletes old backups yet.
 
 The bucket and credentials come from these environment variables:
 

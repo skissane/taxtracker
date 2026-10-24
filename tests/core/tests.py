@@ -59,7 +59,13 @@ from lifetracker.admin_site import (
     _build_admin_site_header,
 )
 from lifetracker.asgi import application as asgi_application
-from lifetracker.core import client_ips, idle_watchdog, jwt_auth, uptime_log
+from lifetracker.core import (
+    auto_backup,
+    client_ips,
+    idle_watchdog,
+    jwt_auth,
+    uptime_log,
+)
 from lifetracker.core.admin import (
     DBStoredFileAdmin,
     MimeTypeFormSet,
@@ -77,6 +83,8 @@ from lifetracker.core.backup import (
     CLOUD_BACKUP_S3_CONFIG,
     backup_database,
     check_backup_file,
+    database_changed,
+    database_signature,
     restore_database,
     run_cloud_backup,
 )
@@ -2801,6 +2809,174 @@ class CloudBackupCommandTests(TransactionTestCase):
         )
         self.assertIsInstance(cm.exception.__cause__.__cause__, IntegrityError)
 
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_if_changed_skips_unchanged_database(self, mock_client):
+        out = io.StringIO()
+        with mock.patch(
+            "lifetracker.core.management.commands.cloud_backup.database_changed",
+            return_value=False,
+        ):
+            call_command("cloud_backup", "--if-changed", stdout=out)
+        self.assertEqual(
+            out.getvalue(),
+            "The database hasn't changed since the last cloud backup; skipping.\n",
+        )
+        mock_client.assert_not_called()
+
+    @mock.patch("lifetracker.core.backup.boto3.client")
+    def test_if_changed_backs_up_changed_database(self, mock_client):
+        uploads = _record_uploads(mock_client)
+        out = io.StringIO()
+        # The tests' in-memory database always counts as changed.
+        call_command("cloud_backup", "--if-changed", stdout=out)
+        [upload] = uploads
+        self.assertIn(f"uploaded successfully as {upload['Key']}", out.getvalue())
+
+
+@override_settings(
+    LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
+    LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
+    LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
+    LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
+)
+class BackupStateTests(TestCase):
+    """database_changed() after run_cloud_backup(), backing up a file-backed
+    database (the tests' own is in memory)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = Path(tmp.name) / "db.sqlite3"
+        handler = ConnectionHandler(
+            {"default": {**settings.DATABASES["default"], "NAME": self.path}}
+        )
+        self.addCleanup(handler.close_all)
+        self.connection = handler["default"]
+        with self.connection.cursor() as cursor:
+            cursor.execute("CREATE TABLE t (v TEXT)")
+            cursor.execute("INSERT INTO t VALUES ('old')")
+        patcher = mock.patch(
+            "lifetracker.core.backup.connections", {"default": self.connection}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        client_patcher = mock.patch("lifetracker.core.backup.boto3.client")
+        self.mock_client = client_patcher.start()
+        self.addCleanup(client_patcher.stop)
+
+    def other_connection(self):
+        """A connection like another process's (e.g. a web request's)."""
+        conn = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(conn.close)
+        return conn
+
+    def test_changed_without_a_backup(self):
+        self.assertTrue(database_changed())
+
+    def test_unchanged_after_backup(self):
+        run_cloud_backup()
+
+        self.assertFalse(database_changed())
+        state = json.loads(settings.LIFETRACKER_BACKUP_STATE_FILE.read_text())
+        key = self.mock_client.return_value.upload_fileobj.call_args.args[2]
+        self.assertEqual(state["object_key"], key)
+
+    def test_reads_dont_count(self):
+        run_cloud_backup()
+        other = self.other_connection()
+        other.execute("SELECT * FROM t").fetchall()
+        other.close()
+
+        self.assertFalse(database_changed())
+
+    def test_commit_counts_in_log_and_after_checkpoint(self):
+        run_cloud_backup()
+        other = self.other_connection()
+        other.execute("INSERT INTO t VALUES ('new')")
+
+        self.assertTrue(database_changed())
+        # Copied into the database file, and the log emptied.
+        other.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        self.assertEqual(Path(f"{self.path}-wal").stat().st_size, 0)
+        self.assertTrue(database_changed())
+
+    def test_commit_during_backup_records_nothing(self):
+        run_cloud_backup()
+
+        def upload_fileobj(*args, **kwargs):
+            # e.g. a web request, while the upload runs.
+            self.other_connection().execute("INSERT INTO t VALUES ('new')")
+
+        self.mock_client.return_value.upload_fileobj.side_effect = upload_fileobj
+        run_cloud_backup()
+
+        self.assertFalse(settings.LIFETRACKER_BACKUP_STATE_FILE.exists())
+        self.assertTrue(database_changed())
+
+    def test_new_destination_counts(self):
+        run_cloud_backup()
+
+        with override_settings(LIFETRACKER_BACKUP_S3_BUCKET_NAME="other-bucket"):
+            self.assertTrue(database_changed())
+        with override_settings(LIFETRACKER_BACKUP_HOSTNAME="other-host"):
+            self.assertTrue(database_changed())
+
+    def test_unreadable_state_counts_as_changed(self):
+        run_cloud_backup()
+        settings.LIFETRACKER_BACKUP_STATE_FILE.write_text("[]")
+
+        self.assertTrue(database_changed())
+
+    def test_state_write_failure_is_logged(self):
+        with (
+            override_settings(
+                LIFETRACKER_BACKUP_STATE_FILE=Path("/nonexistent/state.json")
+            ),
+            self.assertLogs("lifetracker.core.backup", "WARNING") as logs,
+        ):
+            run_cloud_backup()
+
+        self.assertIn("Couldn't record the backup state", logs.output[0])
+
+    def test_signature(self):
+        # setUp's commits are still in the log.
+        self.assertIsNone(database_signature())
+        with self.connection.cursor() as cursor:
+            cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        signature = database_signature()
+        stat = self.path.stat()
+
+        self.assertEqual(
+            signature, [stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns]
+        )
+        self.other_connection().execute("INSERT INTO t VALUES ('new')")
+        self.assertIsNone(database_signature())
+
+    def test_signature_without_log(self):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        # The last connection to close deletes the log.
+        self.connection.close()
+        self.assertFalse(Path(f"{self.path}-wal").exists())
+
+        self.assertIsNotNone(database_signature())
+
+    def test_unremovable_state_is_logged(self):
+        # A directory where the state file should be can't be replaced or
+        # removed.
+        settings.LIFETRACKER_BACKUP_STATE_FILE.mkdir()
+
+        with self.assertLogs("lifetracker.core.backup", "WARNING") as logs:
+            run_cloud_backup()
+
+        self.assertIn("Couldn't record the backup state", logs.output[0])
+        self.assertTrue(database_changed())
+
+
+class InMemoryBackupStateTests(SimpleTestCase):
+    def test_in_memory_database_has_no_signature(self):
+        self.assertIsNone(database_signature())
+
 
 class RestoreDatabaseTests(TestCase):
     """restore_database() and check_backup_file(), on file-backed databases."""
@@ -3369,6 +3545,36 @@ class IdleWatchdogConfigTests(SimpleTestCase):
 
         self.assertEqual(config, idle_watchdog.config_from_env({}))
 
+    def test_auto_backup(self):
+        for env, expected in [
+            ({}, None),
+            ({"LIFETRACKER_AUTO_BACKUP": " "}, None),
+            ({"LIFETRACKER_AUTO_BACKUP": "off"}, None),
+            ({"LIFETRACKER_AUTO_BACKUP": "On"}, 6 * 3600),
+            (
+                {
+                    "LIFETRACKER_AUTO_BACKUP": "on",
+                    "LIFETRACKER_AUTO_BACKUP_INTERVAL_HOURS": "0.5",
+                },
+                1800,
+            ),
+        ]:
+            with self.subTest(env=env):
+                config = idle_watchdog.config_from_env(env)
+                self.assertEqual(config.auto_backup_interval_seconds, expected)
+
+    def test_invalid_auto_backup_settings(self):
+        for env, message in [
+            ({"LIFETRACKER_AUTO_BACKUP": "yes"}, "LIFETRACKER_AUTO_BACKUP must be"),
+            (
+                {"LIFETRACKER_AUTO_BACKUP_INTERVAL_HOURS": "0"},
+                "LIFETRACKER_AUTO_BACKUP_INTERVAL_HOURS must be a positive number",
+            ),
+        ]:
+            with self.subTest(env=env):
+                with self.assertRaisesMessage(ValueError, message):
+                    idle_watchdog.config_from_env(env)
+
     def test_default_ports_follow_gunicorn_port(self):
         config = idle_watchdog.config_from_env({"PORT": "9000"})
 
@@ -3546,6 +3752,7 @@ class IdleWatchdogStateTests(SimpleTestCase):
                     },
                     {"port": 22, "connections": 0, "last_connection_at": None},
                 ],
+                "auto_backup": None,
             },
         )
 
@@ -3555,6 +3762,9 @@ class IdleWatchdogStateTests(SimpleTestCase):
 
         watchdog.check(self.START + 1, {8000: 0, 22: 1}, None)
         self.assertEqual(watchdog.status()["state"], "active")
+
+        watchdog.backing_up = True
+        self.assertEqual(watchdog.status()["state"], "backing up")
 
         watchdog.stopping = True
         self.assertEqual(watchdog.status()["state"], "stopping")
@@ -3654,6 +3864,312 @@ class IdleWatchdogRunTests(SimpleTestCase):
         self.assertIsNone(status)
 
 
+class FakeBackupProcess:
+    """A ``Popen`` for a backup that finishes with ``exit_status`` after
+    ``polls`` polls."""
+
+    def __init__(self, polls=0, exit_status=0):
+        self.polls = polls
+        self.exit_status = exit_status
+        self.killed = False
+
+    def poll(self):
+        if self.killed or self.polls <= 0:
+            return self.exit_status
+        self.polls -= 1
+        return None
+
+    def kill(self):
+        self.killed = True
+        self.exit_status = -9
+
+    def wait(self):
+        return self.exit_status
+
+
+class AutoBackupTests(SimpleTestCase):
+    START = 1_800_000_000
+
+    def _backup(self, *processes, environ=None):
+        self.messages = []
+        self.popen = mock.Mock(side_effect=list(processes))
+        return auto_backup.AutoBackup(
+            3600,
+            self.START,
+            log=self.messages.append,
+            environ=environ or {},
+            popen=self.popen,
+        )
+
+    def test_backs_up_at_startup_then_every_interval(self):
+        backup = self._backup(FakeBackupProcess(), FakeBackupProcess())
+
+        backup.tick(self.START)
+        self.assertTrue(backup.running)
+        backup.tick(self.START + 1)
+        self.assertFalse(backup.running)
+        backup.tick(self.START + 3599)
+        self.assertEqual(self.popen.call_count, 1)
+        backup.tick(self.START + 3600)
+        self.assertEqual(self.popen.call_count, 2)
+        self.assertEqual(
+            self.messages,
+            [
+                "starting automatic backup (at startup)",
+                "automatic backup (at startup) finished",
+                "starting automatic backup (scheduled)",
+            ],
+        )
+
+    def test_runs_cloud_backup_if_changed_with_settings_module(self):
+        backup = self._backup(FakeBackupProcess(), environ={"PATH": "/bin"})
+
+        backup.tick(self.START)
+
+        self.popen.assert_called_once_with(
+            [sys.executable, "-m", "django", "cloud_backup", "--if-changed"],
+            env={"DJANGO_SETTINGS_MODULE": "lifetracker.settings", "PATH": "/bin"},
+        )
+
+    def test_one_at_a_time(self):
+        backup = self._backup(FakeBackupProcess(polls=10))
+
+        backup.tick(self.START)
+        backup.start(self.START + 1, "before stopping")
+
+        self.assertEqual(self.popen.call_count, 1)
+        self.assertEqual(backup.reason, "at startup")
+        self.assertEqual(backup.wake_time(self.START + 1), self.START + 6)
+
+    def test_failure_is_logged(self):
+        backup = self._backup(FakeBackupProcess(exit_status=1))
+
+        backup.tick(self.START)
+        backup.tick(self.START + 5)
+
+        self.assertEqual(backup.last_exit_status, 1)
+        self.assertIn(
+            "automatic backup (at startup) failed with exit status 1", self.messages
+        )
+        # Not retried until the next one's due.
+        self.assertEqual(backup.wake_time(self.START + 5), self.START + 3600)
+
+    def test_hung_backup_is_killed(self):
+        process = FakeBackupProcess(polls=10**6)
+        backup = self._backup(process)
+
+        backup.tick(self.START)
+        backup.tick(self.START + auto_backup.TIMEOUT_SECONDS - 1)
+        self.assertTrue(backup.running)
+        backup.tick(self.START + auto_backup.TIMEOUT_SECONDS)
+
+        self.assertTrue(process.killed)
+        self.assertFalse(backup.running)
+        self.assertEqual(backup.last_exit_status, -9)
+        self.assertIn(
+            "automatic backup (at startup) still running after 30 minutes, killing it",
+            self.messages,
+        )
+
+    def test_start_failure_is_logged(self):
+        backup = self._backup(OSError("no such file"))
+
+        backup.tick(self.START)
+
+        self.assertFalse(backup.running)
+        self.assertIsNone(backup.last_exit_status)
+        self.assertIn("couldn't start automatic backup: no such file", self.messages)
+
+    def test_status(self):
+        backup = self._backup(FakeBackupProcess(polls=1))
+        backup.tick(self.START)
+
+        self.assertEqual(
+            backup.status(idle_watchdog._iso),
+            {
+                "interval_seconds": 3600,
+                "running": True,
+                "reason": "at startup",
+                "last_started_at": "2027-01-15T08:00:00+00:00",
+                "last_finished_at": None,
+                "last_exit_status": None,
+                "next_run_at": "2027-01-15T09:00:00+00:00",
+            },
+        )
+
+
+class IdleWatchdogAutoBackupRunTests(SimpleTestCase):
+    MASTER_PID = 4321
+
+    def _run(self, mode, counts, processes):
+        """Run the loop with backups every hour, a fake clock that each sleep
+        advances by what was asked, fake connection counts from ``counts`` (one
+        per check, every 10 seconds), and fake backup processes."""
+        now = [1_800_000_000.0]
+        counts = iter(counts)
+        kill = mock.Mock()
+        popen = mock.Mock(side_effect=list(processes))
+        statuses = []
+        with tempfile.TemporaryDirectory() as tempdir:
+            config = dataclasses.replace(
+                _watchdog_config(mode, Path(tempdir) / "status.json"),
+                auto_backup_interval_seconds=3600,
+            )
+            real_write_status = idle_watchdog.write_status
+
+            def write_status(path, status):
+                statuses.append(status)
+                real_write_status(path, status)
+
+            with (
+                mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
+                mock.patch.object(idle_watchdog, "write_status", write_status),
+            ):
+                result = idle_watchdog.run(
+                    config,
+                    self.MASTER_PID,
+                    clock=lambda: now[0],
+                    sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
+                    count=lambda ports: next(counts),
+                    request_time=lambda path: None,
+                    getppid=lambda: self.MASTER_PID,
+                    kill=kill,
+                    popen=popen,
+                )
+        return result, kill, popen, stderr.getvalue(), statuses
+
+    def test_backs_up_before_stopping(self):
+        idle = {8000: 0, 22: 0}
+        # The pre-stop backup takes three polls (5 seconds apart).
+        result, kill, popen, stderr, statuses = self._run(
+            "stop", [idle] * 9, [FakeBackupProcess(), FakeBackupProcess(polls=3)]
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(popen.call_count, 2)
+        kill.assert_called_once_with(self.MASTER_PID, signal.SIGTERM)
+        lines = stderr.splitlines()
+        self.assertIn(
+            "idle-watchdog: automatic backups at startup, every 1 hours and before"
+            " stopping",
+            lines,
+        )
+        backup_line = lines.index(
+            "idle-watchdog: starting automatic backup (before stopping)"
+        )
+        self.assertLess(
+            backup_line,
+            lines.index("idle-watchdog: automatic backup (before stopping) finished"),
+        )
+        self.assertIn("sending SIGTERM", lines[-1])
+        # Idle at 60s; the backup finished by the check at 80s.
+        self.assertEqual(
+            [(status["checked_at"][11:19], status["state"]) for status in statuses],
+            [
+                ("08:00:00", "idle"),
+                ("08:00:10", "idle"),
+                ("08:00:20", "idle"),
+                ("08:00:30", "idle"),
+                ("08:00:40", "idle"),
+                ("08:00:50", "idle"),
+                ("08:01:00", "backing up"),
+                ("08:01:10", "backing up"),
+                ("08:01:20", "stopping"),
+            ],
+        )
+        self.assertEqual(statuses[-1]["auto_backup"]["reason"], "before stopping")
+
+    def test_waits_for_running_backup_then_backs_up_again(self):
+        idle = {8000: 0, 22: 0}
+        # The startup backup is still running when the idle timeout is reached.
+        result, kill, popen, stderr, statuses = self._run(
+            "stop", [idle] * 10, [FakeBackupProcess(polls=14), FakeBackupProcess()]
+        )
+
+        self.assertEqual(popen.call_count, 2)
+        kill.assert_called_once()
+        self.assertIn("starting automatic backup (before stopping)", stderr)
+
+    def test_failed_backup_still_stops(self):
+        idle = {8000: 0, 22: 0}
+        result, kill, popen, stderr, statuses = self._run(
+            "stop",
+            [idle] * 8,
+            [FakeBackupProcess(), FakeBackupProcess(exit_status=1)],
+        )
+
+        kill.assert_called_once()
+        self.assertIn("automatic backup (before stopping) failed", stderr)
+
+    def test_activity_calls_off_the_stop(self):
+        idle = {8000: 0, 22: 0}
+        busy = {8000: 1, 22: 0}
+        # Activity while the pre-stop backup runs; idle again for another
+        # minute before the next one (both backups in one idle stretch).
+        counts = [idle] * 7 + [busy] + [idle] * 7
+        result, kill, popen, stderr, statuses = self._run(
+            "stop",
+            counts,
+            [FakeBackupProcess(), FakeBackupProcess(polls=4), FakeBackupProcess()],
+        )
+
+        self.assertEqual(popen.call_count, 3)
+        self.assertEqual(stderr.count("starting automatic backup (before stopping)"), 2)
+        self.assertEqual(statuses[7]["state"], "active")
+        kill.assert_called_once()
+
+    def test_monitor_mode_never_backs_up_before_stopping(self):
+        idle = {8000: 0, 22: 0}
+        ppids = iter([self.MASTER_PID] * 30 + [1])
+        now = [1_800_000_000.0]
+        popen = mock.Mock(return_value=FakeBackupProcess())
+        config = dataclasses.replace(
+            _watchdog_config("monitor"), auto_backup_interval_seconds=3600
+        )
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            idle_watchdog.run(
+                config,
+                self.MASTER_PID,
+                clock=lambda: now[0],
+                sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
+                count=lambda ports: idle,
+                request_time=lambda path: None,
+                getppid=lambda: next(ppids),
+                kill=mock.Mock(),
+                popen=popen,
+            )
+
+        popen.assert_called_once()
+        self.assertNotIn("before stopping", stderr.getvalue())
+
+    def test_backups_alone(self):
+        # Neither idle checks nor uptime: it wakes for the backups alone.
+        ppids = iter([self.MASTER_PID] * 4 + [1])
+        now = [1_800_000_000.0]
+        sleeps = []
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += seconds
+
+        popen = mock.Mock(side_effect=[FakeBackupProcess(polls=1)] * 2)
+        config = dataclasses.replace(
+            _watchdog_config("off"), auto_backup_interval_seconds=3600
+        )
+        with mock.patch("sys.stderr", new_callable=io.StringIO):
+            idle_watchdog.run(
+                config,
+                self.MASTER_PID,
+                clock=lambda: now[0],
+                sleep=sleep,
+                getppid=lambda: next(ppids),
+                popen=popen,
+            )
+
+        self.assertEqual(sleeps, [5, 5, 3590, 5])
+        self.assertEqual(popen.call_count, 2)
+
+
 class IdleWatchdogSpawnTests(SimpleTestCase):
     def test_off_by_default(self):
         with mock.patch("subprocess.Popen") as popen:
@@ -3690,6 +4206,14 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
 
     def test_starts_for_uptime_alone(self):
         env = {"LIFETRACKER_DATA_DIR": "/data"}
+        with (
+            mock.patch("subprocess.Popen") as popen,
+            mock.patch.object(Path, "exists", return_value=True),
+        ):
+            self.assertIs(idle_watchdog.spawn(99, env), popen.return_value)
+
+    def test_starts_for_auto_backup_alone(self):
+        env = {"LIFETRACKER_AUTO_BACKUP": "on"}
         with (
             mock.patch("subprocess.Popen") as popen,
             mock.patch.object(Path, "exists", return_value=True),
@@ -4699,6 +5223,44 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
             [(8000, 0, None), (22, 1, "20 seconds")],
         )
 
+    def test_auto_backup(self):
+        context = self._context(
+            _watchdog_status(
+                self.NOW,
+                auto_backup={
+                    "interval_seconds": 21600,
+                    "running": False,
+                    "reason": "at startup",
+                    "last_started_at": (
+                        self.NOW - datetime.timedelta(seconds=90)
+                    ).isoformat(),
+                    "last_finished_at": (
+                        self.NOW - datetime.timedelta(seconds=80)
+                    ).isoformat(),
+                    "last_exit_status": 0,
+                    "next_run_at": (
+                        self.NOW + datetime.timedelta(hours=6, seconds=-90)
+                    ).isoformat(),
+                },
+            ),
+            env={"LIFETRACKER_AUTO_BACKUP": "on"},
+        )
+
+        self.assertIsNone(context["status_error"])
+        self.assertEqual(context["auto_backup_interval"], "6\xa0hours")
+        backup = context["status"]["auto_backup"]
+        self.assertEqual(backup["last_started_ago"], "1\xa0minute")
+        self.assertEqual(backup["last_exit_status"], 0)
+        self.assertEqual(
+            backup["next_run_at"], self.NOW + datetime.timedelta(hours=6, seconds=-90)
+        )
+
+    def test_auto_backup_off(self):
+        context = self._context(_watchdog_status(self.NOW))
+
+        self.assertIsNone(context["auto_backup_interval"])
+        self.assertIsNone(context["status"]["auto_backup"])
+
     def test_no_request_file(self):
         # The status file's copy of the time is ignored, even without a file.
         status = self._context(_watchdog_status(self.NOW))["status"]
@@ -4822,6 +5384,7 @@ class IdleWatchdogAdminViewTests(TestCase):
         for mode, state, label, expected in [
             ("stop", "active", "Stops At", "Not while connections are open"),
             ("stop", "stopping", "Stops At", "Now: the idle timeout was reached"),
+            ("stop", "backing up", "Stops At", "Once the backup finishes"),
             ("monitor", "idle", "Would Stop At", "(monitor mode: never stops)"),
         ]:
             with self.subTest(mode=mode, state=state):
@@ -4834,6 +5397,44 @@ class IdleWatchdogAdminViewTests(TestCase):
 
                 self.assertContains(response, label)
                 self.assertContains(response, expected)
+
+    def test_page_shows_auto_backups(self):
+        now = timezone.now()
+        idle_watchdog.write_status(
+            self.status_file,
+            _watchdog_status(
+                now,
+                mode="stop",
+                state="backing up",
+                auto_backup={
+                    "interval_seconds": 21600,
+                    "running": True,
+                    "reason": "before stopping",
+                    "last_started_at": now.isoformat(),
+                    "last_finished_at": None,
+                    "last_exit_status": None,
+                    "next_run_at": (now + datetime.timedelta(hours=6)).isoformat(),
+                },
+            ),
+        )
+
+        with mock.patch.dict(os.environ, {"LIFETRACKER_AUTO_BACKUP": "on"}):
+            response = self.client.get(self.URL)
+
+        self.assertContains(response, "Backing up before stopping")
+        self.assertContains(
+            response, "At startup, every 6\xa0hours while up and before stopping"
+        )
+        self.assertContains(response, "Before stopping, started 0")
+        self.assertContains(response, "Once this one finishes, then")
+
+    def test_page_with_auto_backups_off(self):
+        idle_watchdog.write_status(self.status_file, _watchdog_status(timezone.now()))
+
+        response = self.client.get(self.URL)
+
+        self.assertContains(response, "<code>LIFETRACKER_AUTO_BACKUP</code>")
+        self.assertNotContains(response, "Last Automatic Backup")
 
     def test_page_warns_when_stale(self):
         stale = timezone.now() - datetime.timedelta(hours=1)

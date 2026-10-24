@@ -5,6 +5,10 @@ on the admin's Backups page does, via the same ``run_cloud_backup``. Prints the
 uploaded object's key on success. Fails (exit status 1) if the settings are
 incomplete or the upload fails, and also if the upload succeeded but recording
 it in ``CloudBackupStatus`` didn't.
+
+With ``--if-changed`` (as the automatic backups run it; see
+``lifetracker.core.auto_backup``), it uploads nothing, and succeeds, if the
+database hasn't changed since the last cloud backup.
 """
 
 from django.core.management.base import BaseCommand, CommandError
@@ -12,6 +16,7 @@ from django.core.management.base import BaseCommand, CommandError
 from lifetracker.core.backup import (
     CLOUD_BACKUP_ERRORS,
     CloudBackupStatusUpdateError,
+    database_changed,
     run_cloud_backup,
 )
 
@@ -19,7 +24,19 @@ from lifetracker.core.backup import (
 class Command(BaseCommand):
     help = "Upload a backup of the database to the cloud backup bucket."
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--if-changed",
+            action="store_true",
+            help="Skip the backup if the database hasn't changed since the last one.",
+        )
+
     def handle(self, *args, **options):
+        if options["if_changed"] and not database_changed():
+            self.stdout.write(
+                "The database hasn't changed since the last cloud backup; skipping."
+            )
+            return
         try:
             object_key = run_cloud_backup()
         except CloudBackupStatusUpdateError as exc:
