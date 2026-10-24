@@ -21,8 +21,10 @@ At startup the collector downloads this month's DB-IP Lite country and ASN
 databases into the GeoIP directory if it doesn't have them yet
 (``update_geoip``; the ``update_geoip`` command does the same), falling back
 to last month's early in a month before the new ones are out, and fills in
-any IP it couldn't look up before; it looks up each new IP as it records it. DB-IP
-Lite is CC BY 4.0: anywhere showing its data links to db-ip.com.
+any IP it couldn't look up before; it looks up each new IP as it records it.
+Each attempt's outcome, failures' tracebacks included, goes in ``status.json``
+in the GeoIP directory, which the Client IPs page shows. DB-IP Lite is CC BY
+4.0: anywhere showing its data links to db-ip.com.
 
 Like the idle watchdog, it doesn't import Django.
 """
@@ -42,11 +44,14 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 import maxminddb
 import requests
+
+from lifetracker.core import idle_watchdog
 
 DEFAULT_REQUEST_LOG_NAME = "lifetracker-envoy-requests.jsonl"
 DEFAULT_INTERVAL_SECONDS = 5
@@ -56,6 +61,12 @@ TRUNCATE_BYTES = 1024 * 1024
 GEOIP_DATABASES = ("dbip-country-lite", "dbip-asn-lite")
 GEOIP_URL = "https://download.db-ip.com/free/{name}-{month}.mmdb.gz"
 GEOIP_TIMEOUT_SECONDS = 60
+# ``update_geoip``'s record of its last attempt, beside the databases.
+GEOIP_STATUS_NAME = "status.json"
+# Its outcomes for each database.
+DOWNLOADED = "downloaded"
+UP_TO_DATE = "up to date"
+FAILED = "failed"
 # The most requests kept while recording them fails (see ``_collect``).
 MAX_PENDING_REQUESTS = 100_000
 # The longest request line and user agent kept (the rest is cut off).
@@ -283,42 +294,97 @@ def _download(url: str, destination: Path) -> bool:
     return True
 
 
+def _update_one(
+    geoip_dir: Path, name: str, months: tuple[str, str], download, tried: list[str]
+) -> dict:
+    """``update_geoip`` for one database: its outcome, and whether it fell back
+    to last month's. Each URL is added to ``tried`` before it's downloaded."""
+    this_month, last_month = months
+    current = geoip_dir / f"{name}-{this_month}.mmdb"
+    if current.exists():
+        return {"outcome": UP_TO_DATE, "fell_back": False}
+    tried.append(GEOIP_URL.format(name=name, month=this_month))
+    if download(tried[-1], current):
+        return {"outcome": DOWNLOADED, "fell_back": False}
+    previous = geoip_dir / f"{name}-{last_month}.mmdb"
+    if previous.exists():
+        return {"outcome": UP_TO_DATE, "fell_back": True}
+    tried.append(GEOIP_URL.format(name=name, month=last_month))
+    if not download(tried[-1], previous):
+        raise OSError(f"Neither {this_month}'s nor {last_month}'s {name} is available")
+    return {"outcome": DOWNLOADED, "fell_back": True}
+
+
 def update_geoip(
-    geoip_dir: Path, *, today: datetime.date | None = None, download=_download
-) -> list[str]:
+    geoip_dir: Path, *, now: float | None = None, download=_download
+) -> dict[str, dict]:
     """Make sure ``geoip_dir`` has this month's DB-IP Lite databases, or last
     month's if this month's aren't out yet, downloading them if not, and
-    delete older ones. Returns the names of the files it downloaded.
+    delete older ones.
 
-    Raises ``OSError`` or ``requests.RequestException`` if a download fails
-    (other than for want of this month's file) or ``maxminddb``'s error if one
-    isn't a database.
+    Each database is tried even if another fails. Returns each one's status,
+    which it also writes to ``status.json`` in ``geoip_dir`` (see
+    ``read_geoip_status``): ``attempted`` (POSIX time), ``url`` (the last URL
+    tried, or None if it had this month's), ``outcome`` (``DOWNLOADED``,
+    ``UP_TO_DATE`` or ``FAILED``), ``fell_back`` (this month's wasn't out, so
+    it has last month's), ``file`` (the file it has now, or None),
+    ``succeeded`` (the last attempt that didn't fail, kept from the previous
+    status file when this one did, or None), and ``error`` and ``traceback``
+    (the exception, or None).
+
+    Raises ``OSError`` only if it can't create ``geoip_dir`` or write the
+    status file.
     """
-    this_month, last_month = _months(
-        today or datetime.datetime.now(datetime.UTC).date()
-    )
+    now = time.time() if now is None else now
+    months = _months(datetime.datetime.fromtimestamp(now, datetime.UTC).date())
     geoip_dir.mkdir(parents=True, exist_ok=True)
-    downloaded = []
+    try:
+        previous = read_geoip_status(geoip_dir) or {}
+    except OSError, ValueError:
+        previous = {}
+    statuses = {}
     for name in GEOIP_DATABASES:
-        current = geoip_dir / f"{name}-{this_month}.mmdb"
-        if not current.exists():
-            url = GEOIP_URL.format(name=name, month=this_month)
-            if download(url, current):
-                downloaded.append(current.name)
-            else:
-                previous = geoip_dir / f"{name}-{last_month}.mmdb"
-                if not previous.exists():
-                    url = GEOIP_URL.format(name=name, month=last_month)
-                    if not download(url, previous):
-                        raise OSError(
-                            f"Neither {this_month}'s nor {last_month}'s {name}"
-                            " is available"
-                        )
-                    downloaded.append(previous.name)
+        tried: list[str] = []
+        status = {"attempted": now, "error": None, "traceback": None}
+        try:
+            status.update(_update_one(geoip_dir, name, months, download, tried))
+        # Any exception: a cut-off download alone can raise EOFError or
+        # zlib.error as well as requests' and maxminddb's own.
+        except Exception as exc:
+            status.update(
+                outcome=FAILED,
+                fell_back=False,
+                succeeded=previous.get(name, {}).get("succeeded"),
+                error=repr(exc),
+                traceback=traceback.format_exc(),
+            )
+        else:
+            status["succeeded"] = now
         # Keep only the newest.
-        for old in geoip_files(geoip_dir, name)[1:]:
+        files = geoip_files(geoip_dir, name)
+        for old in files[1:]:
             old.unlink(missing_ok=True)
-    return downloaded
+        status["url"] = tried[-1] if tried else None
+        status["file"] = files[0].name if files else None
+        statuses[name] = status
+    idle_watchdog.write_status(geoip_dir / GEOIP_STATUS_NAME, {"databases": statuses})
+    return statuses
+
+
+def read_geoip_status(geoip_dir: Path) -> dict[str, dict] | None:
+    """Each database's status as ``update_geoip`` last wrote it, or None if it
+    hasn't yet. Raises ValueError if the file holds something else, and
+    OSError if it can't be read."""
+    path = geoip_dir / GEOIP_STATUS_NAME
+    status = idle_watchdog.read_status(path)
+    if status is None:
+        return None
+    databases = status.get("databases")
+    if not isinstance(databases, dict) or not all(
+        isinstance(entry, dict) for entry in databases.values()
+    ):
+        raise ValueError("it doesn't hold each database's status")
+    return databases
 
 
 class GeoIP:
@@ -509,14 +575,17 @@ def refresh_geoip(config: Config, connection: sqlite3.Connection, geoip: GeoIP):
     if config.geoip_dir is None:
         return
     try:
-        downloaded = update_geoip(config.geoip_dir)
-    # Any exception: a cut-off download alone can raise EOFError or zlib.error
-    # as well as requests' and maxminddb's own.
+        statuses = update_geoip(config.geoip_dir)
+    # It catches each download's exceptions itself, but nothing would restart
+    # the collector if anything got through.
     except Exception as exc:
-        log(f"couldn't download the DB-IP databases: {exc!r}")
-        downloaded = []
-    for name in downloaded:
-        log(f"downloaded {name}")
+        log(f"couldn't update the DB-IP databases: {exc!r}")
+        statuses = {}
+    for name, status in statuses.items():
+        if status["outcome"] == DOWNLOADED:
+            log(f"downloaded {status['file']}")
+        elif status["outcome"] == FAILED:
+            log(f"couldn't download {name}: {status['error']}")
     try:
         found = fill_in_locations(connection, geoip)
     except sqlite3.Error as exc:

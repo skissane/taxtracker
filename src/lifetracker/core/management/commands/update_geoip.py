@@ -3,7 +3,8 @@
 Downloads this month's DB-IP Lite country and ASN databases (or last month's,
 if this month's aren't out yet) unless they're already there, then looks up
 any recorded client IP without a location yet, as the client IP collector does
-at startup (see ``core.client_ips``).
+at startup (see ``core.client_ips``), recording the outcome in the status file
+the Client IPs page shows.
 """
 
 from django.core.management.base import BaseCommand, CommandError
@@ -22,14 +23,17 @@ class Command(BaseCommand):
                 " LIFETRACKER_DATA_DIR."
             )
         try:
-            downloaded = client_ips.update_geoip(config.geoip_dir)
-        # Any exception, as the collector does: a cut-off download alone can
-        # raise EOFError or zlib.error as well as requests' and maxminddb's own.
-        except Exception as exc:
-            raise CommandError(f"Couldn't download the DB-IP databases: {exc!r}")
-        for name in downloaded:
-            self.stdout.write(f"Downloaded {name}")
-        if not downloaded:
+            statuses = client_ips.update_geoip(config.geoip_dir)
+        except OSError as exc:
+            raise CommandError(f"Couldn't update the DB-IP databases: {exc}")
+        failed = []
+        for name, status in statuses.items():
+            if status["outcome"] == client_ips.DOWNLOADED:
+                self.stdout.write(f"Downloaded {status['file']}")
+            elif status["outcome"] == client_ips.FAILED:
+                self.stderr.write(f"Couldn't download {name}: {status['error']}")
+                failed.append(name)
+        if all(s["outcome"] == client_ips.UP_TO_DATE for s in statuses.values()):
             self.stdout.write("Already up to date")
         connection = client_ips.connect(config.db_path)
         geoip = client_ips.GeoIP(config.geoip_dir)
@@ -39,3 +43,5 @@ class Command(BaseCommand):
             geoip.close()
             connection.close()
         self.stdout.write(f"Looked up {found} IPs without a location")
+        if failed:
+            raise CommandError(f"Couldn't download {', '.join(failed)}")

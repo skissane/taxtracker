@@ -250,13 +250,16 @@ class GeoIPTests(TempDirMixin, SimpleTestCase):
 
 
 class UpdateGeoIPTests(TempDirMixin, SimpleTestCase):
-    TODAY = datetime.date(2026, 1, 3)
+    # 2026-01-03 00:00 UTC.
+    NOW = datetime.datetime(2026, 1, 3, tzinfo=datetime.UTC).timestamp()
 
-    def _fake_download(self, available):
+    def _fake_download(self, available, fail=()):
         calls = []
 
         def download(url, destination):
             calls.append(url)
+            if url in fail:
+                raise requests.ConnectionError("offline")
             if url not in available:
                 return False
             destination.write_bytes(b"db")
@@ -267,50 +270,140 @@ class UpdateGeoIPTests(TempDirMixin, SimpleTestCase):
     def _url(self, name, month):
         return client_ips.GEOIP_URL.format(name=name, month=month)
 
+    def _update(self, download, now=NOW):
+        return client_ips.update_geoip(self.temp, now=now, download=download)
+
+    def _files(self):
+        return sorted(path.name for path in self.temp.glob("*.mmdb"))
+
     def test_downloads_this_month(self):
         available = {self._url(name, "2026-01") for name in client_ips.GEOIP_DATABASES}
         download, calls = self._fake_download(available)
         (self.temp / "dbip-asn-lite-2025-11.mmdb").write_bytes(b"old")
-        downloaded = client_ips.update_geoip(
-            self.temp, today=self.TODAY, download=download
+        statuses = self._update(download)
+        self.assertEqual(
+            statuses["dbip-country-lite"],
+            {
+                "attempted": self.NOW,
+                "outcome": client_ips.DOWNLOADED,
+                "fell_back": False,
+                "url": self._url("dbip-country-lite", "2026-01"),
+                "file": "dbip-country-lite-2026-01.mmdb",
+                "succeeded": self.NOW,
+                "error": None,
+                "traceback": None,
+            },
         )
         self.assertEqual(
-            downloaded, ["dbip-country-lite-2026-01.mmdb", "dbip-asn-lite-2026-01.mmdb"]
+            statuses["dbip-asn-lite"]["file"], "dbip-asn-lite-2026-01.mmdb"
         )
         self.assertEqual(
-            sorted(path.name for path in self.temp.iterdir()),
+            self._files(),
             ["dbip-asn-lite-2026-01.mmdb", "dbip-country-lite-2026-01.mmdb"],
         )
-        # Already there: nothing to do.
-        self.assertEqual(
-            client_ips.update_geoip(self.temp, today=self.TODAY, download=download),
-            [],
-        )
+        self.assertEqual(client_ips.read_geoip_status(self.temp), statuses)
+        # Already there: nothing to download.
+        statuses = self._update(download, now=self.NOW + 60)
         self.assertEqual(len(calls), 2)
+        self.assertEqual(
+            {status["outcome"] for status in statuses.values()},
+            {client_ips.UP_TO_DATE},
+        )
+        self.assertEqual(statuses["dbip-asn-lite"]["url"], None)
+        self.assertEqual(statuses["dbip-asn-lite"]["succeeded"], self.NOW + 60)
 
     def test_falls_back_to_last_month(self):
         available = {self._url(name, "2025-12") for name in client_ips.GEOIP_DATABASES}
         download, calls = self._fake_download(available)
-        downloaded = client_ips.update_geoip(
-            self.temp, today=self.TODAY, download=download
-        )
+        statuses = self._update(download)
         self.assertEqual(
-            downloaded, ["dbip-country-lite-2025-12.mmdb", "dbip-asn-lite-2025-12.mmdb"]
+            [status["file"] for status in statuses.values()],
+            ["dbip-country-lite-2025-12.mmdb", "dbip-asn-lite-2025-12.mmdb"],
+        )
+        self.assertEqual(statuses["dbip-asn-lite"]["outcome"], client_ips.DOWNLOADED)
+        self.assertTrue(statuses["dbip-asn-lite"]["fell_back"])
+        self.assertEqual(
+            statuses["dbip-asn-lite"]["url"], self._url("dbip-asn-lite", "2025-12")
         )
         # Next time, this month's is tried again, but last month's is kept.
-        client_ips.update_geoip(self.temp, today=self.TODAY, download=download)
+        statuses = self._update(download)
         self.assertEqual(len(calls), 6)
         self.assertEqual(
             calls[4:],
             [self._url(name, "2026-01") for name in client_ips.GEOIP_DATABASES],
         )
+        self.assertEqual(statuses["dbip-asn-lite"]["outcome"], client_ips.UP_TO_DATE)
+        self.assertTrue(statuses["dbip-asn-lite"]["fell_back"])
+        self.assertEqual(
+            statuses["dbip-asn-lite"]["url"], self._url("dbip-asn-lite", "2026-01")
+        )
 
     def test_neither_month_available(self):
         download, _ = self._fake_download(set())
-        with self.assertRaisesMessage(
-            OSError, "Neither 2026-01's nor 2025-12's dbip-country-lite is available"
-        ):
-            client_ips.update_geoip(self.temp, today=self.TODAY, download=download)
+        statuses = self._update(download)
+        status = statuses["dbip-country-lite"]
+        self.assertEqual(status["outcome"], client_ips.FAILED)
+        self.assertEqual(
+            status["error"],
+            "OSError(\"Neither 2026-01's nor 2025-12's dbip-country-lite is"
+            ' available")',
+        )
+        self.assertIn("Traceback (most recent call last)", status["traceback"])
+        self.assertEqual(status["url"], self._url("dbip-country-lite", "2025-12"))
+        self.assertIsNone(status["file"])
+        self.assertIsNone(status["succeeded"])
+
+    def test_failure_keeps_last_success_and_tries_the_other(self):
+        country = self._url("dbip-country-lite", "2026-01")
+        asn = self._url("dbip-asn-lite", "2026-01")
+        download, _ = self._fake_download({country, asn})
+        self._update(download)
+        # A month later: the country database's download fails, the ASN's works.
+        later = self.NOW + 31 * 86400
+        country = self._url("dbip-country-lite", "2026-02")
+        asn = self._url("dbip-asn-lite", "2026-02")
+        download, _ = self._fake_download({asn}, fail={country})
+        statuses = self._update(download, now=later)
+        status = statuses["dbip-country-lite"]
+        self.assertEqual(status["outcome"], client_ips.FAILED)
+        self.assertEqual(status["attempted"], later)
+        self.assertEqual(status["succeeded"], self.NOW)
+        self.assertEqual(status["url"], country)
+        self.assertEqual(status["error"], "ConnectionError('offline')")
+        self.assertIn("requests.exceptions.ConnectionError", status["traceback"])
+        # The old one stays in use.
+        self.assertEqual(status["file"], "dbip-country-lite-2026-01.mmdb")
+        self.assertEqual(statuses["dbip-asn-lite"]["outcome"], client_ips.DOWNLOADED)
+        self.assertEqual(
+            self._files(),
+            ["dbip-asn-lite-2026-02.mmdb", "dbip-country-lite-2026-01.mmdb"],
+        )
+
+    def test_unreadable_previous_status_is_ignored(self):
+        (self.temp / client_ips.GEOIP_STATUS_NAME).write_text("not json")
+        download, _ = self._fake_download(
+            set(), fail={self._url("dbip-asn-lite", "2026-01")}
+        )
+        statuses = self._update(download)
+        self.assertIsNone(statuses["dbip-asn-lite"]["succeeded"])
+        self.assertEqual(client_ips.read_geoip_status(self.temp), statuses)
+
+    def test_read_geoip_status(self):
+        self.assertIsNone(client_ips.read_geoip_status(self.temp))
+        path = self.temp / client_ips.GEOIP_STATUS_NAME
+        for contents in ("{}", '{"databases": []}', '{"databases": {"x": 1}}'):
+            path.write_text(contents)
+            with (
+                self.subTest(contents),
+                self.assertRaisesMessage(
+                    ValueError, "doesn't hold each database's status"
+                ),
+            ):
+                client_ips.read_geoip_status(self.temp)
+        for contents in ("[]", "{"):
+            path.write_text(contents)
+            with self.subTest(contents), self.assertRaises(ValueError):
+                client_ips.read_geoip_status(self.temp)
 
 
 class DownloadTests(TempDirMixin, SimpleTestCase):
@@ -625,7 +718,10 @@ class RunTests(TempDirMixin, SimpleTestCase):
 
         def update(geoip_dir):
             write_geoip(geoip_dir)
-            return ["x.mmdb"]
+            return {
+                "dbip-country-lite": {"outcome": client_ips.UP_TO_DATE},
+                "dbip-asn-lite": {"outcome": client_ips.DOWNLOADED, "file": "x.mmdb"},
+            }
 
         with (
             mock.patch.object(client_ips, "update_geoip", side_effect=update) as update,
@@ -651,7 +747,7 @@ class RunTests(TempDirMixin, SimpleTestCase):
             mock.patch.object(
                 client_ips,
                 "update_geoip",
-                side_effect=requests.ConnectionError("offline"),
+                side_effect=PermissionError("read-only"),
             ),
             mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
         ):
@@ -659,33 +755,45 @@ class RunTests(TempDirMixin, SimpleTestCase):
                 client_ips.run(config, 1, sleep=lambda s: None, getppid=lambda: 2), 0
             )
         self.assertIn(
-            "couldn't download the DB-IP databases: ConnectionError('offline')",
+            "couldn't update the DB-IP databases: PermissionError('read-only')",
             stderr.getvalue(),
         )
 
     def test_cut_off_download_is_logged(self):
         # A gzip stream that ends early: GzipFile raises EOFError.
         config = self._config(download=True)
-        response = mock.MagicMock(
-            status_code=200, raw=io.BytesIO(gzip.compress(b"x" * 1000)[:-20])
-        )
-        response.__enter__.return_value = response
+
+        def response():
+            response = mock.MagicMock(
+                status_code=200, raw=io.BytesIO(gzip.compress(b"x" * 1000)[:-20])
+            )
+            response.__enter__.return_value = response
+            return response
+
         with (
-            mock.patch.object(requests, "get", return_value=response),
+            mock.patch.object(requests, "get", side_effect=lambda *a, **k: response()),
             mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
         ):
             self.assertEqual(
                 client_ips.run(config, 1, sleep=lambda s: None, getppid=lambda: 2), 0
             )
         self.assertIn(
-            "couldn't download the DB-IP databases: EOFError", stderr.getvalue()
+            "couldn't download dbip-country-lite: EOFError", stderr.getvalue()
         )
-        self.assertEqual(list(config.geoip_dir.iterdir()), [])
+        self.assertIn("couldn't download dbip-asn-lite: EOFError", stderr.getvalue())
+        # Nothing but the status file, which records the failures.
+        self.assertEqual(
+            [path.name for path in config.geoip_dir.iterdir()],
+            [client_ips.GEOIP_STATUS_NAME],
+        )
+        statuses = client_ips.read_geoip_status(config.geoip_dir)
+        self.assertEqual(statuses["dbip-asn-lite"]["outcome"], client_ips.FAILED)
+        self.assertIn("EOFError", statuses["dbip-asn-lite"]["traceback"])
 
     def test_fill_in_failure_is_logged(self):
         config = self._config(download=True)
         with (
-            mock.patch.object(client_ips, "update_geoip", return_value=[]),
+            mock.patch.object(client_ips, "update_geoip", return_value={}),
             mock.patch.object(
                 client_ips,
                 "fill_in_locations",
@@ -774,7 +882,13 @@ class UpdateGeoIPCommandTests(TempDirMixin, SimpleTestCase):
 
         def update(geoip_dir):
             write_geoip(geoip_dir)
-            return ["dbip-asn-lite-2026-10.mmdb"]
+            return {
+                "dbip-country-lite": {"outcome": client_ips.UP_TO_DATE},
+                "dbip-asn-lite": {
+                    "outcome": client_ips.DOWNLOADED,
+                    "file": "dbip-asn-lite-2026-10.mmdb",
+                },
+            }
 
         stdout = io.StringIO()
         with (
@@ -797,24 +911,61 @@ class UpdateGeoIPCommandTests(TempDirMixin, SimpleTestCase):
                 os.environ,
                 {"LIFETRACKER_CLIENT_IP_DB": str(self.temp / "client_ips.sqlite3")},
             ),
-            mock.patch.object(client_ips, "update_geoip", return_value=[]),
+            mock.patch.object(
+                client_ips,
+                "update_geoip",
+                return_value={
+                    name: {"outcome": client_ips.UP_TO_DATE}
+                    for name in client_ips.GEOIP_DATABASES
+                },
+            ),
         ):
             call_command("update_geoip", stdout=stdout)
         self.assertIn("Already up to date", stdout.getvalue())
 
     def test_failure(self):
+        stdout, stderr = io.StringIO(), io.StringIO()
         with (
             mock.patch.dict(
                 os.environ,
                 {"LIFETRACKER_CLIENT_IP_DB": str(self.temp / "client_ips.sqlite3")},
             ),
             mock.patch.object(
-                client_ips, "update_geoip", side_effect=requests.ConnectionError("x")
+                client_ips,
+                "update_geoip",
+                return_value={
+                    "dbip-country-lite": {
+                        "outcome": client_ips.FAILED,
+                        "error": "ConnectionError('x')",
+                    },
+                    "dbip-asn-lite": {"outcome": client_ips.UP_TO_DATE},
+                },
             ),
         ):
             with self.assertRaisesMessage(
-                CommandError,
-                "Couldn't download the DB-IP databases: ConnectionError('x')",
+                CommandError, "Couldn't download dbip-country-lite"
+            ):
+                call_command("update_geoip", stdout=stdout, stderr=stderr)
+        self.assertEqual(
+            stderr.getvalue(),
+            "Couldn't download dbip-country-lite: ConnectionError('x')\n",
+        )
+        # It still looked up what it could.
+        self.assertIn("Looked up 0 IPs", stdout.getvalue())
+        self.assertNotIn("Already up to date", stdout.getvalue())
+
+    def test_unwritable(self):
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"LIFETRACKER_CLIENT_IP_DB": str(self.temp / "client_ips.sqlite3")},
+            ),
+            mock.patch.object(
+                client_ips, "update_geoip", side_effect=PermissionError("read-only")
+            ),
+        ):
+            with self.assertRaisesMessage(
+                CommandError, "Couldn't update the DB-IP databases: read-only"
             ):
                 call_command("update_geoip")
 
@@ -943,3 +1094,63 @@ class ClientIPsAdminViewTests(TempDirMixin, TestCase):
         self.db_path.write_bytes(b"not a database" * 100)
         response = self.client.get(self.URL)
         self.assertContains(response, f"Couldn&#x27;t read {self.db_path}")
+
+    def _write_geoip_status(self, contents):
+        (self.temp / "geoip").mkdir(exist_ok=True)
+        (self.temp / "geoip" / client_ips.GEOIP_STATUS_NAME).write_text(contents)
+
+    def test_geoip_status(self):
+        now = datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC).timestamp()
+        country = client_ips.GEOIP_URL.format(name="dbip-country-lite", month="2026-10")
+
+        def download(url, destination):
+            if url == country:
+                raise requests.ConnectionError("offline")
+            return False
+
+        (self.temp / "geoip").mkdir()
+        (self.temp / "geoip" / "dbip-asn-lite-2026-09.mmdb").write_bytes(b"db")
+        client_ips.update_geoip(self.temp / "geoip", now=now, download=download)
+        response = self.client.get(self.URL)
+        self.assertContains(
+            response, "<strong>Failed</strong>: ConnectionError(&#x27;offline&#x27;)"
+        )
+        self.assertContains(response, f"<code>{country}</code>", html=True)
+        self.assertContains(response, "<summary>Traceback</summary>")
+        self.assertContains(response, "requests.exceptions.ConnectionError")
+        self.assertContains(response, "Never")
+        self.assertContains(response, "Up to date")
+        self.assertContains(response, "this month's isn't out yet")
+        self.assertContains(
+            response,
+            '<time data-lt-local datetime="2026-10-02T00:00:00Z">'
+            "2026-10-02T00:00:00Z</time>",
+            count=3,
+            html=True,
+        )
+
+    def test_no_geoip_status_yet(self):
+        response = self.client.get(self.URL)
+        self.assertContains(response, "No download tried yet.")
+
+    def test_no_geoip_status_with_download_off(self):
+        with mock.patch.dict(os.environ, {"LIFETRACKER_GEOIP_DOWNLOAD": "0"}):
+            response = self.client.get(self.URL)
+        self.assertContains(
+            response,
+            "No download tried yet (<code>LIFETRACKER_GEOIP_DOWNLOAD=0</code>).",
+        )
+
+    def test_unreadable_geoip_status(self):
+        self._write_geoip_status('{"databases": []}')
+        response = self.client.get(self.URL)
+        self.assertContains(response, "Couldn&#x27;t read ")
+        self.assertContains(response, "doesn&#x27;t hold each database&#x27;s status")
+        self.assertNotContains(response, "No download tried yet")
+
+    def test_unexpected_geoip_status_times(self):
+        self._write_geoip_status(
+            json.dumps({"databases": {"dbip-asn-lite": {"attempted": "yesterday"}}})
+        )
+        response = self.client.get(self.URL)
+        self.assertContains(response, "Unexpected contents in ")

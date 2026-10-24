@@ -441,7 +441,7 @@ Each IP is looked up when first seen, and keeps that location; IPs seen while th
 ./flyssh.sh python manage.py update_geoip
 ```
 
-Superusers can see the record in the admin, from the **Client IPs** link in the top bar: the networks that logged-in requests came from, then the IPs seen most recently, optionally only those with logged-in requests.
+Superusers can see the record in the admin, from the **Client IPs** link in the top bar: how the last DB-IP download went (with the error and traceback if it failed, as `fly logs` keeps only a short window), the networks that logged-in requests came from, then the IPs seen most recently, optionally only those with logged-in requests.
 
 ## Command-line utilities
 

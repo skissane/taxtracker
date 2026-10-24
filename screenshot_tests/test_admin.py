@@ -179,7 +179,7 @@ def test_client_ips(admin_user, page, monkeypatch, tmp_path):
     # over IPv6.
     (tmp_path / "geoip").mkdir()
     write_mmdb(
-        tmp_path / "geoip" / "dbip-country-lite-2026-10.mmdb",
+        tmp_path / "geoip" / "dbip-country-lite-2026-09.mmdb",
         {
             network: {"country": {"iso_code": code, "names": {"en": name}}}
             for network, code, name in (
@@ -256,7 +256,44 @@ def test_client_ips(admin_user, page, monkeypatch, tmp_path):
     client_ips.record(connection, requests, geoip)
     geoip.close()
     connection.close()
+    # This month's country download failed (so September's is still in use),
+    # and the ASN database was downloaded.
+    url = client_ips.GEOIP_URL.format
+    traceback = (
+        "Traceback (most recent call last):\n"
+        '  File "/app/src/lifetracker/core/client_ips.py", line 1, in update_geoip\n'
+        "requests.exceptions.ConnectionError: Connection reset by peer\n"
+    )
+    (tmp_path / "geoip" / client_ips.GEOIP_STATUS_NAME).write_text(
+        json.dumps(
+            {
+                "databases": {
+                    "dbip-country-lite": {
+                        "attempted": now - 7200,
+                        "outcome": client_ips.FAILED,
+                        "fell_back": False,
+                        "url": url(name="dbip-country-lite", month="2026-10"),
+                        "file": "dbip-country-lite-2026-09.mmdb",
+                        "succeeded": now - 86400 * 30,
+                        "error": "ConnectionError('Connection reset by peer')",
+                        "traceback": traceback,
+                    },
+                    "dbip-asn-lite": {
+                        "attempted": now - 7200,
+                        "outcome": client_ips.DOWNLOADED,
+                        "fell_back": False,
+                        "url": url(name="dbip-asn-lite", month="2026-10"),
+                        "file": "dbip-asn-lite-2026-10.mmdb",
+                        "succeeded": now - 7200,
+                        "error": None,
+                        "traceback": None,
+                    },
+                }
+            }
+        )
+    )
     monkeypatch.setenv("LIFETRACKER_CLIENT_IP_DB", str(tmp_path / "client_ips.sqlite3"))
     _log_in(page, admin_user)
     page.goto("/admin/client-ips/")
+    page.locator("details summary").first.click()
     _screenshot(page, "client-ips")
