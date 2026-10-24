@@ -1742,6 +1742,19 @@ class AdjustNotesHeadingsTests(TestCase):
         notes = "# Heading\n```\n# code\n"
         self.assertEqual(_adjust_notes_headings(notes, 2), "### Heading\n```\n# code\n")
 
+    def test_inline_code_span_does_not_open_fence(self):
+        notes = "```inline code```\n# Heading\n"
+        self.assertEqual(
+            _adjust_notes_headings(notes, 2), "```inline code```\n### Heading\n"
+        )
+
+    def test_only_newline_splits_lines(self):
+        notes = "# One\rtext\f# not a heading\n## Two"
+        self.assertEqual(
+            _adjust_notes_headings(notes, 2),
+            "### One\rtext\f# not a heading\n#### Two",
+        )
+
     def test_line_endings_preserved(self):
         notes = "# One\r\n## Two\n# Three"
         self.assertEqual(

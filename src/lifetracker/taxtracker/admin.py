@@ -700,9 +700,10 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
 
 
 _ATX_HEADING_RE = re.compile(r"(#{1,6}) (.+)")
-# A fence opens with 3+ backticks or tildes, indented at most 3 spaces; a closing
-# fence uses the same character, at least as many of it, and nothing after.
-_CODE_FENCE_RE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
+# A fence opens with 3+ backticks or tildes, indented at most 3 spaces (a backtick
+# fence's info string can't hold a backtick, or it's an inline code span); a
+# closing fence uses the same character, at least as many of it, and nothing after.
+_CODE_FENCE_RE = re.compile(r" {0,3}(`{3,}(?=[^`]*$)|~{3,})(.*)")
 
 
 def _adjust_notes_headings(notes: str, item_heading_level: int) -> str:
@@ -711,7 +712,8 @@ def _adjust_notes_headings(notes: str, item_heading_level: int) -> str:
     Lines inside fenced code blocks (``` or ~~~) aren't headings, so are left as
     they are and don't count towards the shallowest level.
     """
-    lines = notes.splitlines(keepends=True)
+    # Split only after "\n", as splitlines() would also split on "\r", "\f" etc.
+    lines = re.split(r"(?<=\n)", notes)
     headings = {}
     fence = None
     for index, line in enumerate(lines):
