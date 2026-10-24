@@ -19,6 +19,12 @@ def _jwt_key_files(settings, _jwt_key_dir):
 
 
 @pytest.fixture(autouse=True)
+def _backup_state_file(settings, tmp_path):
+    """Keep the state cloud backups record out of the source tree."""
+    settings.LIFETRACKER_BACKUP_STATE_FILE = tmp_path / "backup-state.json"
+
+
+@pytest.fixture(autouse=True)
 def _no_relay_ranges_download(monkeypatch):
     """Never download Apple's iCloud Private Relay ranges: ``update_geoip``
     does unless given ``download_relay_ranges``, and so the collector and the

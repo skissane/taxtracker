@@ -288,6 +288,13 @@ LIFETRACKER_BACKUP_HOSTNAME = (
     or _fly_hostname
     or socket.gethostname()
 )
+# Where a cloud backup records the database file's state, so that
+# `cloud_backup --if-changed` (the automatic backups) can skip one when nothing
+# has changed since. Beside the database by default.
+LIFETRACKER_BACKUP_STATE_FILE = Path(
+    os.environ.get("LIFETRACKER_BACKUP_STATE_FILE", "").strip()
+    or f"{DATABASES['default']['NAME']}-backup-state.json"
+)
 
 
 def fly_machine_url(app_name, machine_id):

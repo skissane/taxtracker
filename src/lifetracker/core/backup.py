@@ -8,18 +8,23 @@ backup, and ``restore_cloud_backup`` restores one; callers must enforce
 authorization themselves.
 """
 
+import logging
 import os
 import sqlite3
 import tempfile
+from pathlib import Path
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
-from django.db import connections
+from django.db import DatabaseError, connections
 from django.utils import timezone
 
+from lifetracker.core import idle_watchdog
 from lifetracker.core.models import CLOUD_BACKUP_STATUS_PK, CloudBackupStatus
+
+logger = logging.getLogger(__name__)
 
 # The upload runs inside the request, so bound how long a hung endpoint can stall
 # it: botocore's defaults (60s timeouts, several retries) can outlast gunicorn's
@@ -146,6 +151,7 @@ def run_cloud_backup():
 
     require_cloud_backup_settings()
 
+    data_version = _data_version()
     with backup_database() as backup_file:
         backup_size = os.fstat(backup_file.fileno()).st_size
         backup_time = timezone.now()
@@ -172,7 +178,102 @@ def run_cloud_backup():
         )
     except Exception as exc:
         raise CloudBackupStatusUpdateError(object_key) from exc
+    _record_backup_state(data_version, object_key)
     return object_key
+
+
+# Telling whether the database has changed since the last cloud backup, for
+# `cloud_backup --if-changed`: after each backup, run_cloud_backup records the
+# database file's size and modification time in the state file
+# (LIFETRACKER_BACKUP_STATE_FILE), once a checkpoint has emptied the
+# write-ahead log. Any later commit then either is in the log or, once a
+# checkpoint has copied it into the database file, has changed that file's
+# modification time, while reads change neither. The backup's own write to
+# CloudBackupStatus comes before the checkpoint, so it doesn't count; but a
+# commit by another connection after the backup copy started might not be in
+# the backup, so then nothing is recorded, and the next backup goes ahead.
+
+
+def _data_version():
+    """SQLite's ``PRAGMA data_version`` on Django's connection, which changes
+    whenever another connection commits (never for this connection's own
+    commits)."""
+    with connections["default"].cursor() as cursor:
+        return cursor.execute("PRAGMA data_version").fetchone()[0]
+
+
+def database_signature():
+    """The database file's identity, size and modification time, or None if
+    its write-ahead log isn't empty (or there's no file, as for an in-memory
+    database)."""
+    path = Path(connections["default"].settings_dict["NAME"])
+    wal = Path(f"{path}-wal")
+    try:
+        stat = path.stat()
+        # SQLite deletes the log when the last connection closes.
+        wal_size = wal.stat().st_size if wal.exists() else 0
+    except OSError:
+        return None
+    if wal_size:
+        return None
+    return [stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns]
+
+
+def _backup_destination():
+    """Where backups go, so a new bucket or hostname gets a fresh backup."""
+    return {
+        "endpoint_url": settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL,
+        "bucket_name": settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME,
+        "hostname": settings.LIFETRACKER_BACKUP_HOSTNAME,
+    }
+
+
+def _record_backup_state(data_version, object_key):
+    """Record the database's state after a backup, if it's certain the backup
+    has every commit so far (see above); otherwise remove any old record. Logs
+    rather than raises, as the backup itself has succeeded."""
+    path = Path(settings.LIFETRACKER_BACKUP_STATE_FILE)
+    try:
+        with connections["default"].cursor() as cursor:
+            cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        # After the signature, so a commit before it is always caught.
+        signature = database_signature()
+        unchanged = _data_version() == data_version
+        if signature is not None and unchanged:
+            idle_watchdog.write_status(
+                path,
+                {
+                    "database": signature,
+                    "destination": _backup_destination(),
+                    "object_key": object_key,
+                    "recorded_at": timezone.now().isoformat(),
+                },
+            )
+        else:
+            path.unlink(missing_ok=True)
+    except (OSError, sqlite3.Error, DatabaseError) as exc:
+        logger.warning("Couldn't record the backup state in %s: %s", path, exc)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def database_changed():
+    """Whether the database (or where backups go) might have changed since the
+    last cloud backup; True unless that's certain not to be so."""
+    try:
+        state = idle_watchdog.read_status(Path(settings.LIFETRACKER_BACKUP_STATE_FILE))
+    except OSError, ValueError:
+        return True
+    if state is None:
+        return True
+    signature = database_signature()
+    return (
+        signature is None
+        or state.get("database") != signature
+        or state.get("destination") != _backup_destination()
+    )
 
 
 def list_cloud_backups(prefix):
