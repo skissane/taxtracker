@@ -1,14 +1,25 @@
 {% extends "admin/base_site.html" %}
 
-{% load page_timing %}
+{% load page_timing static %}
 
 {% comment %}
   Extends the admin's own base_site.html (Django skips this file when resolving
   the same name), adding top bar links to admin pages that belong to no model,
   so have no admin index entry, and (on Fly) to the Machine's page in Fly's
   dashboard. If these grow numerous, make them a menu. Also
-  adds the page generation time (see core/timing.py) to every page's footer.
+  adds the page generation time (see core/timing.py) to every page's footer,
+  and links the web app manifest and icon (see core/web_manifest.py) from every
+  page's head.
 {% endcomment %}
+{% block extrahead %}
+  {{ block.super }}
+  <link rel="manifest" href="{% url 'web_manifest' %}">
+  <link rel="icon"
+        type="image/svg+xml"
+        href="{% static 'core/app_icon.svg' %}">
+  <link rel="apple-touch-icon" href="{% static 'core/app_icon.png' %}">
+  {% if site_title %}<meta name="apple-mobile-web-app-title" content="{{ site_title }}">{% endif %}
+{% endblock extrahead %}
 {% block extrastyle %}
   {{ block.super }}
   <style>
