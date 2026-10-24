@@ -52,7 +52,7 @@ uv run pytest tests/taxtracker/tests.py::ItemModelTests::test_str_root
 # Run tests under coverage, print a report, and write coverage.xml and junit.xml (no minimum enforced)
 just coverage
 
-# Screenshot the admin login, index, backups, cloud backup list, idle watchdog, uptime, uptime day and client IPs pages, in light and dark mode, into screenshots/ (gitignored)
+# Screenshot the admin login, index, backups, cloud backup list, idle watchdog, uptime, uptime day, client IPs and app icon pages, in light and dark mode, into screenshots/ (gitignored)
 just screenshots
 
 # Post screenshots/ to PR 123 as a comment, or update it (as gh's logged-in user)
@@ -73,7 +73,7 @@ uv run lifetracker-cli --help
 
 **Stack:** Django 6.x, Python 3.14, SQLite, `uv` for package management.
 `pyproject.toml`'s `[tool.uv] required-version` sets the oldest uv allowed (older ones write `uv.lock` in an older format); the `version:` of each `setup-uv` step in `ci.yml` and the `ghcr.io/astral-sh/uv` image tag in the `Dockerfile` pin one exact uv, so raise all three together.
-The entire UI is the Django admin — there are no custom non-admin views (except file serving and the `/healthz/` health check), and `/` redirects to `/admin/`.
+The entire UI is the Django admin — there are no custom non-admin views (except file serving, the `/healthz/` health check, and the web app manifest and app icon), and `/` redirects to `/admin/`.
 No frontend framework.
 
 **Package layout:** `src/lifetracker/` is the Django project (settings, urls).
@@ -141,7 +141,7 @@ Nothing rotates the signing key; a new one appears only if the private key file 
 No token is issued on a 500, as `SessionMiddleware` wouldn't save the session.
 The private key is created on first use (`signing_key()`, cached per process; linked into place so concurrent workers can't overwrite each other's) as `LIFETRACKER_JWT_PRIVATE_KEY_FILE` (default `jwt_private_key.pem` in the config directory, mode 0600), and the public key written as a one-key JWKS (`kid` is its RFC 7638 thumbprint) to `LIFETRACKER_JWT_JWKS_FILE` (default `jwt_jwks.json` there, mode 0644) for the proxy; the JWKS is only rewritten if its contents differ, so a read-only config directory works once both exist.
 The `ensure_jwt_key` command (core) creates them; `run.sh` runs it after `ensure_superuser`, `docker-entrypoint.sh` too when given arguments (otherwise `envoy_config` does the same), and `just docker-run` runs it on the host, as the container's `/config` is read-only.
-`core/auth_whitelist.py`'s `auth_whitelist()` is the one list of requests that need no login, for the proxy: the admin login (GET/HEAD/POST), logout (POST), the Google SSO start and callback (GET/HEAD), by exact path from `reverse()`, everything under `STATIC_URL` (GET/HEAD; WhiteNoise serves those before the middleware anyway), the health check, `/healthz/` (GET/HEAD), and the web app manifest, `/manifest.webmanifest` (GET/HEAD).
+`core/auth_whitelist.py`'s `auth_whitelist()` is the one list of requests that need no login, for the proxy: the admin login (GET/HEAD/POST), logout (POST), the Google SSO start and callback (GET/HEAD), by exact path from `reverse()`, everything under `STATIC_URL` (GET/HEAD; WhiteNoise serves those before the middleware anyway), the health check, `/healthz/` (GET/HEAD), the web app manifest, `/manifest.webmanifest` (GET/HEAD), and the uploaded app icon, `/app-icon.png` (GET/HEAD).
 The `auth_whitelist` command prints the list as JSON.
 Envoy's config (`envoy/envoy.yaml`) is a template that `core/envoy_config.py`'s `render()` fills in, via the `envoy_config` command (core), which `docker-entrypoint.sh` runs before starting Envoy: each `@NAME@` placeholder becomes a JSON value (valid YAML, so nothing needs escaping), and an unknown one is an error.
 Besides the listen address and gunicorn's port, it fills in from Django the JWT's issuer, audience and cookie name (`jwt_auth`'s constants), the JWKS path (`LIFETRACKER_JWT_JWKS_FILE`), the login redirect (`reverse("admin:login")`) and `jwt_rules()`, `jwt_authn`'s rules: one per whitelist entry and method (exact `:method` header, `path` or `prefix`), needing no JWT, then `prefix: "/"` (the route's own match, so every request that reaches gunicorn matched a rule) requiring the `django` provider.
@@ -202,6 +202,7 @@ Nothing prunes `client_ip`: each new IP adds a row of a few hundred bytes, which
 - **`ReceivedDocument`** (taxtracker) — a document received back from the tax agent/office for a `FinancialYear`, with its own attachments.
 - **`CloudBackupStatus`** (core) — single row (`CLOUD_BACKUP_STATUS_PK`) recording the time, S3 object key and size (bytes) of the last successful cloud backup.
   Moved from taxtracker: core's `0002` creates its table and taxtracker's `0004` copies the row across and drops the old one (and the reverse).
+- **`AppIcon`** (core) — single row (`APP_ICON_PK`) holding the uploaded app icon (a `DatabaseStorage` file), its size and SHA-256; no row means the default icon (see Admin extensions).
 - **`TaskType`** (tasktracker) — kind of task, optionally restricted to linking to one model (`content_type`).
   The built-in "Generic" type (`TaskType.GENERIC_PK`, created by a data migration) is the default, can't be renamed, linked to a model or deleted.
 - **`Task`** (tasktracker) — pending/done task, self-referential `parent` (tree), optionally linked to one object via a generic FK (`content_type`/`object_id`); `clean()` only allows a link of its task type's model, and rejects parent cycles (via `TreeNodeMixin`, as for `Item`).
@@ -261,8 +262,12 @@ It links db-ip.com, as DB-IP Lite's CC BY 4.0 licence asks of anything showing i
 
 Every admin page's head links the web app manifest (`/manifest.webmanifest`, URL name `web_manifest`), which `core/web_manifest.py`'s `web_manifest` view generates, so "Add to Home Screen" on iOS opens the admin as a standalone app.
 It's on the auth whitelist, as browsers fetch it without cookies, so it always names the site `LIFETRACKER_UNAUTHENTICATED_SITE_NAME`, whoever asks; that's why it's a view rather than a static file.
-`base_site.html`'s `extrahead` block links it, the icon (`core/static/core/app_icon.svg` as the favicon, and `app_icon.png`, 512x512 and opaque, rendered from the SVG, as the `apple-touch-icon` and the manifest's only icon), and sets `apple-mobile-web-app-title` to the page's `site_title`, so the login page includes them all.
+`base_site.html`'s `extrahead` block links it and the icon (as the favicon and the `apple-touch-icon`, via the `app_icon` template tag), and sets `apple-mobile-web-app-title` to the page's `site_title`, so the login page includes them all.
 No `apple-mobile-web-app-capable` tag: it's deprecated, and the manifest's `display: standalone` replaces it.
+`core/app_icon.py`'s `current_icon()` gives the icon all of these use: by default `core/static/core/app_icon.png` (512x512 and opaque, rendered from `app_icon.svg` beside it, which is the default favicon), or the PNG a superuser uploaded on the **App Icon** page (`/admin/app-icon/`, URL name `admin:app_icon_page`, `core.admin.app_icon_view`, served and linked from the top bar like the Idle Watchdog page), which also resets it to the default.
+An upload must be a square PNG, at least 512x512 and at most 1 MiB; `check_icon` reads the chunk structure and IHDR with the standard library, not Pillow, and the page warns of transparency (an alpha colour type or a `tRNS` chunk), which iOS fills in with black.
+It's stored as the single `AppIcon` row, whose `DatabaseStorage` file goes with it when `save_icon` or `reset_icon` deletes it, and served publicly (it's on the auth whitelist) by the `app_icon` view at `/app-icon.png`, which redirects to the default (uncached) when there's none.
+Links to it add `?v=` and the first 16 hex digits of its SHA-256, and a response for the current version is cached for a year (`immutable`), any other `v` not at all; the manifest's one-hour cache can still name the previous icon for up to an hour.
 
 Every admin page's footer shows how long the page took to generate ("Page generated in 0.042 seconds").
 `core/timing.py`'s `RequestTimingMiddleware`, first in `MIDDLEWARE` so it covers the others, records when Django started on the request; `base_site.html`'s `footer` block shows the time so far via the `page_generation_time` tag (`core/templatetags/page_timing.py`, empty without the middleware or a request in the context), styled by its `extrastyle` block.

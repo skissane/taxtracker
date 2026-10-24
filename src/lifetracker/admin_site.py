@@ -69,6 +69,7 @@ class LifetrackerAdminSite(admin.AdminSite):
         # Imported here: core.admin registers its models on admin.site, an
         # instance of this class, so a top-level import would be circular.
         from lifetracker.core.admin import (  # noqa: PLC0415
+            app_icon_view,
             client_ips_view,
             idle_watchdog_view,
             uptime_day_view,
@@ -97,6 +98,11 @@ class LifetrackerAdminSite(admin.AdminSite):
                 "client-ips/",
                 self.admin_view(client_ips_view),
                 name="client_ips",
+            ),
+            path(
+                "app-icon/",
+                self.admin_view(app_icon_view),
+                name="app_icon_page",
             ),
             *super().get_urls(),
         ]
