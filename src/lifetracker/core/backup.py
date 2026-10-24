@@ -1,10 +1,11 @@
-"""Database backups: serialising the SQLite database for download, and
-uploading it to (and listing) an S3-compatible cloud backup bucket.
+"""Database backups: serialising the SQLite database for download, uploading
+it to (and listing) an S3-compatible cloud backup bucket, and restoring one.
 
 These back up the whole database, so they're shared by every module. The
 admin views that use them are on ``CloudBackupStatusAdmin`` in
-``core/admin.py``, and the ``cloud_backup`` management command also runs a cloud
-backup; callers must enforce authorization themselves.
+``core/admin.py``, the ``cloud_backup`` management command also runs a cloud
+backup, and ``restore_cloud_backup`` restores one; callers must enforce
+authorization themselves.
 """
 
 import os
@@ -110,6 +111,16 @@ def missing_cloud_backup_settings():
     ]
 
 
+def require_cloud_backup_settings():
+    """Raise ``RuntimeError`` naming any required cloud backup settings unset."""
+    missing_required = missing_cloud_backup_settings()
+    if missing_required:
+        raise RuntimeError(
+            "Cloud backup settings are incomplete. Missing: "
+            f"{', '.join(missing_required)}."
+        )
+
+
 def cloud_backup_s3_client():
     """Return a boto3 S3 client for the configured backup bucket."""
     endpoint_url = settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL or None
@@ -133,12 +144,7 @@ def run_cloud_backup():
     # Checked first: unlike missing settings, configuration can't fix this.
     check_sqlite("Cloud backup")
 
-    missing_required = missing_cloud_backup_settings()
-    if missing_required:
-        raise RuntimeError(
-            "Cloud backup settings are incomplete. Missing: "
-            f"{', '.join(missing_required)}."
-        )
+    require_cloud_backup_settings()
 
     with backup_database() as backup_file:
         backup_size = os.fstat(backup_file.fileno()).st_size
@@ -195,3 +201,85 @@ def list_cloud_backups(prefix):
     ]
     objects.sort(key=lambda obj: (obj["last_modified"], obj["key"]), reverse=True)
     return folders, objects
+
+
+def download_cloud_backup(object_key, path):
+    """Download the cloud backup *object_key* to the file at *path*."""
+    check_sqlite("Cloud backup restore")
+    require_cloud_backup_settings()
+    s3_client = cloud_backup_s3_client()
+    with open(path, "wb") as dest:
+        s3_client.download_fileobj(
+            settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME, object_key, dest
+        )
+
+
+def _page_size(conn):
+    return conn.execute("PRAGMA page_size").fetchone()[0]
+
+
+def check_backup_file(path):
+    """Raise ``RuntimeError`` unless *path* is a database we can restore.
+
+    It must be an intact SQLite database (``PRAGMA quick_check``) that has
+    Django's ``django_migrations`` table, so a stray file can't replace the
+    database.
+    """
+    source = sqlite3.connect(path)
+    try:
+        try:
+            problems = [row[0] for row in source.execute("PRAGMA quick_check")]
+        except sqlite3.DatabaseError as exc:
+            # e.g. "file is not a database".
+            raise RuntimeError(f"The backup isn't a valid database: {exc}") from exc
+        if problems != ["ok"]:
+            raise RuntimeError(
+                "The backup failed SQLite's integrity check: " + "; ".join(problems)
+            )
+        has_migrations = source.execute(
+            "SELECT 1 FROM sqlite_master"
+            " WHERE type = 'table' AND name = 'django_migrations'"
+        ).fetchone()
+        if not has_migrations:
+            raise RuntimeError("The backup has no django_migrations table.")
+    finally:
+        source.close()
+
+
+def restore_database(path):
+    """Replace the whole default (SQLite) database with the database at *path*.
+
+    This copies *path* into the live database with SQLite's online backup
+    API, through Django's connection, rather than replacing the file, so
+    it's safe while the web app has the database open: the copy is one write
+    transaction, so other connections can't write until it commits (they wait,
+    up to the ``timeout`` in ``DATABASES``), and readers see the old database
+    until then and the restored one after it, never a mixture. SQLite looks
+    after the ``-wal`` and ``-shm`` files itself, so they never go stale, and
+    the database stays in WAL mode.
+
+    The two page sizes must match, as SQLite can't change a WAL database's
+    page size; every database this app creates uses SQLite's default.
+
+    Raises ``RuntimeError`` inside a transaction, as SQLite won't copy into a
+    connection that has one open.
+    """
+    connection = connections["default"]
+    if connection.in_atomic_block:
+        raise RuntimeError("Can't restore the database inside a transaction.")
+    source = sqlite3.connect(path)
+    try:
+        with connection.cursor() as cursor:
+            dest = cursor.connection
+            source_page_size = _page_size(source)
+            dest_page_size = _page_size(dest)
+            if source_page_size != dest_page_size:
+                raise RuntimeError(
+                    f"The backup's page size ({source_page_size} bytes) differs "
+                    f"from the database's ({dest_page_size} bytes)."
+                )
+            source.backup(dest)
+    finally:
+        source.close()
+    # Its cached state (e.g. the schema) describes the old database.
+    connection.close()
