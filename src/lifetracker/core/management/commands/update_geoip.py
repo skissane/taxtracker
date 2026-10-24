@@ -6,8 +6,6 @@ any recorded client IP without a location yet, as the client IP collector does
 at startup (see ``core.client_ips``).
 """
 
-import maxminddb
-import requests
 from django.core.management.base import BaseCommand, CommandError
 
 from lifetracker.core import client_ips
@@ -25,12 +23,10 @@ class Command(BaseCommand):
             )
         try:
             downloaded = client_ips.update_geoip(config.geoip_dir)
-        except (
-            OSError,
-            requests.RequestException,
-            maxminddb.InvalidDatabaseError,
-        ) as exc:
-            raise CommandError(f"Couldn't download the DB-IP databases: {exc}")
+        # Any exception, as the collector does: a cut-off download alone can
+        # raise EOFError or zlib.error as well as requests' and maxminddb's own.
+        except Exception as exc:
+            raise CommandError(f"Couldn't download the DB-IP databases: {exc!r}")
         for name in downloaded:
             self.stdout.write(f"Downloaded {name}")
         if not downloaded:

@@ -659,7 +659,73 @@ class RunTests(TempDirMixin, SimpleTestCase):
                 client_ips.run(config, 1, sleep=lambda s: None, getppid=lambda: 2), 0
             )
         self.assertIn(
-            "couldn't download the DB-IP databases: offline", stderr.getvalue()
+            "couldn't download the DB-IP databases: ConnectionError('offline')",
+            stderr.getvalue(),
+        )
+
+    def test_cut_off_download_is_logged(self):
+        # A gzip stream that ends early: GzipFile raises EOFError.
+        config = self._config(download=True)
+        response = mock.MagicMock(
+            status_code=200, raw=io.BytesIO(gzip.compress(b"x" * 1000)[:-20])
+        )
+        response.__enter__.return_value = response
+        with (
+            mock.patch.object(requests, "get", return_value=response),
+            mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
+        ):
+            self.assertEqual(
+                client_ips.run(config, 1, sleep=lambda s: None, getppid=lambda: 2), 0
+            )
+        self.assertIn(
+            "couldn't download the DB-IP databases: EOFError", stderr.getvalue()
+        )
+        self.assertEqual(list(config.geoip_dir.iterdir()), [])
+
+    def test_fill_in_failure_is_logged(self):
+        config = self._config(download=True)
+        with (
+            mock.patch.object(client_ips, "update_geoip", return_value=[]),
+            mock.patch.object(
+                client_ips,
+                "fill_in_locations",
+                side_effect=client_ips.sqlite3.OperationalError("locked"),
+            ),
+            mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
+        ):
+            self.assertEqual(
+                client_ips.run(config, 1, sleep=lambda s: None, getppid=lambda: 2), 0
+            )
+        self.assertIn("couldn't look up IPs seen earlier: locked", stderr.getvalue())
+
+    def test_failed_requests_are_retried(self):
+        config = self._config()
+        config.request_log.write_text(envoy_line() + "\n")
+        parents = iter([1, 1, 2])
+        record = client_ips.record
+        failures = [client_ips.sqlite3.OperationalError("full")]
+
+        def record_failing_once(*args):
+            if failures:
+                raise failures.pop()
+            return record(*args)
+
+        with (
+            mock.patch.object(client_ips, "record", side_effect=record_failing_once),
+            mock.patch("sys.stderr", new_callable=io.StringIO),
+        ):
+
+            def sleep(seconds):
+                # The second batch arrives while the first is still pending.
+                with config.request_log.open("a") as file:
+                    file.write(envoy_line(fly_client_ip="198.51.100.1") + "\n")
+
+            client_ips.run(config, 1, sleep=sleep, getppid=lambda: next(parents))
+        connection = client_ips.connect(config.db_path)
+        self.addCleanup(connection.close)
+        self.assertEqual(
+            sorted(row[0] for row in connection.execute("SELECT ip FROM client_ip")),
+            ["198.51.100.1", "203.0.113.7"],
         )
 
     def test_spawn(self):
@@ -747,7 +813,8 @@ class UpdateGeoIPCommandTests(TempDirMixin, SimpleTestCase):
             ),
         ):
             with self.assertRaisesMessage(
-                CommandError, "Couldn't download the DB-IP databases: x"
+                CommandError,
+                "Couldn't download the DB-IP databases: ConnectionError('x')",
             ):
                 call_command("update_geoip")
 

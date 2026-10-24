@@ -27,6 +27,7 @@ Lite is CC BY 4.0: anywhere showing its data links to db-ip.com.
 Like the idle watchdog, it doesn't import Django.
 """
 
+import collections
 import contextlib
 import dataclasses
 import datetime
@@ -55,6 +56,8 @@ TRUNCATE_BYTES = 1024 * 1024
 GEOIP_DATABASES = ("dbip-country-lite", "dbip-asn-lite")
 GEOIP_URL = "https://download.db-ip.com/free/{name}-{month}.mmdb.gz"
 GEOIP_TIMEOUT_SECONDS = 60
+# The most requests kept while recording them fails (see ``_collect``).
+MAX_PENDING_REQUESTS = 100_000
 # The longest request line and user agent kept (the rest is cut off).
 MAX_TEXT_LENGTH = 500
 SCHEMA_VERSION = 1
@@ -501,17 +504,24 @@ def fill_in_locations(connection: sqlite3.Connection, geoip: GeoIP) -> int:
 
 
 def refresh_geoip(config: Config, connection: sqlite3.Connection, geoip: GeoIP):
-    """``update_geoip``, then ``fill_in_locations``; logs rather than raises."""
+    """``update_geoip``, then ``fill_in_locations``; logs rather than raises,
+    as nothing would restart the collector if it exited."""
     if config.geoip_dir is None:
         return
     try:
         downloaded = update_geoip(config.geoip_dir)
-    except (OSError, requests.RequestException, maxminddb.InvalidDatabaseError) as exc:
-        log(f"couldn't download the DB-IP databases: {exc}")
+    # Any exception: a cut-off download alone can raise EOFError or zlib.error
+    # as well as requests' and maxminddb's own.
+    except Exception as exc:
+        log(f"couldn't download the DB-IP databases: {exc!r}")
         downloaded = []
     for name in downloaded:
         log(f"downloaded {name}")
-    found = fill_in_locations(connection, geoip)
+    try:
+        found = fill_in_locations(connection, geoip)
+    except sqlite3.Error as exc:
+        log(f"couldn't look up IPs seen earlier: {exc}")
+        return
     if found:
         log(f"looked up {found} IPs seen earlier")
 
@@ -577,11 +587,18 @@ def run(
 
 def _collect(config, master_pid, connection, geoip, sleep, getppid) -> int:
     reader = RequestLogReader(config.request_log)
+    # Requests read but not yet recorded, as the reader has moved past them
+    # (and may have emptied the file): retried until recording works again,
+    # keeping only the newest MAX_PENDING_REQUESTS meanwhile.
+    pending: collections.deque[Request] = collections.deque(maxlen=MAX_PENDING_REQUESTS)
     failing = False
     while True:
         try:
-            parsed = (parse_line(line) for line in reader.read())
-            record(connection, (request for request in parsed if request), geoip)
+            pending.extend(
+                request for request in map(parse_line, reader.read()) if request
+            )
+            record(connection, pending, geoip)
+            pending.clear()
         except (OSError, sqlite3.Error) as exc:
             # Logged once per failing stretch.
             if not failing:
