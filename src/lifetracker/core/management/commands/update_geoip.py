@@ -1,10 +1,12 @@
 """Management command: update_geoip.
 
 Downloads this month's DB-IP Lite country and ASN databases (or last month's,
-if this month's aren't out yet) unless they're already there, then looks up
-any recorded client IP without a location yet, as the client IP collector does
-at startup (see ``core.client_ips``), recording the outcome in the status file
-the Client IPs page shows.
+if this month's aren't out yet) unless they're already there, and Apple's
+iCloud Private Relay egress ranges unless they're unchanged, then looks up any
+recorded client IP without a location yet, and checks any not yet checked
+against the relay ranges, as the client IP collector does at startup (see
+``core.client_ips``), recording the outcome in the status file the Client IPs
+page shows.
 """
 
 from django.core.management.base import BaseCommand, CommandError
@@ -13,7 +15,10 @@ from lifetracker.core import client_ips
 
 
 class Command(BaseCommand):
-    help = "Download the DB-IP Lite databases and look up client IPs in them."
+    help = (
+        "Download the DB-IP Lite databases and iCloud Private Relay ranges, and"
+        " look up client IPs in them."
+    )
 
     def handle(self, *args, **options):
         config = client_ips.config_from_env()
@@ -39,9 +44,13 @@ class Command(BaseCommand):
         geoip = client_ips.GeoIP(config.geoip_dir)
         try:
             found = client_ips.fill_in_locations(connection, geoip)
+            checked = client_ips.fill_in_relay(connection, geoip)
         finally:
             geoip.close()
             connection.close()
         self.stdout.write(f"Looked up {found} IPs without a location")
+        self.stdout.write(
+            f"Checked {checked} IPs not checked yet against the Private Relay ranges"
+        )
         if failed:
             raise CommandError(f"Couldn't download {', '.join(failed)}")

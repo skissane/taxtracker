@@ -20,6 +20,9 @@ from django.urls import reverse
 from lifetracker.core import client_ips
 from tests.core.mmdb_writer import write_geoip, write_mmdb
 
+# tests/conftest.py replaces it in every test, so it never downloads anything.
+download_relay_ranges = client_ips._download_relay_ranges
+
 
 def envoy_line(**fields):
     """A line of Envoy's request log, as envoy/envoy.yaml's json_format
@@ -53,6 +56,29 @@ def request(ip="203.0.113.7", time=1000.0, **fields):
             **fields,
         }
     )
+
+
+# A few lines in the shape of Apple's list, from the documentation ranges.
+RELAY_LINES = [
+    "203.0.113.0/27,AU,AU-NSW,Sydney,",
+    "203.0.113.64/31,AU,AU-VIC,Melbourne,",
+    "2001:db8:1::/64,NZ,NZ-AUK,Auckland,",
+]
+
+
+def write_relay_ranges(geoip_dir, lines=RELAY_LINES):
+    geoip_dir.mkdir(parents=True, exist_ok=True)
+    return client_ips.build_relay_ranges(
+        lines, geoip_dir / client_ips.RELAY_RANGES_FILE
+    )
+
+
+def relay_lookup(geoip_dir, ip):
+    relay = client_ips.RelayRanges(geoip_dir)
+    try:
+        return relay.lookup(ip)
+    finally:
+        relay.close()
 
 
 class TempDirMixin:
@@ -317,7 +343,7 @@ class UpdateGeoIPTests(TempDirMixin, SimpleTestCase):
         download, calls = self._fake_download(available)
         statuses = self._update(download)
         self.assertEqual(
-            [status["file"] for status in statuses.values()],
+            [statuses[name]["file"] for name in client_ips.GEOIP_DATABASES],
             ["dbip-country-lite-2025-12.mmdb", "dbip-asn-lite-2025-12.mmdb"],
         )
         self.assertEqual(statuses["dbip-asn-lite"]["outcome"], client_ips.DOWNLOADED)
@@ -451,6 +477,197 @@ class DownloadTests(TempDirMixin, SimpleTestCase):
         self.assertEqual(list(self.temp.iterdir()), [])
 
 
+class RelayRangesTests(TempDirMixin, SimpleTestCase):
+    def test_lookup(self):
+        count = write_relay_ranges(
+            self.temp,
+            [
+                *RELAY_LINES,
+                "",
+                "# a comment",
+                "not a prefix,XX,,,",
+                # Host bits set, and nothing but the prefix.
+                "198.51.100.9/30",
+            ],
+        )
+        self.assertEqual(count, 4)
+        relay = client_ips.RelayRanges(self.temp)
+        self.addCleanup(relay.close)
+        sydney = client_ips.Relay(True, "AU", "AU-NSW", "Sydney")
+        not_relay = client_ips.Relay(False)
+        for ip, expected in (
+            ("203.0.113.0", sydney),
+            ("203.0.113.31", sydney),
+            ("203.0.113.32", not_relay),
+            ("203.0.113.65", client_ips.Relay(True, "AU", "AU-VIC", "Melbourne")),
+            ("203.0.113.66", not_relay),
+            ("198.51.100.11", client_ips.Relay(True)),
+            ("2001:db8:1::abcd", client_ips.Relay(True, "NZ", "NZ-AUK", "Auckland")),
+            ("2001:db8:1:1::", not_relay),
+            ("192.0.2.1", not_relay),
+            ("::1", not_relay),
+        ):
+            with self.subTest(ip):
+                self.assertEqual(relay.lookup(ip), expected)
+
+    def test_no_ranges(self):
+        self.assertEqual(relay_lookup(self.temp, "203.0.113.1"), client_ips.Relay())
+        self.assertEqual(relay_lookup(None, "203.0.113.1"), client_ips.Relay())
+        (self.temp / client_ips.RELAY_RANGES_FILE).write_bytes(b"junk" * 100)
+        self.assertEqual(relay_lookup(self.temp, "203.0.113.1"), client_ips.Relay())
+
+    def test_reopens_when_replaced(self):
+        write_relay_ranges(self.temp)
+        geoip = client_ips.GeoIP(self.temp)
+        self.addCleanup(geoip.close)
+        self.assertTrue(geoip.relay("203.0.113.1").private_relay)
+        write_relay_ranges(self.temp, ["192.0.2.0/24,US,US-CA,Los Angeles,"])
+        self.assertFalse(geoip.relay("203.0.113.1").private_relay)
+        self.assertEqual(geoip.relay("192.0.2.1").relay_city, "Los Angeles")
+        (self.temp / client_ips.RELAY_RANGES_FILE).unlink()
+        self.assertEqual(geoip.relay("192.0.2.1"), client_ips.Relay())
+
+    def test_empty_list_keeps_the_old_ranges(self):
+        write_relay_ranges(self.temp)
+        with self.assertRaisesMessage(ValueError, "no ranges in the list"):
+            write_relay_ranges(self.temp, ["", "junk"])
+        self.assertEqual(
+            sorted(path.name for path in self.temp.iterdir()),
+            [client_ips.RELAY_RANGES_FILE],
+        )
+        self.assertTrue(relay_lookup(self.temp, "203.0.113.1").private_relay)
+
+    def _response(self, status, body=b"", headers=None):
+        response = mock.MagicMock(status_code=status, headers=headers or {})
+        response.iter_lines.return_value = iter(body.splitlines())
+        response.__enter__.return_value = response
+        if status >= 400:
+            response.raise_for_status.side_effect = requests.HTTPError(str(status))
+        return response
+
+    def test_download(self):
+        destination = self.temp / client_ips.RELAY_RANGES_FILE
+        body = "\n".join(RELAY_LINES).encode()
+        with mock.patch.object(
+            requests,
+            "get",
+            return_value=self._response(200, body, {"ETag": '"v1"'}),
+        ) as get:
+            self.assertEqual(
+                download_relay_ranges("https://x/y.csv", destination, None), '"v1"'
+            )
+        get.assert_called_once_with(
+            "https://x/y.csv",
+            headers={},
+            stream=True,
+            timeout=client_ips.GEOIP_TIMEOUT_SECONDS,
+        )
+        self.assertEqual(destination.stat().st_mode & 0o777, 0o644)
+        self.assertTrue(relay_lookup(self.temp, "203.0.113.1").private_relay)
+        # Without an ETag.
+        with mock.patch.object(requests, "get", return_value=self._response(200, body)):
+            self.assertEqual(
+                download_relay_ranges("https://x/y.csv", destination, '"v1"'), ""
+            )
+
+    def test_download_unchanged(self):
+        with mock.patch.object(
+            requests, "get", return_value=self._response(304)
+        ) as get:
+            self.assertIsNone(
+                download_relay_ranges(
+                    "https://x/y.csv", self.temp / "r.sqlite3", '"v1"'
+                )
+            )
+        self.assertEqual(get.call_args.kwargs["headers"], {"If-None-Match": '"v1"'})
+        self.assertEqual(list(self.temp.iterdir()), [])
+
+    def test_download_error(self):
+        with mock.patch.object(requests, "get", return_value=self._response(500)):
+            with self.assertRaises(requests.HTTPError):
+                download_relay_ranges("https://x/y.csv", self.temp / "r.sqlite3", None)
+        self.assertEqual(list(self.temp.iterdir()), [])
+
+
+class UpdateRelayRangesTests(TempDirMixin, SimpleTestCase):
+    NOW = 1_800_000_000.0
+
+    def _update(self, download, now=NOW):
+        return client_ips.update_geoip(
+            self.temp,
+            now=now,
+            download=lambda url, destination: False,
+            download_relay_ranges=download,
+        )[client_ips.RELAY_RANGES]
+
+    def test_downloads_then_checks_etag(self):
+        etags = []
+
+        def download(url, destination, etag):
+            etags.append(etag)
+            if etag == '"v1"':
+                return None
+            write_relay_ranges(destination.parent)
+            return '"v1"'
+
+        status = self._update(download)
+        self.assertEqual(
+            status,
+            {
+                "attempted": self.NOW,
+                "url": client_ips.RELAY_RANGES_URL,
+                "outcome": client_ips.DOWNLOADED,
+                "fell_back": False,
+                "file": client_ips.RELAY_RANGES_FILE,
+                "succeeded": self.NOW,
+                "etag": '"v1"',
+                "error": None,
+                "traceback": None,
+            },
+        )
+        status = self._update(download, now=self.NOW + 60)
+        self.assertEqual(etags, [None, '"v1"'])
+        self.assertEqual(status["outcome"], client_ips.UP_TO_DATE)
+        self.assertEqual(status["etag"], '"v1"')
+        self.assertEqual(status["succeeded"], self.NOW + 60)
+        self.assertEqual(
+            client_ips.read_geoip_status(self.temp)[client_ips.RELAY_RANGES], status
+        )
+        # Without the file, its ETag is no use.
+        (self.temp / client_ips.RELAY_RANGES_FILE).unlink()
+        status = self._update(download)
+        self.assertEqual(etags[-1], None)
+        self.assertEqual(status["outcome"], client_ips.DOWNLOADED)
+
+    def test_failure_keeps_the_last_list(self):
+        self._update(
+            lambda url, destination, etag: (
+                write_relay_ranges(destination.parent) and '"v1"'
+            )
+        )
+
+        def fail(url, destination, etag):
+            raise requests.ConnectionError("offline")
+
+        status = self._update(fail, now=self.NOW + 60)
+        self.assertEqual(status["outcome"], client_ips.FAILED)
+        self.assertEqual(status["error"], "ConnectionError('offline')")
+        self.assertIn("requests.exceptions.ConnectionError", status["traceback"])
+        self.assertEqual(status["succeeded"], self.NOW)
+        self.assertEqual(status["file"], client_ips.RELAY_RANGES_FILE)
+        self.assertEqual(status["etag"], '"v1"')
+
+    def test_failure_without_a_list(self):
+        def fail(url, destination, etag):
+            raise ValueError("no ranges in the list")
+
+        status = self._update(fail)
+        self.assertEqual(status["outcome"], client_ips.FAILED)
+        self.assertIsNone(status["succeeded"])
+        self.assertIsNone(status["file"])
+        self.assertIsNone(status["etag"])
+
+
 class RecordTests(TempDirMixin, SimpleTestCase):
     def setUp(self):
         super().setUp()
@@ -497,6 +714,11 @@ class RecordTests(TempDirMixin, SimpleTestCase):
                 "country_name": "Australia",
                 "asn": 64500,
                 "as_org": "Example ISP",
+                # No relay ranges to check against.
+                "private_relay": None,
+                "relay_country": None,
+                "relay_region": None,
+                "relay_city": None,
             },
         )
         other = self._row("198.51.100.1")
@@ -550,7 +772,8 @@ class RecordTests(TempDirMixin, SimpleTestCase):
 
     def test_failed_batch_is_rolled_back(self):
         geoip = mock.Mock(
-            lookup=mock.Mock(side_effect=[client_ips.Location(), ValueError])
+            lookup=mock.Mock(side_effect=[client_ips.Location(), ValueError]),
+            relay=mock.Mock(return_value=client_ips.Relay()),
         )
         with self.assertRaises(ValueError):
             client_ips.record(
@@ -627,6 +850,7 @@ class RecordTests(TempDirMixin, SimpleTestCase):
                     "ips": 2,
                     "countries": "AU",
                     "logged_in": 2,
+                    "relay_ips": None,
                     "first_logged_in": 1000,
                     "last_logged_in": 3000,
                 },
@@ -636,11 +860,112 @@ class RecordTests(TempDirMixin, SimpleTestCase):
                     "ips": 1,
                     "countries": None,
                     "logged_in": 1,
+                    "relay_ips": None,
                     "first_logged_in": 2000,
                     "last_logged_in": 2000,
                 },
             ],
         )
+
+    def test_private_relay(self):
+        write_relay_ranges(self.geoip_dir)
+        client_ips.record(
+            self.connection,
+            [request(), request(ip="2001:db8:1::5"), request(ip="198.51.100.1")],
+            self.geoip,
+        )
+        self.assertEqual(
+            {
+                k: self._row()[k]
+                for k in (
+                    "private_relay",
+                    "relay_country",
+                    "relay_region",
+                    "relay_city",
+                )
+            },
+            {
+                "private_relay": 1,
+                "relay_country": "AU",
+                "relay_region": "AU-NSW",
+                "relay_city": "Sydney",
+            },
+        )
+        self.assertEqual(self._row("2001:db8:1::5")["relay_city"], "Auckland")
+        self.assertEqual(self._row("198.51.100.1")["private_relay"], 0)
+        # Checked again each time it's seen: no longer in the list.
+        write_relay_ranges(self.geoip_dir, ["192.0.2.0/24,US,,,"])
+        client_ips.record(self.connection, [request(time=2000)], self.geoip)
+        self.assertEqual(self._row()["private_relay"], 0)
+        self.assertIsNone(self._row()["relay_city"])
+        # Without a list, what it had is kept.
+        write_relay_ranges(self.geoip_dir)
+        client_ips.record(self.connection, [request(time=3000)], self.geoip)
+        (self.geoip_dir / client_ips.RELAY_RANGES_FILE).unlink()
+        client_ips.record(self.connection, [request(time=4000)], self.geoip)
+        self.assertEqual(self._row()["private_relay"], 1)
+        self.assertEqual(self._row()["relay_city"], "Sydney")
+
+    def test_fill_in_relay(self):
+        client_ips.record(
+            self.connection, [request(), request(ip="198.51.100.1")], self.geoip
+        )
+        self.assertIsNone(self._row()["private_relay"])
+        self.assertEqual(client_ips.fill_in_relay(self.connection, self.geoip), 0)
+        write_relay_ranges(self.geoip_dir)
+        self.assertEqual(client_ips.fill_in_relay(self.connection, self.geoip), 2)
+        self.assertEqual(self._row()["private_relay"], 1)
+        self.assertEqual(self._row()["relay_city"], "Sydney")
+        self.assertEqual(self._row("198.51.100.1")["private_relay"], 0)
+        # Only those not checked yet.
+        self.assertEqual(client_ips.fill_in_relay(self.connection, self.geoip), 0)
+
+    def test_relay_ips_per_network(self):
+        write_geoip(self.geoip_dir)
+        write_relay_ranges(self.geoip_dir)
+        client_ips.record(
+            self.connection,
+            [
+                request(logged_in=True),
+                request(ip="203.0.113.200", logged_in=True),
+                request(ip="203.0.113.201", logged_in=True),
+            ],
+            self.geoip,
+        )
+        [network] = client_ips.logged_in_networks(self.connection)
+        self.assertEqual((network["ips"], network["relay_ips"]), (3, 1))
+
+    def test_upgrades_version_1(self):
+        self.connection.close()
+        path = self.temp / "v1.sqlite3"
+        old = client_ips.sqlite3.connect(path)
+        old.execute(
+            "CREATE TABLE client_ip (ip TEXT PRIMARY KEY, first_seen REAL NOT NULL,"
+            " last_seen REAL NOT NULL, requests INTEGER NOT NULL,"
+            " rejected INTEGER NOT NULL, logged_in INTEGER NOT NULL,"
+            " first_logged_in REAL, last_logged_in REAL, last_request TEXT NOT NULL,"
+            " last_status INTEGER, last_user_agent TEXT NOT NULL, country TEXT,"
+            " country_name TEXT, asn INTEGER, as_org TEXT)"
+        )
+        old.execute(
+            "INSERT INTO client_ip VALUES"
+            " ('203.0.113.7', 1, 2, 3, 0, 0, NULL, NULL, 'GET /', 200, 'UA',"
+            " 'AU', 'Australia', 64500, 'Example ISP')"
+        )
+        old.execute("PRAGMA user_version=1")
+        old.commit()
+        old.close()
+        self.connection = connection = client_ips.connect(path)
+        self.addCleanup(connection.close)
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)
+        row = dict(connection.execute("SELECT * FROM client_ip").fetchone())
+        self.assertEqual(row["requests"], 3)
+        self.assertIsNone(row["private_relay"])
+        # And once the ranges are there, it's checked against them.
+        write_relay_ranges(self.geoip_dir)
+        self.assertEqual(client_ips.fill_in_relay(connection, self.geoip), 1)
+        # Connecting again changes nothing.
+        client_ips.connect(path).close()
 
     def test_read_only_connection(self):
         client_ips.record(self.connection, [request()], self.geoip)
@@ -731,6 +1056,26 @@ class RunTests(TempDirMixin, SimpleTestCase):
         update.assert_called_once_with(config.geoip_dir)
         self.assertIn("downloaded x.mmdb", stderr.getvalue())
         self.assertIn("looked up 1 IPs seen earlier", stderr.getvalue())
+
+    def test_checks_relay_at_startup(self):
+        config = self._config(download=True)
+        connection = client_ips.connect(config.db_path)
+        client_ips.record(connection, [request()], client_ips.GeoIP(None))
+        connection.close()
+
+        def update(geoip_dir):
+            write_relay_ranges(geoip_dir)
+            return {}
+
+        with (
+            mock.patch.object(client_ips, "update_geoip", side_effect=update),
+            mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
+        ):
+            client_ips.run(config, 1, sleep=lambda s: None, getppid=lambda: 2)
+        self.assertIn(
+            "checked 1 IPs seen earlier against the Private Relay ranges",
+            stderr.getvalue(),
+        )
 
     def test_no_download_without_geoip_dir(self):
         config = self._config(download=True, geoip_dir=None)
@@ -904,7 +1249,8 @@ class UpdateGeoIPCommandTests(TempDirMixin, SimpleTestCase):
         self.assertEqual(
             stdout.getvalue(),
             "Downloaded dbip-asn-lite-2026-10.mmdb\n"
-            "Looked up 1 IPs without a location\n",
+            "Looked up 1 IPs without a location\n"
+            "Checked 0 IPs not checked yet against the Private Relay ranges\n",
         )
         row = connection.execute("SELECT asn FROM client_ip").fetchone()
         self.assertEqual(row["asn"], 64500)
@@ -1061,6 +1407,40 @@ class ClientIPsAdminViewTests(TempDirMixin, TestCase):
         self.assertIn("AS64500", networks)
         self.assertNotIn("198.51.100.1", networks)
 
+    def test_private_relay(self):
+        write_geoip(self.temp / "geoip")
+        write_relay_ranges(self.temp / "geoip")
+        connection = client_ips.connect(self.db_path)
+        geoip = client_ips.GeoIP(self.temp / "geoip")
+        client_ips.record(
+            connection,
+            [
+                request(logged_in=True),
+                request(ip="2001:db8:1::5"),
+                request(ip="198.51.100.1"),
+            ],
+            geoip,
+        )
+        connection.execute(
+            "UPDATE client_ip SET relay_city = NULL, relay_region = NULL"
+            " WHERE ip = '2001:db8:1::5'"
+        )
+        geoip.close()
+        connection.close()
+        response = self.client.get(self.URL)
+        self.assertContains(
+            response,
+            '<strong class="lt-relay">iCloud Private Relay</strong>',
+            count=2,
+            html=True,
+        )
+        self.assertContains(response, "(Sydney, AU-NSW)")
+        self.assertContains(response, "(NZ)")
+        self.assertContains(response, client_ips.RELAY_RANGES_URL)
+        networks = response.content.decode().split("<h2>IPs</h2>")[0]
+        self.assertIn('<th scope="col" class="lt-num">Private Relay IPs</th>', networks)
+        self.assertIn('<td class="lt-num">1</td>', networks)
+
     def test_ipv6_wraps_after_colons(self):
         connection = client_ips.connect(self.db_path)
         client_ips.record(
@@ -1130,7 +1510,8 @@ class ClientIPsAdminViewTests(TempDirMixin, TestCase):
             response,
             '<time data-lt-local datetime="2026-10-02T00:00:00Z">'
             "2026-10-02T00:00:00Z</time>",
-            count=3,
+            # Each database's attempt and the ASN and relay ranges' successes.
+            count=5,
             html=True,
         )
 
