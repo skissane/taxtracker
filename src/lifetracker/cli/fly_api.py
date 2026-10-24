@@ -35,7 +35,8 @@ def fly_api_command(path: str, socket_path: str) -> None:
         raise click.ClickException(f"{socket_path}: {e!r}") from None
     body = response.body
     try:
-        body = (json.dumps(json.loads(body), indent=2) + "\n").encode()
+        pretty = json.dumps(json.loads(body), indent=2, ensure_ascii=False)
+        body = (pretty + "\n").encode()
     except ValueError:
         pass
     sys.stdout.buffer.write(body)

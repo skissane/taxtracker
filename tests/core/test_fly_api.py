@@ -111,6 +111,12 @@ class FlyApiCommandTests(FakeFlyApiMixin, SimpleTestCase):
         self.assertEqual(result.stdout, '{\n  "ok": true\n}\n')
         self.assertEqual(self.requests, [("GET", "/v1/apps/a/machines", "flaps")])
 
+    def test_non_ascii_json_not_escaped(self):
+        self.server.response = (200, "application/json", '{"name": "café"}'.encode())
+        result = self.invoke("/x")
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(result.stdout_bytes, '{\n  "name": "café"\n}\n'.encode())
+
     def test_non_json_body_unchanged(self):
         self.server.response = (200, "text/plain", b"plain\xff")
         result = self.invoke("/x")
