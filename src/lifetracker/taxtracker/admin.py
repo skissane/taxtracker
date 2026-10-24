@@ -699,59 +699,46 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
 # ---------------------------------------------------------------------------
 
 
+_ATX_HEADING_RE = re.compile(r"(#{1,6}) (.+)")
+# A fence opens with 3+ backticks or tildes, indented at most 3 spaces; a closing
+# fence uses the same character, at least as many of it, and nothing after.
+_CODE_FENCE_RE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
+
+
 def _adjust_notes_headings(notes: str, item_heading_level: int) -> str:
-    """Re-level ATX headings in *notes* so shallowest becomes item_heading_level+1."""
-    atx_re = re.compile(r"^(#{1,6}) (.+)$")
-    fence_re = re.compile(r"^\s*(`{3,}|~{3,})")
+    """Re-level ATX headings in *notes* so shallowest becomes item_heading_level+1.
+
+    Lines inside fenced code blocks (``` or ~~~) aren't headings, so are left as
+    they are and don't count towards the shallowest level.
+    """
     lines = notes.splitlines(keepends=True)
-    heading_matches = []
-    fence_char = None
-    in_fence = False
-
-    for line_index, line in enumerate(lines):
-        fence_match = fence_re.match(line)
-        if fence_match:
-            fence = fence_match.group(1)
-            if in_fence:
-                if fence.startswith(fence_char):
-                    in_fence = False
-                    fence_char = None
-            elif not in_fence:
-                in_fence = True
-                fence_char = fence[0]
-            continue
-        if in_fence:
-            continue
-        match = atx_re.match(line.rstrip("\r\n"))
-        if match:
-            heading_matches.append((line_index, match))
-
-    if not heading_matches:
+    headings = {}
+    fence = None
+    for index, line in enumerate(lines):
+        content = line.rstrip("\r\n")
+        fence_match = _CODE_FENCE_RE.fullmatch(content)
+        if fence is None:
+            if fence_match:
+                fence = fence_match.group(1)
+            elif heading_match := _ATX_HEADING_RE.fullmatch(content):
+                headings[index] = heading_match
+        elif (
+            fence_match
+            and fence_match.group(1)[0] == fence[0]
+            and len(fence_match.group(1)) >= len(fence)
+            and not fence_match.group(2).strip()
+        ):
+            fence = None
+    if not headings:
         return notes
-
-    min_level = min(len(match.group(1)) for _, match in heading_matches)
+    min_level = min(len(m.group(1)) for m in headings.values())
     target_base = item_heading_level + 1
 
-    def _reheader(match):
-        new_level = len(match.group(1)) - min_level + target_base
-        return "#" * min(new_level, 6) + " " + match.group(2)
-
-    rewritten = []
-    for line_index, line in enumerate(lines):
-        match = None
-        for target_index, target_match in heading_matches:
-            if target_index == line_index:
-                match = target_match
-                break
-        if match is not None:
-            replacement = _reheader(match)
-            suffix = "\n" if line.endswith("\n") else ""
-            if line.endswith("\r\n"):
-                suffix = "\r\n"
-            rewritten.append(replacement + suffix)
-            continue
-        rewritten.append(line)
-    return "".join(rewritten)
+    for index, m in headings.items():
+        new_level = len(m.group(1)) - min_level + target_base
+        line_ending = lines[index][m.end() :]
+        lines[index] = "#" * min(new_level, 6) + " " + m.group(2) + line_ending
+    return "".join(lines)
 
 
 def _safe_component(title):

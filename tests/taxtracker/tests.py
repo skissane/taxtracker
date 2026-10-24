@@ -1712,15 +1712,41 @@ class AdjustNotesHeadingsTests(TestCase):
             "# comment inside shell block\n"
             'echo "hi"\n'
             "```\n"
-            "# Real heading\n"
+            "## Real heading\n"
             "~~~\n"
-            "## also ignored\n"
+            "# also ignored\n"
             "~~~\n"
         )
-        result = _adjust_notes_headings(notes, 2)
-        self.assertIn("# comment inside shell block", result)
-        self.assertIn("### Real heading", result)
-        self.assertIn("## also ignored", result)
+        # The fenced "#" lines don't count, so "##" is the shallowest level.
+        self.assertEqual(
+            _adjust_notes_headings(notes, 2),
+            notes.replace("## Real heading", "### Real heading"),
+        )
+
+    def test_fence_closed_only_by_matching_fence(self):
+        notes = (
+            "````\n"
+            "```\n"  # too short to close
+            "~~~~\n"  # other character
+            "```` not a close\n"  # text after it
+            "# still code\n"
+            "  ````\n"
+            "# Heading\n"
+        )
+        self.assertEqual(
+            _adjust_notes_headings(notes, 2),
+            notes.replace("# Heading", "### Heading"),
+        )
+
+    def test_unclosed_fence_runs_to_end(self):
+        notes = "# Heading\n```\n# code\n"
+        self.assertEqual(_adjust_notes_headings(notes, 2), "### Heading\n```\n# code\n")
+
+    def test_line_endings_preserved(self):
+        notes = "# One\r\n## Two\n# Three"
+        self.assertEqual(
+            _adjust_notes_headings(notes, 2), "### One\r\n#### Two\n### Three"
+        )
 
     def test_hash_in_body_not_treated_as_heading(self):
         # Only lines where # is at the start are headings
