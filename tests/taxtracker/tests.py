@@ -366,9 +366,13 @@ class CopyItemsTests(TestCase):
         )
         with mock.patch.object(FinancialYear.objects, "filter") as mock_filter:
             mock_filter.return_value.exists.return_value = False
-            response = client.post(url, follow=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "FY2025 already exists.")
+            response = client.post(url)
+        self.assertRedirects(
+            response,
+            reverse("admin:taxtracker_financialyear_changelist"),
+            fetch_redirect_response=False,
+        )
+        self.assertContains(client.get(response.url), "FY2025 already exists.")
         new_fy = FinancialYear.objects.get(year=2025)
         self.assertFalse(new_fy.items.exists())
 
