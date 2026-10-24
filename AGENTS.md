@@ -117,6 +117,8 @@ Rows deleted before that receiver existed left their `DBStoredFile`s behind: cor
 `DatabaseStorage` (in `core/models.py`) is a custom Django storage backend that writes file content to `DBStoredFile` rows.
 Storage paths have the form `db/<pk>/<filename>`.
 Files are served through `DBStoredFileAdmin.serve_file_view` at `/admin/core/dbstoredfile/file/<pk>/`.
+It guesses the type from the filename (`application/octet-stream` if it can't, or if the name gives an encoding such as `.gz`) and shows only `INLINE_CONTENT_TYPES` (PDF, common raster images, plain text) inline; anything else, HTML and SVG included, is sent as an `attachment` download, so an attached file can't run script on the admin origin with the viewer's session (issue #140).
+Every response has `X-Content-Type-Options: nosniff`, and all but PDFs `Content-Security-Policy: sandbox; default-src 'none'`; PDFs are left out because browsers' built-in PDF viewers won't run in a sandboxed document.
 
 **Logging:** `settings.LOGGING` sends the `django` and `lifetracker` loggers (INFO and up) to one stderr `StreamHandler`, whatever `DEBUG` is, so production 500s' tracebacks and the app's own `logging` calls reach the container log and `fly logs`.
 Django's default config prints only while `DEBUG` is on and otherwise mails `ADMINS`, which is unset here.
