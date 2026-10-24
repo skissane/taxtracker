@@ -112,6 +112,7 @@ To put either file somewhere else, set `LIFETRACKER_DB_PATH` or `LIFETRACKER_SEC
 The entrypoint starts as root only to set up the `lifetracker` user (UID and GID 10001 by default), then drops to that user to run migrations and Gunicorn.
 Set `LIFETRACKER_UID` and `LIFETRACKER_GID` to run as different IDs, for example to match the owner of a bind-mounted directory; `just docker-run` sets them to your own, so the container can read your `secret_key` (mode 0600) from `/config`.
 On each start the entrypoint re-owns anything in `/data` not already owned by that user, which also upgrades volumes from older root-run images.
+On a Fly Machine it also gives the `lifetracker` group read and write access to the Fly Machines API socket, `/.fly/api`, which otherwise only root can use, so the app and `./flyssh.sh` sessions can call it without root.
 Only `/data` is re-owned: if you've pointed `LIFETRACKER_DB_PATH` or a writable `LIFETRACKER_CONFIG_DIR` somewhere else, `chown` its files to that user yourself, or the app can't write to them.
 Running with `docker run --user` skips all of this and runs as the given user, who then needs write access to `/data`.
 Pass `-u lifetracker` to `docker exec` (as above, and as `just docker-shell` does) so commands don't run as root.
