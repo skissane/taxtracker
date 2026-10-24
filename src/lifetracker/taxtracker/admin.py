@@ -1,8 +1,10 @@
 import io
+import os
 import re
 import shutil
 import tempfile
 import zipfile
+from collections import defaultdict
 from pathlib import Path
 
 from django.contrib import admin, messages
@@ -756,6 +758,70 @@ def _folder_path(item, item_map):
     return "/".join(parts)
 
 
+def _dedupe_component(name, used):
+    """Return *name* with a numeric suffix if needed to avoid collisions."""
+    if name not in used:
+        used.add(name)
+        return name
+    counter = 2
+    while True:
+        deduped = f"{name} ({counter})"
+        if deduped not in used:
+            used.add(deduped)
+            return deduped
+        counter += 1
+
+
+def _dedupe_filename(filename, used):
+    """Return *filename* with a numeric suffix before the extension if needed."""
+    if filename not in used:
+        used.add(filename)
+        return filename
+    stem, ext = os.path.splitext(filename)
+    counter = 2
+    while True:
+        deduped = f"{stem} ({counter}){ext}"
+        if deduped not in used:
+            used.add(deduped)
+            return deduped
+        counter += 1
+
+
+def _unique_folder_paths(items):
+    """Return per-item unique folder paths after applying _safe_component()."""
+    children_by_parent = defaultdict(list)
+    for item in items:
+        children_by_parent[item.parent_id].append(item)
+
+    folder_paths = {}
+    visited = set()
+    root_used_names = set()
+
+    def assign(parent_id, parent_path, used_names):
+        siblings = sorted(
+            children_by_parent.get(parent_id, ()),
+            key=lambda item: (item.order, item.title, item.pk),
+        )
+        for item in siblings:
+            visited.add(item.pk)
+            folder_name = _dedupe_component(_safe_component(item.title), used_names)
+            folder_path = f"{parent_path}/{folder_name}" if parent_path else folder_name
+            folder_paths[item.pk] = folder_path
+            assign(item.pk, folder_path, set())
+
+    assign(None, "", root_used_names)
+
+    # Corrupt data can leave items whose parent is missing; include them anyway.
+    for item in sorted(items, key=lambda item: (item.order, item.title, item.pk)):
+        if item.pk in visited:
+            continue
+        folder_name = _dedupe_component(_safe_component(item.title), root_used_names)
+        folder_paths[item.pk] = folder_name
+        assign(item.pk, folder_name, set())
+
+    return folder_paths
+
+
 def _build_fy_index_md(fy, prefix="", zf=None):
     """Return the index.md content string for one FinancialYear.
 
@@ -766,8 +832,7 @@ def _build_fy_index_md(fy, prefix="", zf=None):
         .prefetch_related("attachments")
         .order_by("order", "title")
     )
-    item_map = {item.pk: item for item in items}
-    folder_paths = {item.pk: _folder_path(item, item_map) for item in items}
+    folder_paths = _unique_folder_paths(items)
     items.sort(key=lambda item: folder_paths[item.pk].lower())
 
     index_lines = [
@@ -783,9 +848,11 @@ def _build_fy_index_md(fy, prefix="", zf=None):
         if not attachments and not item.notes:
             continue
         fp = folder_paths[item.pk]
+        used_filenames = set()
         index_lines.append(f"## {fp}\n")
         for attachment in attachments:
             safe_name = _safe_component(attachment.file.name.split("/")[-1])
+            safe_name = _dedupe_filename(safe_name, used_filenames)
             zip_path = f"{prefix}{fp}/{safe_name}"
             missing = False
             try:

@@ -492,6 +492,59 @@ class AdminViewTests(TestCase):
             index_content.index(child_heading), index_content.index(zeta_heading)
         )
 
+    def test_download_zip_deduplicates_same_attachment_filename(self):
+        item = Item.objects.create(year=self.fy, title="X", order=2)
+        Attachment.objects.create(
+            item=item,
+            title="first",
+            file=ContentFile(b"one", name="s.pdf"),
+        )
+        Attachment.objects.create(
+            item=item,
+            title="second",
+            file=ContentFile(b"two", name="s.pdf"),
+        )
+
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        response = self.client.get(url)
+        buf = io.BytesIO(response.getvalue())
+        with zipfile.ZipFile(buf) as zf:
+            names = zf.namelist()
+            self.assertEqual(len(names), len(set(names)))
+            self.assertEqual(zf.read("X/s.pdf"), b"one")
+            self.assertEqual(zf.read("X/s (2).pdf"), b"two")
+            index_content = zf.read("index.md").decode()
+        self.assertIn("`X/s.pdf`", index_content)
+        self.assertIn("`X/s (2).pdf`", index_content)
+
+    def test_download_zip_deduplicates_sanitized_sibling_titles(self):
+        item1 = Item.objects.create(year=self.fy, title="A/B", order=2)
+        item2 = Item.objects.create(year=self.fy, title="A_B", order=3)
+        Attachment.objects.create(
+            item=item1,
+            title="first",
+            file=ContentFile(b"one", name="doc.pdf"),
+        )
+        Attachment.objects.create(
+            item=item2,
+            title="second",
+            file=ContentFile(b"two", name="doc.pdf"),
+        )
+
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        response = self.client.get(url)
+        buf = io.BytesIO(response.getvalue())
+        with zipfile.ZipFile(buf) as zf:
+            names = zf.namelist()
+            self.assertEqual(len(names), len(set(names)))
+            self.assertEqual(zf.read("A_B/doc.pdf"), b"one")
+            self.assertEqual(zf.read("A_B (2)/doc.pdf"), b"two")
+            index_content = zf.read("index.md").decode()
+        self.assertIn("## A_B\n", index_content)
+        self.assertIn("## A_B (2)\n", index_content)
+        self.assertIn("`A_B/doc.pdf`", index_content)
+        self.assertIn("`A_B (2)/doc.pdf`", index_content)
+
     def test_download_multi_zip_get(self):
         """GET renders the multi-year ZIP selection form."""
         url = reverse("admin:taxtracker_financialyear_download_multi_zip")
