@@ -194,6 +194,18 @@
     </table>
   </div>
   <h2>Item Checklist</h2>
+  {% if unreachable_items %}
+    <div class="messagelist">
+      <div class="warning">
+        {{ unreachable_items|length }} item(s) are not reachable from a root item and are listed separately:
+        <ul>
+          {% for item in unreachable_items %}
+            <li><a href="{% url 'admin:taxtracker_item_change' item.pk %}">{{ item.tree_path_str }}</a></li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  {% endif %}
   <table class="tt-checklist">
     <thead>
       <tr class="tt-thead-row">
