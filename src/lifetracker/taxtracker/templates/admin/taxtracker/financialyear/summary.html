@@ -197,7 +197,7 @@
   {% if unreachable_items %}
     <div class="messagelist">
       <div class="warning">
-        {{ unreachable_items|length }} item(s) are not reachable from a root item and are listed separately:
+        {{ unreachable_items|length }} item(s) are not reachable from a root item, so aren't in the checklist below:
         <ul>
           {% for item in unreachable_items %}
             <li><a href="{% url 'admin:taxtracker_item_change' item.pk %}">{{ item.tree_path_str }}</a></li>

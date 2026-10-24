@@ -1122,8 +1122,6 @@ class FinancialYearAdmin(admin.ModelAdmin):
         if item_admin is None or not item_admin.has_add_permission(request):
             raise PermissionDenied
         new_year_num = fy.year + 1
-        all_items = list(fy.items.order_by("order", "title"))
-        _, unreachable_items = _tree_rows_and_unreachable_items(all_items)
 
         if FinancialYear.objects.filter(year=new_year_num).exists():
             messages.error(
@@ -1157,6 +1155,9 @@ class FinancialYearAdmin(admin.ModelAdmin):
                 reverse("admin:taxtracker_financialyear_change", args=[new_fy.pk])
             )
 
+        _, unreachable_items = _tree_rows_and_unreachable_items(
+            list(fy.items.order_by("order", "title"))
+        )
         context = {
             **self.admin_site.each_context(request),
             "title": f"Copy {fy} to FY{new_year_num}",
