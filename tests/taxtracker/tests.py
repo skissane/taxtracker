@@ -325,6 +325,15 @@ class CopyItemsTests(TestCase):
         client.login(username="admin", password="password")
         return client
 
+    def _create_cycle(self):
+        first = Item.objects.create(year=self.fy, title="Cycle A", order=9)
+        second = Item.objects.create(
+            year=self.fy, parent=first, title="Cycle B", order=1
+        )
+        first.parent = second
+        first.save(update_fields=["parent"])
+        return first, second
+
     def test_copy_to_new_year_creates_items(self):
         client = self._create_superuser_client()
         url = reverse(
@@ -375,6 +384,37 @@ class CopyItemsTests(TestCase):
         self.assertContains(client.get(response.url), "FY2025 already exists.")
         new_fy = FinancialYear.objects.get(year=2025)
         self.assertFalse(new_fy.items.exists())
+
+    def test_copy_to_new_year_warns_about_items_unreachable_from_root(self):
+        cycle_a, cycle_b = self._create_cycle()
+        client = self._create_superuser_client()
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        response = client.get(url)
+        self.assertContains(response, "not reachable from a root item")
+        self.assertContains(response, cycle_a.title)
+        self.assertContains(response, cycle_b.title)
+
+    def test_copy_to_new_year_skips_unreachable_items_with_warning(self):
+        self._create_cycle()
+        client = self._create_superuser_client()
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        response = client.post(url, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "not copied because they are not reachable from a root item",
+        )
+        new_fy = FinancialYear.objects.get(year=2025)
+        self.assertEqual(
+            list(
+                new_fy.items.order_by("order", "title").values_list("title", flat=True)
+            ),
+            ["Child", "Root"],
+        )
 
 
 class ReceivedDocumentAdminViewTests(TestCase):
@@ -493,6 +533,21 @@ class AdminViewTests(TestCase):
         self.assertContains(response, "FY2024")
         self.assertContains(response, "Test Item")
 
+    def test_summary_view_lists_items_unreachable_from_root(self):
+        first = Item.objects.create(year=self.fy, title="Cycle A", order=9)
+        second = Item.objects.create(
+            year=self.fy, parent=first, title="Cycle B", order=1
+        )
+        first.parent = second
+        first.save(update_fields=["parent"])
+
+        url = reverse("admin:taxtracker_financialyear_summary", args=[self.fy.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "not reachable from a root item")
+        self.assertContains(response, first.title)
+        self.assertContains(response, second.title)
+
     def test_summary_view_requires_financialyear_view_permission(self):
         client = self._limited_client("limited-summary")
         url = reverse("admin:taxtracker_financialyear_summary", args=[self.fy.pk])
@@ -511,6 +566,25 @@ class AdminViewTests(TestCase):
             response["Content-Disposition"],
             'attachment; filename="FY2024_attachments.zip"',
         )
+
+    def test_download_zip_view_handles_parent_cycles(self):
+        first = Item.objects.create(year=self.fy, title="Cycle A", order=9)
+        second = Item.objects.create(
+            year=self.fy, parent=first, title="Cycle B", order=1
+        )
+        first.parent = second
+        first.save(update_fields=["parent"])
+        Attachment.objects.create(
+            item=first,
+            title="cycle.pdf",
+            file=ContentFile(b"cycle", name="cycle.pdf"),
+        )
+
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(response.getvalue())) as zf:
+            self.assertTrue(any(name.endswith("/cycle.pdf") for name in zf.namelist()))
 
     def test_download_zip_view_requires_financialyear_view_permission(self):
         client = self._limited_client("limited-zip")
