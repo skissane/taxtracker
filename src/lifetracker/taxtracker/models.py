@@ -211,9 +211,10 @@ class Item(TreeNodeMixin, models.Model):
     def save(self, *args, **kwargs):
         old_year_id = None
         if self.pk is not None:
-            old_year_id = (
-                Item.objects.filter(pk=self.pk).values_list("year_id", flat=True).first()
-            )
+            old_year_id = Item.objects.filter(pk=self.pk).values_list(
+                "year_id",
+                flat=True,
+            ).first()
 
         # Enforce year inheritance at the ORM level too, so direct saves (shell,
         # fixtures, scripts) also respect the invariant without requiring full_clean().

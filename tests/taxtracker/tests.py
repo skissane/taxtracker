@@ -194,7 +194,11 @@ class ItemYearInheritanceTests(TestCase):
         self.assertEqual(child.year_id, self.fy2024.pk)
 
     def test_reparent_to_other_year_cascades_descendants(self):
-        parent_2025 = Item.objects.create(year=self.fy2025, title="Parent 2025", order=2)
+        parent_2025 = Item.objects.create(
+            year=self.fy2025,
+            title="Parent 2025",
+            order=2,
+        )
         child = Item.objects.create(
             year=self.fy2024, parent=self.parent, title="Child", order=1
         )
