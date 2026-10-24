@@ -6,7 +6,6 @@ import time
 from urllib.parse import quote
 
 from django import forms
-from django.apps import apps
 from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -228,17 +227,11 @@ class DBStoredFileAdmin(admin.ModelAdmin):
         if request.user.is_superuser:
             return True
         path_prefix = f"db/{stored_file_pk}/"
-        for model in apps.get_models():
-            model_admin = self.admin_site._registry.get(model)
-            if model_admin is None:
-                continue
+        for model, model_admin in self.admin_site._registry.items():
             for field in database_storage_file_fields(model):
-                obj = (
-                    model._base_manager.exclude(**{field.attname: ""})
-                    .exclude(**{f"{field.attname}__isnull": True})
-                    .filter(**{f"{field.attname}__startswith": path_prefix})
-                    .first()
-                )
+                obj = model._base_manager.filter(
+                    **{f"{field.attname}__startswith": path_prefix}
+                ).first()
                 if obj is not None and model_admin.has_view_permission(request, obj):
                     return True
         return False

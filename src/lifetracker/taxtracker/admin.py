@@ -1023,10 +1023,23 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # ZIP download view
     # ------------------------------------------------------------------
 
-    def download_zip_view(self, request, pk):
-        fy = get_object_or_404(FinancialYear, pk=pk)
+    def _check_export_permission(self, request, fy=None):
+        """Raise PermissionDenied unless the user can view what a ZIP exports.
+
+        A ZIP (or its index) holds the year's items, their notes and every
+        attachment's file, so it needs view permission on all three models,
+        not just FinancialYear.
+        """
         if not self.has_view_permission(request, fy):
             raise PermissionDenied
+        for model in (Item, Attachment):
+            model_admin = self.admin_site._registry.get(model)
+            if model_admin is None or not model_admin.has_view_permission(request):
+                raise PermissionDenied
+
+    def download_zip_view(self, request, pk):
+        fy = get_object_or_404(FinancialYear, pk=pk)
+        self._check_export_permission(request, fy)
         return _zip_response(_build_zip(fy), f"{fy}_attachments.zip")
 
     # ------------------------------------------------------------------
@@ -1034,8 +1047,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # ------------------------------------------------------------------
 
     def download_multi_zip_view(self, request):
-        if not self.has_view_permission(request):
-            raise PermissionDenied
+        self._check_export_permission(request)
         all_fys = list(
             FinancialYear.objects.order_by("year").prefetch_related("status_history")
         )
@@ -1088,6 +1100,9 @@ class FinancialYearAdmin(admin.ModelAdmin):
         if not self.has_view_permission(request, fy):
             raise PermissionDenied
         if not self.has_add_permission(request):
+            raise PermissionDenied
+        item_admin = self.admin_site._registry.get(Item)
+        if item_admin is None or not item_admin.has_add_permission(request):
             raise PermissionDenied
         new_year_num = fy.year + 1
 
