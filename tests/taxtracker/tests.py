@@ -356,6 +356,21 @@ class CopyItemsTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertFalse(FinancialYear.objects.filter(year=2026).exists())
 
+    @mock.patch(
+        "lifetracker.taxtracker.admin.FinancialYear.objects.create",
+        side_effect=IntegrityError,
+    )
+    def test_copy_to_new_year_integrity_error_shows_existing_year_error(
+        self, _mock_create
+    ):
+        client = self._create_superuser_client()
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        response = client.post(url, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "FY2025 already exists.")
+
 
 class ReceivedDocumentAdminViewTests(TestCase):
     def setUp(self):
