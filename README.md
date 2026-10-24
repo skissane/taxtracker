@@ -309,6 +309,24 @@ UV_ENV_FILE=.env uv run python manage.py cloud_backup   # locally, with .env's s
 
 Backups only run when you click the button or run the command; nothing schedules them.
 
+### Restoring a cloud backup
+
+The `restore_cloud_backup` management command replaces the whole database with a cloud backup, given its key as **View Backups in Bucket** lists it:
+
+```bash
+./flyssh.sh python manage.py restore_cloud_backup my-app.fly.dev/db-backup.2026-10-11.01.13.53.sqlite3
+```
+
+It downloads the backup and checks it's an intact SQLite database from this app, asks you to type `yes` (`--no-input` skips that), uploads a cloud backup of the current database, then copies the downloaded one over it and runs migrations.
+It stops before changing anything if the download, the check or that backup fails, and at the end prints the key of the backup it made, which you can restore to undo it.
+The **Backups** page's last backup is that one too, not whatever the restored database had recorded.
+
+You don't need to stop the app first.
+The copy goes through SQLite (its online backup API), as a single write transaction, rather than replacing the file: while it runs, the app can still read the old data but its writes wait (for up to 30 seconds, after which they fail), and once it finishes every request sees the restored data, never a mix of the two; SQLite looks after `db.sqlite3-wal` and `db.sqlite3-shm` itself, so there's nothing to delete.
+Still, run it when nobody's using the app: anything changed after the backup of the current database is taken (while it uploads) is in neither copy, a form opened before the restore and saved after it saves into the restored data, and as sessions are in the database, whoever is logged in is likely to be logged out.
+It needs temporary space (`/tmp`) for two copies of the database, the download and the backup of the current one, and, while copying, room beside the database for its write-ahead log to grow to the restored database's size.
+The [client IP record](#client-ips) is a separate file, so a restore leaves it alone.
+
 The bucket and credentials come from these environment variables:
 
 | Variable | Purpose |
