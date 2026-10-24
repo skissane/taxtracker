@@ -2952,6 +2952,26 @@ class BackupStateTests(TestCase):
         self.other_connection().execute("INSERT INTO t VALUES ('new')")
         self.assertIsNone(database_signature())
 
+    def test_signature_without_log(self):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        # The last connection to close deletes the log.
+        self.connection.close()
+        self.assertFalse(Path(f"{self.path}-wal").exists())
+
+        self.assertIsNotNone(database_signature())
+
+    def test_unremovable_state_is_logged(self):
+        # A directory where the state file should be can't be replaced or
+        # removed.
+        settings.LIFETRACKER_BACKUP_STATE_FILE.mkdir()
+
+        with self.assertLogs("lifetracker.core.backup", "WARNING") as logs:
+            run_cloud_backup()
+
+        self.assertIn("Couldn't record the backup state", logs.output[0])
+        self.assertTrue(database_changed())
+
 
 class InMemoryBackupStateTests(SimpleTestCase):
     def test_in_memory_database_has_no_signature(self):

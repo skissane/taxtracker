@@ -207,15 +207,11 @@ def database_signature():
     its write-ahead log isn't empty (or there's no file, as for an in-memory
     database)."""
     path = Path(connections["default"].settings_dict["NAME"])
+    wal = Path(f"{path}-wal")
     try:
         stat = path.stat()
-    except OSError:
-        return None
-    try:
-        wal_size = Path(f"{path}-wal").stat().st_size
-    except FileNotFoundError:
         # SQLite deletes the log when the last connection closes.
-        wal_size = 0
+        wal_size = wal.stat().st_size if wal.exists() else 0
     except OSError:
         return None
     if wal_size:
