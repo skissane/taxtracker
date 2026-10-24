@@ -878,6 +878,42 @@ def ip_count(connection: sqlite3.Connection, *, logged_in_only: bool = False) ->
     return connection.execute(f"SELECT count(*) FROM client_ip {where}").fetchone()[0]
 
 
+# The client_ip columns holding POSIX times, which export_rows gives as ISO
+# 8601 UTC.
+TIME_COLUMNS = frozenset(
+    {"first_seen", "last_seen", "first_logged_in", "last_logged_in"}
+)
+
+
+def _iso_utc(posix_time: float) -> str:
+    return (
+        datetime.datetime.fromtimestamp(posix_time, datetime.UTC)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def export_rows(
+    connection: sqlite3.Connection, *, logged_in_only: bool = False
+) -> Iterable[dict]:
+    """Every IP's row (only those with a valid JWT if ``logged_in_only``),
+    first seen first, as a dict in the table's column order (so columns a
+    later schema adds come last), with times as ISO 8601 UTC strings and
+    missing values ``None``."""
+    where = "WHERE logged_in > 0" if logged_in_only else ""
+    cursor = connection.execute(
+        f"SELECT * FROM client_ip {where} ORDER BY first_seen, ip"
+    )
+    columns = [description[0] for description in cursor.description]
+    for row in cursor:
+        yield {
+            column: _iso_utc(value)
+            if column in TIME_COLUMNS and value is not None
+            else value
+            for column, value in zip(columns, row, strict=True)
+        }
+
+
 def logged_in_networks(connection: sqlite3.Connection) -> list[sqlite3.Row]:
     """Each network (ASN) any request with a valid JWT came from, with its
     IPs' count and first and last such request, most recent first."""
