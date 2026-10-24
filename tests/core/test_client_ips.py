@@ -1,5 +1,5 @@
 """Tests for the client IP record (core/client_ips.py), its admin page and the
-update_geoip command."""
+update_geoip and client_ips_export commands."""
 
 import datetime
 import gzip
@@ -973,6 +973,74 @@ class UpdateGeoIPCommandTests(TempDirMixin, SimpleTestCase):
                 CommandError, "Couldn't update the DB-IP databases: read-only"
             ):
                 call_command("update_geoip")
+
+
+class ClientIPsExportCommandTests(TempDirMixin, SimpleTestCase):
+    def setUp(self):
+        super().setUp()
+        self.db_path = self.temp / "client_ips.sqlite3"
+        patcher = mock.patch.dict(
+            os.environ, {"LIFETRACKER_CLIENT_IP_DB": str(self.db_path)}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _export(self, *args):
+        stdout = io.StringIO()
+        call_command("client_ips_export", *args, stdout=stdout)
+        return [json.loads(line) for line in stdout.getvalue().splitlines()]
+
+    def test_not_configured(self):
+        with mock.patch.dict(os.environ, {"LIFETRACKER_CLIENT_IP_DB": "off"}):
+            with self.assertRaisesMessage(CommandError, "aren't recorded"):
+                call_command("client_ips_export")
+
+    def test_no_database(self):
+        with self.assertRaisesMessage(CommandError, "Couldn't open"):
+            call_command("client_ips_export")
+        self.assertFalse(self.db_path.exists())
+
+    def test_exports_every_ip_first_seen_first(self):
+        connection = client_ips.connect(self.db_path)
+        self.addCleanup(connection.close)
+        geoip_dir = self.temp / "geoip"
+        write_geoip(geoip_dir)
+        geoip = client_ips.GeoIP(geoip_dir)
+        self.addCleanup(geoip.close)
+        client_ips.record(
+            connection,
+            [
+                request(ip="198.51.100.1", time=1761200001.5, logged_in=True),
+                request(time=1761200000.25, user_agent='a "quoted"\nUA'),
+            ],
+            geoip,
+        )
+        rows = self._export()
+        self.assertEqual([row["ip"] for row in rows], ["203.0.113.7", "198.51.100.1"])
+        self.assertEqual(
+            list(rows[0]),
+            [
+                description[0]
+                for description in connection.execute(
+                    "SELECT * FROM client_ip"
+                ).description
+            ],
+        )
+        self.assertEqual(rows[0]["first_seen"], "2025-10-23T06:13:20.250Z")
+        self.assertEqual(rows[0]["last_seen"], "2025-10-23T06:13:20.250Z")
+        self.assertIsNone(rows[0]["first_logged_in"])
+        self.assertEqual(rows[0]["last_user_agent"], 'a "quoted"\nUA')
+        self.assertEqual(rows[0]["country"], "AU")
+        self.assertEqual(rows[1]["first_logged_in"], "2025-10-23T06:13:21.500Z")
+        self.assertEqual(rows[1]["logged_in"], 1)
+
+        self.assertEqual(
+            [row["ip"] for row in self._export("--logged-in")], ["198.51.100.1"]
+        )
+
+    def test_empty(self):
+        client_ips.connect(self.db_path).close()
+        self.assertEqual(self._export(), [])
 
 
 class ClientIPsAdminViewTests(TempDirMixin, TestCase):
