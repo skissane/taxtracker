@@ -18,6 +18,7 @@ from django.utils import timezone
 
 from lifetracker.core.models import DBStoredFile, FileExtension, FileType
 from lifetracker.taxtracker.admin import (
+    FinancialYearAdmin,
     _adjust_notes_headings,
     _attachment_date_warning,
 )
@@ -62,9 +63,36 @@ class FinancialYearModelTests(TestCase):
         self.assertEqual(self.fy.effective_lodgement_date, override)
 
     def test_days_until_lodgement(self):
-        today = timezone.now().date()
+        today = timezone.localdate()
         expected = (self.fy.effective_lodgement_date - today).days
         self.assertEqual(self.fy.days_until_lodgement, expected)
+
+    def test_days_until_lodgement_uses_local_date(self):
+        self.fy.lodgement_date_override = datetime.date(2024, 10, 31)
+        self.fy.save()
+        with timezone.override("Australia/Sydney"):
+            with mock.patch(
+                "django.utils.timezone.now",
+                return_value=datetime.datetime(
+                    2024, 10, 30, 14, 30, tzinfo=datetime.UTC
+                ),
+            ):
+                self.assertEqual(self.fy.days_until_lodgement, 0)
+
+    def test_status_since_display_uses_local_date(self):
+        self.fy.status = FinancialYear.STATUS_SUBMITTED
+        self.fy.save()
+        history = self.fy.status_history.order_by("-transitioned_at", "-pk").first()
+        history.transitioned_at = datetime.datetime(
+            2024, 10, 30, 14, 30, tzinfo=datetime.UTC
+        )
+        history.save(update_fields=["transitioned_at"])
+
+        with timezone.override("Australia/Sydney"):
+            self.assertEqual(
+                FinancialYearAdmin.status_since_display(None, self.fy),
+                datetime.date(2024, 10, 31),
+            )
 
     def test_default_status_is_pending_submission(self):
         self.assertEqual(self.fy.status, FinancialYear.STATUS_PENDING_SUBMISSION)
