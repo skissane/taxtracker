@@ -117,6 +117,7 @@ Rows deleted before that receiver existed left their `DBStoredFile`s behind: cor
 `DatabaseStorage` (in `core/models.py`) is a custom Django storage backend that writes file content to `DBStoredFile` rows.
 Storage paths have the form `db/<pk>/<filename>`.
 Files are served through `DBStoredFileAdmin.serve_file_view` at `/admin/core/dbstoredfile/file/<pk>/`.
+A superuser can open any file; anyone else needs view permission (the model admin's `has_view_permission`) on a row of a registered model whose `DatabaseStorage` field holds `db/<pk>/...`, so orphaned files and those of unregistered models such as `AppIcon` are superuser-only (issue #148).
 It guesses the type from the filename (`application/octet-stream` if it can't, or if the name gives an encoding such as `.gz`) and shows only `INLINE_CONTENT_TYPES` (PDF, common raster images, plain text) inline; anything else, HTML and SVG included, is sent as an `attachment` download, so an attached file can't run script on the admin origin with the viewer's session (issue #140).
 Every response has `X-Content-Type-Options: nosniff`, and all but PDFs `Content-Security-Policy: sandbox; default-src 'none'`; PDFs are left out because browsers' built-in PDF viewers won't run in a sandboxed document.
 

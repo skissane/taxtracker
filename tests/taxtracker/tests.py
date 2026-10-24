@@ -365,6 +365,26 @@ class CopyItemsTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertFalse(FinancialYear.objects.filter(year=2026).exists())
 
+    def test_copy_to_new_year_race_shows_existing_year_error(self):
+        # Another request creates FY2025 after this one's exists() check, so
+        # the create hits the unique constraint (issue #156).
+        FinancialYear.objects.create(year=2025)
+        client = self._create_superuser_client()
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        with mock.patch.object(FinancialYear.objects, "filter") as mock_filter:
+            mock_filter.return_value.exists.return_value = False
+            response = client.post(url)
+        self.assertRedirects(
+            response,
+            reverse("admin:taxtracker_financialyear_changelist"),
+            fetch_redirect_response=False,
+        )
+        self.assertContains(client.get(response.url), "FY2025 already exists.")
+        new_fy = FinancialYear.objects.get(year=2025)
+        self.assertFalse(new_fy.items.exists())
+
     def test_copy_to_new_year_warns_about_items_unreachable_from_root(self):
         cycle_a, cycle_b = self._create_cycle()
         client = self._create_superuser_client()
@@ -491,6 +511,16 @@ class AdminViewTests(TestCase):
         self.fy = FinancialYear.objects.create(year=2024)
         self.item = Item.objects.create(year=self.fy, title="Test Item", order=1)
 
+    def _limited_client(self, username, *permission_codenames):
+        user = User.objects.create_user(username, f"{username}@example.com", "password")
+        user.is_staff = True
+        user.save()
+        for codename in permission_codenames:
+            user.user_permissions.add(Permission.objects.get(codename=codename))
+        client = Client()
+        client.force_login(user)
+        return client
+
     def test_changelist(self):
         url = reverse("admin:taxtracker_financialyear_changelist")
         response = self.client.get(url)
@@ -517,6 +547,12 @@ class AdminViewTests(TestCase):
         self.assertContains(response, "not reachable from a root item")
         self.assertContains(response, first.title)
         self.assertContains(response, second.title)
+
+    def test_summary_view_requires_financialyear_view_permission(self):
+        client = self._limited_client("limited-summary")
+        url = reverse("admin:taxtracker_financialyear_summary", args=[self.fy.pk])
+        response = client.get(url)
+        self.assertEqual(response.status_code, 403)
 
     def test_download_zip_view(self):
         url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
@@ -549,6 +585,84 @@ class AdminViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         with zipfile.ZipFile(io.BytesIO(response.getvalue())) as zf:
             self.assertTrue(any(name.endswith("/cycle.pdf") for name in zf.namelist()))
+
+    def test_download_zip_view_requires_financialyear_view_permission(self):
+        client = self._limited_client("limited-zip")
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        response = client.get(url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_copy_to_new_year_requires_financialyear_add_permission(self):
+        client = self._limited_client("limited-copy-add", "view_financialyear")
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        response = client.get(url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_copy_to_new_year_requires_financialyear_view_permission(self):
+        client = self._limited_client("limited-copy-view", "add_financialyear")
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        response = client.get(url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_download_zip_view_requires_item_and_attachment_view_permission(self):
+        """A ZIP holds items' notes and attachments' files: FY view isn't enough."""
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        for username, codenames in [
+            ("zip-fy-only", ["view_financialyear"]),
+            ("zip-no-attachment", ["view_financialyear", "view_item"]),
+            ("zip-no-item", ["view_financialyear", "view_attachment"]),
+        ]:
+            with self.subTest(codenames=codenames):
+                client = self._limited_client(username, *codenames)
+                self.assertEqual(client.get(url).status_code, 403)
+
+    def test_download_zip_view_allowed_with_view_permissions(self):
+        client = self._limited_client(
+            "zip-all", "view_financialyear", "view_item", "view_attachment"
+        )
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        response = client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/zip")
+        with zipfile.ZipFile(io.BytesIO(response.getvalue())) as zf:
+            self.assertIn("index.md", zf.namelist())
+
+    def test_download_multi_zip_requires_attachment_view_permission(self):
+        client = self._limited_client(
+            "multi-no-attachment", "view_financialyear", "view_item"
+        )
+        url = reverse("admin:taxtracker_financialyear_download_multi_zip")
+        self.assertEqual(client.get(url).status_code, 403)
+        response = client.post(url, {"fy_ids": [self.fy.pk], "action": "view_index"})
+        self.assertEqual(response.status_code, 403)
+
+    def test_copy_to_new_year_requires_item_add_permission(self):
+        client = self._limited_client(
+            "copy-no-item", "view_financialyear", "add_financialyear"
+        )
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        self.assertEqual(client.post(url).status_code, 403)
+        self.assertFalse(FinancialYear.objects.filter(year=2025).exists())
+
+    def test_copy_to_new_year_allowed_with_add_permissions(self):
+        client = self._limited_client(
+            "copy-all", "view_financialyear", "add_financialyear", "add_item"
+        )
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        response = client.post(url)
+        self.assertEqual(response.status_code, 302)
+        new_fy = FinancialYear.objects.get(year=2025)
+        self.assertEqual(
+            list(new_fy.items.values_list("title", flat=True)), ["Test Item"]
+        )
 
     def test_download_zip_spooled_to_disk(self):
         """A ZIP bigger than the spool limit is built on disk and still complete."""

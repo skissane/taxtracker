@@ -7,7 +7,7 @@ from pathlib import Path
 
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.response import TemplateResponse
@@ -1005,6 +1005,8 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
     def summary_view(self, request, pk):
         fy = get_object_or_404(FinancialYear, pk=pk)
+        if not self.has_view_permission(request, fy):
+            raise PermissionDenied
         # Fetch all items in a single query to avoid N+1 for deep hierarchies.
         all_items = list(
             fy.items.prefetch_related("attachments").order_by("order", "title")
@@ -1038,8 +1040,23 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # ZIP download view
     # ------------------------------------------------------------------
 
+    def _check_export_permission(self, request, fy=None):
+        """Raise PermissionDenied unless the user can view what a ZIP exports.
+
+        A ZIP (or its index) holds the year's items, their notes and every
+        attachment's file, so it needs view permission on all three models,
+        not just FinancialYear.
+        """
+        if not self.has_view_permission(request, fy):
+            raise PermissionDenied
+        for model in (Item, Attachment):
+            model_admin = self.admin_site._registry.get(model)
+            if model_admin is None or not model_admin.has_view_permission(request):
+                raise PermissionDenied
+
     def download_zip_view(self, request, pk):
         fy = get_object_or_404(FinancialYear, pk=pk)
+        self._check_export_permission(request, fy)
         return _zip_response(_build_zip(fy), f"{fy}_attachments.zip")
 
     # ------------------------------------------------------------------
@@ -1047,8 +1064,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # ------------------------------------------------------------------
 
     def download_multi_zip_view(self, request):
-        if not self.has_view_permission(request):
-            raise PermissionDenied
+        self._check_export_permission(request)
         all_fys = list(
             FinancialYear.objects.order_by("year").prefetch_related("status_history")
         )
@@ -1098,6 +1114,13 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
     def copy_to_new_year_view(self, request, pk):
         fy = get_object_or_404(FinancialYear, pk=pk)
+        if not self.has_view_permission(request, fy):
+            raise PermissionDenied
+        if not self.has_add_permission(request):
+            raise PermissionDenied
+        item_admin = self.admin_site._registry.get(Item)
+        if item_admin is None or not item_admin.has_add_permission(request):
+            raise PermissionDenied
         new_year_num = fy.year + 1
         all_items = list(fy.items.order_by("order", "title"))
         _, unreachable_items = _tree_rows_and_unreachable_items(all_items)
@@ -1110,14 +1133,21 @@ class FinancialYearAdmin(admin.ModelAdmin):
             return redirect(reverse("admin:taxtracker_financialyear_changelist"))
 
         if request.method == "POST":
-            with transaction.atomic():
-                new_fy = FinancialYear.objects.create(year=new_year_num)
-                skipped_items = _copy_items(fy, new_fy)
+            try:
+                with transaction.atomic():
+                    new_fy = FinancialYear.objects.create(year=new_year_num)
+                    skipped_items = _copy_items(fy, new_fy)
+            except IntegrityError:
+                messages.error(
+                    request,
+                    f"FY{new_year_num} already exists.",
+                )
+                return redirect(reverse("admin:taxtracker_financialyear_changelist"))
             if skipped_items:
                 messages.warning(
                     request,
-                    f"{len(skipped_items)} item(s) were not copied because they are not "
-                    "reachable from a root item.",
+                    f"{len(skipped_items)} item(s) were not copied because they are "
+                    "not reachable from a root item.",
                 )
             messages.success(
                 request,
