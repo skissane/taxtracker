@@ -662,6 +662,90 @@ class ServeFileViewTests(TestCase):
         self.assertEqual(response.content, content)
         self.assertIn("served.txt", response.get("Content-Disposition", ""))
 
+    def _get_as_superuser(self, obj):
+        client = Client()
+        client.force_login(User.objects.create_superuser(f"admin{obj.pk}"))
+        return client.get(reverse("admin:core_dbstoredfile_serve_file", args=[obj.pk]))
+
+    def test_safe_types_are_served_inline(self):
+        for filename, content_type in [
+            ("doc.pdf", "application/pdf"),
+            ("photo.jpg", "image/jpeg"),
+            ("photo.png", "image/png"),
+            ("anim.gif", "image/gif"),
+            ("pic.webp", "image/webp"),
+            ("notes.txt", "text/plain"),
+        ]:
+            with self.subTest(filename=filename):
+                response = self._get_as_superuser(self._stored_file(filename))
+                self.assertEqual(response["Content-Type"], content_type)
+                self.assertTrue(
+                    response["Content-Disposition"].startswith("inline;"),
+                    response["Content-Disposition"],
+                )
+                self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+
+    def test_types_that_can_run_script_are_downloaded(self):
+        """An HTML or SVG attachment must never render as a page on the admin
+        origin, where its script would run with the viewer's session."""
+        for filename in [
+            "page.html",
+            "page.htm",
+            "image.svg",
+            "data.xml",
+            "page.xhtml",
+            "script.js",
+            "mystery.notarealext",
+        ]:
+            with self.subTest(filename=filename):
+                response = self._get_as_superuser(
+                    self._stored_file(filename, b"<script>alert(1)</script>")
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response["Content-Disposition"],
+                    f"attachment; filename=\"{filename}\"; filename*=UTF-8''{filename}",
+                )
+                self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+                self.assertEqual(
+                    response["Content-Security-Policy"],
+                    "sandbox; default-src 'none'",
+                )
+
+    def test_compressed_files_are_downloaded_as_bytes(self):
+        """ "x.txt.gz" guesses as text/plain with gzip encoding; showing it as
+        text would show the compressed bytes."""
+        for filename in ["notes.txt.gz", "doc.pdf.bz2", "page.html.xz"]:
+            with self.subTest(filename=filename):
+                response = self._get_as_superuser(self._stored_file(filename))
+                self.assertEqual(response["Content-Type"], "application/octet-stream")
+                self.assertTrue(
+                    response["Content-Disposition"].startswith("attachment;"),
+                    response["Content-Disposition"],
+                )
+
+    def test_inline_images_and_text_are_sandboxed(self):
+        for filename in ["photo.png", "notes.txt"]:
+            with self.subTest(filename=filename):
+                response = self._get_as_superuser(self._stored_file(filename))
+                self.assertEqual(
+                    response["Content-Security-Policy"],
+                    "sandbox; default-src 'none'",
+                )
+
+    def test_pdf_is_not_sandboxed(self):
+        """Browsers' PDF viewers won't run in a sandboxed document."""
+        response = self._get_as_superuser(self._stored_file("doc.pdf"))
+        self.assertNotIn("Content-Security-Policy", response)
+
+    def test_filename_is_escaped_in_header(self):
+        response = self._get_as_superuser(self._stored_file('a"b\\c é.html'))
+        self.assertEqual(
+            response["Content-Disposition"],
+            'attachment; filename="a\\"b\\\\c .html";'
+            " filename*=UTF-8''a%22b%5Cc%20%C3%A9.html",
+        )
+
     def test_serve_file_view_requires_login(self):
         """Unauthenticated requests to the serve view should redirect to login."""
         obj = self._stored_file("secret.pdf", b"secret pdf bytes")
