@@ -191,6 +191,14 @@ It goes through `./flyctl.sh`, and passes `--pty` only when run from a terminal:
 To run as another user, put `--user=<name>` first, e.g. `./flyssh.sh --user=root` (`HOME` is then `/home/<name>`, or `/root` for root).
 Use `--` before a command that itself starts with `--`.
 
+To query the Fly Machines API from the Machine itself, without an API token, use `lifetracker-cli fly-api`, which sends a GET through the Machine's `/.fly/api` socket and pretty-prints the JSON.
+`{app}` and `{machine}` in the path become the Machine's app name and ID, as no shell expands `$FLY_APP_NAME` there:
+
+```bash
+./flyssh.sh lifetracker-cli fly-api /v1/apps/{app}/machines
+./flyssh.sh lifetracker-cli fly-api /v1/apps/{app}/machines/{machine}
+```
+
 If the Machine isn't running, `./flyssh.sh` starts it first, waiting for it to finish stopping if need be (this needs `jq`).
 Fly's own auto-stop judges idleness by HTTP traffic through its proxy, not SSH sessions, so it could cut off a long session or command; `fly.toml` turns it off.
 
@@ -458,6 +466,7 @@ iOS copies the icon when you add the app, so to see a new one there, remove the 
 
 
 The `lifetracker-cli` command has a few standalone helpers for preparing files to attach, separate from the web app: extracting attachments from `.eml` files and PDFs from Fidelity `.har` files, filtering ZIPs, converting ZIPs of `.eml` files to PDF or text, and grouping lists of dates by financial year.
+It also has `fly-api`, for querying the Fly Machines API on a Fly Machine (see Fly.io above).
 List them with:
 
 ```bash
