@@ -104,7 +104,12 @@ from lifetracker.core.models import (
 from lifetracker.core.timing import REQUEST_START_ATTR
 from lifetracker.settings import fly_machine_url
 from lifetracker.tasktracker.models import Task, TaskAttachment
-from lifetracker.taxtracker.models import Attachment, FinancialYear, Item
+from lifetracker.taxtracker.models import (
+    Attachment,
+    FinancialYear,
+    Item,
+    ReceivedDocument,
+)
 from lifetracker.wsgi import application as wsgi_application
 
 _GOOGLE_SSO_ENABLED_SETTINGS = {
@@ -803,6 +808,24 @@ class ServeFileViewTests(TestCase):
         response = client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, content)
+
+    def test_serve_file_view_received_document_attachment(self):
+        """A received document's attachment is checked through Attachment's admin."""
+        fy = FinancialYear.objects.create(year=2024)
+        doc = ReceivedDocument.objects.create(year=fy, title="Assessment")
+        attachment = Attachment.objects.create(
+            received_document=doc,
+            title="assessment.pdf",
+            file=ContentFile(b"assessment", name="assessment.pdf"),
+        )
+        pk = int(attachment.file.name.split("/", 2)[1])
+        url = reverse("admin:core_dbstoredfile_serve_file", args=[pk])
+        denied = self._staff_client("staff-doc-no-view", "view_receiveddocument")
+        self.assertEqual(denied.get(url).status_code, 403)
+        allowed = self._staff_client("staff-doc-view", "view_attachment")
+        response = allowed.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"assessment")
 
 
 class DatabaseStorageTests(TestCase):
