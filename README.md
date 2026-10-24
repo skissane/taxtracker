@@ -203,7 +203,7 @@ To query the Fly Machines API from the Machine itself, without an API token, use
 
 ```bash
 ./flyssh.sh lifetracker-cli fly-api --post /v1/apps/{app}/machines/{machine}/metadata/note --json '{"value": "hello"}'
-./flyssh.sh lifetracker-cli fly-api --post /v1/apps/{app}/machines/{machine}/stop  # ends the session
+./flyssh.sh lifetracker-cli fly-api --post /v1/apps/{app}/machines/{machine}/stop  # stops the Machine, ending the session
 ```
 
 If the Machine isn't running, `./flyssh.sh` starts it first, waiting for it to finish stopping if need be (this needs `jq`).

@@ -38,12 +38,12 @@ def _parse_json_object(text: str) -> dict:
 def fly_api_command(
     path: str, post: bool, json_text: str | None, socket_path: str
 ) -> None:
-    """GET PATH from the Fly Machines API, on a Fly Machine, without a token.
+    """Call PATH on the Fly Machines API, on a Fly Machine, without a token.
 
     {app} and {machine} in PATH become $FLY_APP_NAME and $FLY_MACHINE_ID, e.g.
-    /v1/apps/{app}/machines. --post POSTs instead, with an empty body, or with
-    --json's object, e.g. --post --json '{"signal": "SIGHUP"}'. A JSON response
-    is pretty-printed. Exits 1 if the status isn't 2xx.
+    /v1/apps/{app}/machines. It GETs PATH, or with --post POSTs to it, with an
+    empty body, or with --json's object, e.g. --post --json '{"value": "x"}'.
+    A JSON response is pretty-printed. Exits 1 if the status isn't 2xx.
     """
     if json_text is not None and not post:
         raise click.UsageError("--json needs --post")
