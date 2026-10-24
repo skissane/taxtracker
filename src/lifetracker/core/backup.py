@@ -111,6 +111,16 @@ def missing_cloud_backup_settings():
     ]
 
 
+def require_cloud_backup_settings():
+    """Raise ``RuntimeError`` naming any required cloud backup settings unset."""
+    missing_required = missing_cloud_backup_settings()
+    if missing_required:
+        raise RuntimeError(
+            "Cloud backup settings are incomplete. Missing: "
+            f"{', '.join(missing_required)}."
+        )
+
+
 def cloud_backup_s3_client():
     """Return a boto3 S3 client for the configured backup bucket."""
     endpoint_url = settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL or None
@@ -134,12 +144,7 @@ def run_cloud_backup():
     # Checked first: unlike missing settings, configuration can't fix this.
     check_sqlite("Cloud backup")
 
-    missing_required = missing_cloud_backup_settings()
-    if missing_required:
-        raise RuntimeError(
-            "Cloud backup settings are incomplete. Missing: "
-            f"{', '.join(missing_required)}."
-        )
+    require_cloud_backup_settings()
 
     with backup_database() as backup_file:
         backup_size = os.fstat(backup_file.fileno()).st_size
@@ -201,12 +206,7 @@ def list_cloud_backups(prefix):
 def download_cloud_backup(object_key, path):
     """Download the cloud backup *object_key* to the file at *path*."""
     check_sqlite("Cloud backup restore")
-    missing_required = missing_cloud_backup_settings()
-    if missing_required:
-        raise RuntimeError(
-            "Cloud backup settings are incomplete. Missing: "
-            f"{', '.join(missing_required)}."
-        )
+    require_cloud_backup_settings()
     s3_client = cloud_backup_s3_client()
     with open(path, "wb") as dest:
         s3_client.download_fileobj(
@@ -225,10 +225,7 @@ def check_backup_file(path):
     Django's ``django_migrations`` table, so a stray file can't replace the
     database.
     """
-    try:
-        source = sqlite3.connect(path)
-    except sqlite3.Error as exc:
-        raise RuntimeError(f"Can't open the backup: {exc}") from exc
+    source = sqlite3.connect(path)
     try:
         try:
             problems = [row[0] for row in source.execute("PRAGMA quick_check")]

@@ -2803,6 +2803,22 @@ class RestoreDatabaseTests(TestCase):
         ):
             check_backup_file(self.make_backup("CREATE TABLE t (v TEXT)"))
 
+    def test_check_rejects_corrupt_database(self):
+        path = self.make_backup(
+            "CREATE TABLE django_migrations (id)",
+            "CREATE TABLE t (v TEXT)",
+            *["INSERT INTO t VALUES ('" + "x" * 100 + "')"] * 500,
+        )
+        data = bytearray(path.read_bytes())
+        # Point page 4's (a leaf of t's) first freeblock past the page's end.
+        offset = 4096 * 3 + 1
+        data[offset : offset + 2] = b"\x0f\xf0"
+        path.write_bytes(data)
+        with self.assertRaisesMessage(
+            RuntimeError, "The backup failed SQLite's integrity check: "
+        ):
+            check_backup_file(path)
+
     def test_check_rejects_non_database(self):
         path = self.tmp / "junk.sqlite3"
         path.write_bytes(b"not a database" * 100)
@@ -2924,6 +2940,16 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
         self.assertEqual(self.uploads, [])
         self.assertEqual(self.restored, [])
 
+    @override_settings(LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="")
+    def test_missing_settings_fail(self):
+        with self.assertRaisesMessage(
+            CommandError,
+            f"Downloading {self.KEY} failed: Cloud backup settings are incomplete. "
+            "Missing: LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY.",
+        ):
+            self.call("--no-input")
+        self.mock_client.assert_not_called()
+
     def test_invalid_backup_changes_nothing(self):
         self.backup_bytes = b"not a database" * 100
         with self.assertRaisesMessage(
@@ -2943,6 +2969,24 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
         ):
             self.call("--no-input")
         self.assertEqual(self.restored, [])
+
+    def test_restores_when_only_recording_backup_status_fails(self):
+        with (
+            mock.patch.object(
+                CloudBackupStatus.objects,
+                "update_or_create",
+                side_effect=IntegrityError("boom"),
+            ),
+            mock.patch(
+                "lifetracker.core.management.commands.restore_cloud_backup"
+                ".restore_database",
+                side_effect=lambda path: self.restored.append(Path(path).read_bytes()),
+            ),
+        ):
+            output = self.call("--no-input")
+        [upload] = self.uploads
+        self.assertIn(f"Backed up the current database as {upload['Key']}.", output)
+        self.assertEqual(self.restored, [self.backup_bytes])
 
     def test_restore_error_reported(self):
         with mock.patch(
