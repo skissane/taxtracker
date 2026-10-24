@@ -193,6 +193,39 @@ class ItemYearInheritanceTests(TestCase):
         child.refresh_from_db()
         self.assertEqual(child.year_id, self.fy2024.pk)
 
+    def test_reparent_to_other_year_cascades_descendants(self):
+        parent_2025 = Item.objects.create(year=self.fy2025, title="Parent 2025", order=2)
+        child = Item.objects.create(
+            year=self.fy2024, parent=self.parent, title="Child", order=1
+        )
+        grandchild = Item.objects.create(
+            year=self.fy2024, parent=child, title="Grandchild", order=1
+        )
+
+        child.parent = parent_2025
+        child.save()
+
+        child.refresh_from_db()
+        grandchild.refresh_from_db()
+        self.assertEqual(child.year_id, self.fy2025.pk)
+        self.assertEqual(grandchild.year_id, self.fy2025.pk)
+
+    def test_root_year_change_cascades_descendants_on_model_save(self):
+        child = Item.objects.create(
+            year=self.fy2024, parent=self.parent, title="Child", order=1
+        )
+        grandchild = Item.objects.create(
+            year=self.fy2024, parent=child, title="Grandchild", order=1
+        )
+
+        self.parent.year = self.fy2025
+        self.parent.save()
+
+        child.refresh_from_db()
+        grandchild.refresh_from_db()
+        self.assertEqual(child.year_id, self.fy2025.pk)
+        self.assertEqual(grandchild.year_id, self.fy2025.pk)
+
 
 class ReceivedDocumentModelTests(TestCase):
     def setUp(self):
