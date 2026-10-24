@@ -478,6 +478,12 @@ IPs recorded before there was a list (including before this feature) are checked
 
 Superusers can see the record in the admin, from the **Client IPs** link in the top bar: how the last DB-IP and Private Relay downloads went (with the error and traceback if it failed, as `fly logs` keeps only a short window), the networks that logged-in requests came from (with how many of their IPs were Private Relay ones), then the IPs seen most recently (marking Private Relay ones), optionally only those with logged-in requests.
 
+To get the whole record as data, `client_ips_export` writes it as JSON Lines, one object per IP with the same fields as the record (times in ISO 8601 UTC, missing values `null`), first seen first; `--logged-in` keeps only IPs with logged-in requests:
+
+```bash
+./flyssh.sh python manage.py client_ips_export > client-ips.jsonl
+```
+
 ## Home screen app
 
 Every admin page links a web app manifest, `/manifest.webmanifest`, and an app icon, so "Add to Home Screen" on iOS (or "Install app" in Chrome) opens Life Tracker as a standalone app with its own icon, starting at `/admin/`.
