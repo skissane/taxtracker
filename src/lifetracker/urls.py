@@ -5,6 +5,7 @@ from django.urls import include, path
 from django.views.generic import RedirectView
 
 from lifetracker.core.health import healthz
+from lifetracker.core.web_manifest import web_manifest
 
 urlpatterns = [
     # There's no non-admin site yet, so send the root URL to the admin. Temporary
@@ -17,4 +18,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     # Unauthenticated, for CI's post-deploy check (see core/health.py).
     path("healthz/", healthz, name="healthz"),
+    # Unauthenticated, as browsers fetch it without cookies (see
+    # core/web_manifest.py).
+    path("manifest.webmanifest", web_manifest, name="web_manifest"),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
