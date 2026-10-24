@@ -356,6 +356,26 @@ class CopyItemsTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertFalse(FinancialYear.objects.filter(year=2026).exists())
 
+    def test_copy_to_new_year_race_shows_existing_year_error(self):
+        # Another request creates FY2025 after this one's exists() check, so
+        # the create hits the unique constraint (issue #156).
+        FinancialYear.objects.create(year=2025)
+        client = self._create_superuser_client()
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        with mock.patch.object(FinancialYear.objects, "filter") as mock_filter:
+            mock_filter.return_value.exists.return_value = False
+            response = client.post(url)
+        self.assertRedirects(
+            response,
+            reverse("admin:taxtracker_financialyear_changelist"),
+            fetch_redirect_response=False,
+        )
+        self.assertContains(client.get(response.url), "FY2025 already exists.")
+        new_fy = FinancialYear.objects.get(year=2025)
+        self.assertFalse(new_fy.items.exists())
+
 
 class ReceivedDocumentAdminViewTests(TestCase):
     def setUp(self):

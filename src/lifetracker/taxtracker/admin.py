@@ -7,7 +7,7 @@ from pathlib import Path
 
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.response import TemplateResponse
@@ -1114,9 +1114,16 @@ class FinancialYearAdmin(admin.ModelAdmin):
             return redirect(reverse("admin:taxtracker_financialyear_changelist"))
 
         if request.method == "POST":
-            with transaction.atomic():
-                new_fy = FinancialYear.objects.create(year=new_year_num)
-                _copy_items(fy, new_fy)
+            try:
+                with transaction.atomic():
+                    new_fy = FinancialYear.objects.create(year=new_year_num)
+                    _copy_items(fy, new_fy)
+            except IntegrityError:
+                messages.error(
+                    request,
+                    f"FY{new_year_num} already exists.",
+                )
+                return redirect(reverse("admin:taxtracker_financialyear_changelist"))
             messages.success(
                 request,
                 f"Created FY{new_year_num} with items copied from {fy}.",
