@@ -632,14 +632,13 @@ class RelayRanges:
         self.close()
         if identity is None:
             return None
+        connection = None
         try:
             connection = connect_read_only(self.path)
-        except sqlite3.Error:
-            return None
-        try:
             connection.execute("SELECT 1 FROM relay_range LIMIT 1").fetchall()
         except sqlite3.Error:
-            connection.close()
+            if connection is not None:
+                connection.close()
             return None
         self._connection, self._stat = connection, identity
         return connection

@@ -516,6 +516,19 @@ class RelayRangesTests(TempDirMixin, SimpleTestCase):
         (self.temp / client_ips.RELAY_RANGES_FILE).write_bytes(b"junk" * 100)
         self.assertEqual(relay_lookup(self.temp, "203.0.113.1"), client_ips.Relay())
 
+    def test_unreadable_once_open(self):
+        write_relay_ranges(self.temp)
+        relay = client_ips.RelayRanges(self.temp)
+        self.addCleanup(relay.close)
+        self.assertTrue(relay.lookup("203.0.113.1").private_relay)
+        relay._connection.close()
+        relay._connection = mock.Mock(
+            execute=mock.Mock(
+                side_effect=client_ips.sqlite3.DatabaseError("disk I/O error")
+            )
+        )
+        self.assertEqual(relay.lookup("203.0.113.1"), client_ips.Relay())
+
     def test_reopens_when_replaced(self):
         write_relay_ranges(self.temp)
         geoip = client_ips.GeoIP(self.temp)
