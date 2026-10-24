@@ -258,6 +258,25 @@ class ItemYearInheritanceTests(TestCase):
         self.assertEqual(child.year_id, self.fy2025.pk)
         self.assertEqual(grandchild.year_id, self.fy2025.pk)
 
+    def test_reparent_within_same_year_leaves_descendants(self):
+        other_parent = Item.objects.create(
+            year=self.fy2024, title="Other Parent 2024", order=2
+        )
+        child = Item.objects.create(
+            year=self.fy2024, parent=self.parent, title="Child", order=1
+        )
+        grandchild = Item.objects.create(
+            year=self.fy2024, parent=child, title="Grandchild", order=1
+        )
+
+        child.parent = other_parent
+        with self.assertNumQueries(3):
+            # Stored year, parent's year, then the UPDATE: no descendant walk.
+            child.save()
+
+        grandchild.refresh_from_db()
+        self.assertEqual(grandchild.year_id, self.fy2024.pk)
+
 
 class ReceivedDocumentModelTests(TestCase):
     def setUp(self):
