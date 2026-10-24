@@ -148,6 +148,27 @@ class GoogleSSOSettingsTests(TestCase):
             response["Location"],
         )
 
+    def test_google_sso_start_login_keeps_only_admin_next(self):
+        # Any other next makes the library's callback fail with "Google SSO not
+        # enabled for Pages"; the login page passes on next=/ for a logged-out
+        # visit to the bare domain, which the proxy redirects there.
+        cases = [
+            ("/admin/core/", "/admin/core/"),
+            ("/", "/admin/"),
+            ("null", "/admin/"),
+            ("https://example.com/admin/", "/admin/"),
+            (None, "/admin/"),
+        ]
+        for next_url, expected in cases:
+            with self.subTest(next_url=next_url):
+                query = {} if next_url is None else {"next": next_url}
+                with override_settings(**_GOOGLE_SSO_ENABLED_SETTINGS):
+                    response = self.client.get(
+                        reverse("django_google_sso:oauth_start_login"), query
+                    )
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(self.client.session["sso_next_url"], expected)
+
     @override_settings(GOOGLE_SSO_ENABLED=False)
     def test_google_sso_routes_404_when_disabled(self):
         for name in ("oauth_start_login", "oauth_callback"):
@@ -175,8 +196,8 @@ class GoogleSSOSettingsTests(TestCase):
                 ):
                     continue
                 route, view = node.args
-                # Unwrap our _require_sso_enabled(views.x) to views.x.
-                if isinstance(view, ast.Call):
+                # Unwrap our wrappers, e.g. _require_sso_enabled(views.x), to views.x.
+                while isinstance(view, ast.Call):
                     (view,) = view.args
                 (name,) = (kw.value.value for kw in node.keywords if kw.arg == "name")
                 found.add((route.value, ast.unparse(view), name))
