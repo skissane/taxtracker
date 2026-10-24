@@ -23,7 +23,10 @@ _REQUEST_FILE = idle_watchdog.request_file_from_env()
 
 def when_ready(server):
     # Runs once, in the master, after it starts listening; workers never run
-    # it, so they never start a watchdog of their own.
+    # it, so they never start a watchdog of their own. Nothing keeps the
+    # Popens: the master's reap_workers waits on every child, not just its
+    # workers ("Reaped unknown child process"), so neither is left a zombie
+    # when it exits, and a kept Popen couldn't see the real exit status.
     idle_watchdog.spawn(server.pid)
     client_ips.spawn(server.pid)
 
