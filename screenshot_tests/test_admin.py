@@ -175,8 +175,8 @@ def test_uptime(admin_user, page, monkeypatch, tmp_path):
 
 def test_client_ips(admin_user, page, monkeypatch, tmp_path):
     # A few made-up IPs (from the documentation ranges): the owner's home and
-    # phone networks, logged in, and three scanners Envoy turned away, one
-    # over IPv6.
+    # phone networks, logged in, the phone's through iCloud Private Relay, and
+    # three scanners Envoy turned away, one over IPv6.
     (tmp_path / "geoip").mkdir()
     write_mmdb(
         tmp_path / "geoip" / "dbip-country-lite-2026-09.mmdb",
@@ -200,12 +200,16 @@ def test_client_ips(admin_user, page, monkeypatch, tmp_path):
             }
             for network, asn, org in (
                 ("203.0.113.0/24", 64500, "Example Broadband"),
-                ("2001:db8::/32", 64501, "Example Mobile"),
+                ("2001:db8::/32", 64501, "Example CDN"),
                 ("198.51.100.0/24", 64502, "Example Cloud Hosting"),
                 ("192.0.2.0/24", 64503, "Example Servers B.V."),
                 ("3fff::/20", 64504, "Example Hosting GmbH"),
             )
         },
+    )
+    client_ips.build_relay_ranges(
+        ["2001:db8:4a1c:7f00::/64,AU,AU-NSW,Sydney,"],
+        tmp_path / "geoip" / client_ips.RELAY_RANGES_FILE,
     )
     now = datetime.datetime.now(datetime.UTC).timestamp()
     browser = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Firefox/140.0"
@@ -257,7 +261,7 @@ def test_client_ips(admin_user, page, monkeypatch, tmp_path):
     geoip.close()
     connection.close()
     # This month's country download failed (so September's is still in use),
-    # and the ASN database was downloaded.
+    # the ASN database was downloaded, and the relay ranges hadn't changed.
     url = client_ips.GEOIP_URL.format
     traceback = (
         "Traceback (most recent call last):\n"
@@ -285,6 +289,17 @@ def test_client_ips(admin_user, page, monkeypatch, tmp_path):
                         "url": url(name="dbip-asn-lite", month="2026-10"),
                         "file": "dbip-asn-lite-2026-10.mmdb",
                         "succeeded": now - 7200,
+                        "error": None,
+                        "traceback": None,
+                    },
+                    client_ips.RELAY_RANGES: {
+                        "attempted": now - 7200,
+                        "outcome": client_ips.UP_TO_DATE,
+                        "fell_back": False,
+                        "url": client_ips.RELAY_RANGES_URL,
+                        "file": client_ips.RELAY_RANGES_FILE,
+                        "succeeded": now - 7200,
+                        "etag": '"6ad29859-b7d5af"',
                         "error": None,
                         "traceback": None,
                     },

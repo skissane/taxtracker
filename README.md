@@ -450,13 +450,15 @@ Set `LIFETRACKER_CLIENT_IP_DB` to put it somewhere else, or to `off` to stop rec
 Countries and networks come from [DB-IP](https://db-ip.com)'s free Lite databases (CC BY 4.0), which need no account.
 At startup, the process downloads this month's into `geoip/` beside the record (`LIFETRACKER_GEOIP_DIR` to change that) unless it already has them, falling back to last month's early in a month before the new ones are out, and deletes older ones.
 Each IP is looked up when first seen, and keeps that location; IPs seen while the databases were missing are looked up once they're there.
+At every startup, it also checks Apple's [list of iCloud Private Relay egress ranges](https://mask-api.icloud.com/egress-ip-ranges.csv), downloading it (about 12 MB) only if it's changed, and marks each IP that's in it when seen, with the rough location of the relay's users the list gives.
+IPs recorded before there was a list (including before this feature) are checked once there is one.
 `LIFETRACKER_GEOIP_DOWNLOAD=0` turns the download off; to download them by hand:
 
 ```bash
 ./flyssh.sh python manage.py update_geoip
 ```
 
-Superusers can see the record in the admin, from the **Client IPs** link in the top bar: how the last DB-IP download went (with the error and traceback if it failed, as `fly logs` keeps only a short window), the networks that logged-in requests came from, then the IPs seen most recently, optionally only those with logged-in requests.
+Superusers can see the record in the admin, from the **Client IPs** link in the top bar: how the last DB-IP and Private Relay downloads went (with the error and traceback if it failed, as `fly logs` keeps only a short window), the networks that logged-in requests came from (with how many of their IPs were Private Relay ones), then the IPs seen most recently (marking Private Relay ones), optionally only those with logged-in requests.
 
 ## Home screen app
 

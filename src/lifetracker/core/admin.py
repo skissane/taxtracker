@@ -726,6 +726,11 @@ def _client_ip_row(row):
         row["ip_html"] = format_html_join(
             mark_safe(":<wbr>"), "{}", ((part,) for part in row["ip"].split(":"))
         )
+    if row.get("private_relay"):
+        # Apple's rough location of the relay's user, e.g. "Sydney, AU-NSW".
+        row["relay_location"] = ", ".join(
+            part for part in (row.get("relay_city"), row.get("relay_region")) if part
+        ) or row.get("relay_country")
     for name in ("first_seen", "last_seen", "first_logged_in", "last_logged_in"):
         if name in row:
             row[name] = _utc_iso_from_timestamp(row[name])
@@ -744,7 +749,7 @@ def _geoip_status_rows(geoip_dir):
         return None, None
     rows = []
     try:
-        for name in client_ips.GEOIP_DATABASES:
+        for name in client_ips.GEOIP_SOURCES:
             if name in statuses:
                 status = statuses[name]
                 rows.append(
@@ -775,6 +780,7 @@ def client_ips_page_context(logged_in_only=False):
         "geoip_files": [],
         "geoip_status": None,
         "geoip_status_error": None,
+        "relay_ranges_url": client_ips.RELAY_RANGES_URL,
     }
     if config.db_path is None:
         return context

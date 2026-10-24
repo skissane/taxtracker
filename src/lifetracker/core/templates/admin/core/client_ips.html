@@ -24,6 +24,10 @@
     overflow-wrap: anywhere;
   }
 
+  .lt-client-ips .lt-relay {
+    white-space: nowrap;
+  }
+
   .lt-client-ips pre {
     white-space: pre-wrap;
   }
@@ -58,14 +62,15 @@
       {% else %}
         No DB-IP databases in <code>{{ config.geoip_dir }}</code> yet, so no locations: run <code>manage.py update_geoip</code>.
       {% endif %}
+      IPs marked <em>iCloud Private Relay</em> are in Apple's <a href="{{ relay_ranges_url }}">list of its egress ranges</a> (when last seen), with the rough location of the relay's users that the list gives.
     </p>
-    <h2>DB-IP downloads</h2>
+    <h2>Downloads</h2>
     {% if geoip_status_error %}<p class="errornote">{{ geoip_status_error }}</p>{% endif %}
     {% if geoip_status %}
       <table class="lt-client-ips">
         <thead>
           <tr>
-            <th scope="col">Database</th>
+            <th scope="col">Source</th>
             <th scope="col">Last attempt</th>
             <th scope="col">Outcome</th>
             <th scope="col">Last success</th>
@@ -126,6 +131,7 @@
               <th scope="col">Network</th>
               <th scope="col">Countries</th>
               <th scope="col" class="lt-num">IPs</th>
+              <th scope="col" class="lt-num">Private Relay IPs</th>
               <th scope="col" class="lt-num">Logged-in requests</th>
               <th scope="col">First logged in</th>
               <th scope="col">Last logged in</th>
@@ -144,6 +150,7 @@
                 <td>{{ network.as_org|default:"" }}</td>
                 <td>{{ network.countries|default:"" }}</td>
                 <td class="lt-num">{{ network.ips }}</td>
+                <td class="lt-num">{{ network.relay_ips|default_if_none:"" }}</td>
                 <td class="lt-num">{{ network.logged_in }}</td>
                 <td class="lt-nowrap">
                   <time data-lt-local datetime="{{ network.first_logged_in }}">{{ network.first_logged_in }}</time>
@@ -189,7 +196,14 @@
                 <td>
                   {% if ip.country %}<abbr title="{{ ip.country_name|default:ip.country }}">{{ ip.country }}</abbr>{% endif %}
                 </td>
-                <td>{% if ip.asn is not None %}AS{{ ip.asn }} {{ ip.as_org|default:"" }}{% endif %}</td>
+                <td>
+                  {% if ip.asn is not None %}AS{{ ip.asn }} {{ ip.as_org|default:"" }}{% endif %}
+                  {% if ip.private_relay %}
+                    <br>
+                    <strong class="lt-relay">iCloud Private Relay</strong>
+                    {% if ip.relay_location %}({{ ip.relay_location }}){% endif %}
+                  {% endif %}
+                </td>
                 <td class="lt-num">{{ ip.requests }}</td>
                 <td class="lt-num">{{ ip.rejected }}</td>
                 <td class="lt-num">{{ ip.logged_in }}</td>
