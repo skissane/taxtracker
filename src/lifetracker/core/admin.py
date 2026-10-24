@@ -6,6 +6,7 @@ import time
 from urllib.parse import quote
 
 from django import forms
+from django.apps import apps
 from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -19,6 +20,7 @@ from django.utils.safestring import mark_safe
 from django.utils.timesince import timesince
 
 from lifetracker.core import app_icon, client_ips, idle_watchdog, uptime_log
+from lifetracker.core.attachments import database_storage_file_fields
 from lifetracker.core.backup import (
     CLOUD_BACKUP_ERRORS,
     CloudBackupStatusUpdateError,
@@ -221,8 +223,30 @@ class DBStoredFileAdmin(admin.ModelAdmin):
         ]
         return custom + super().get_urls()
 
+    def _can_view_stored_file(self, request, stored_file_pk):
+        """Whether *request.user* can view at least one model row owning this file."""
+        if request.user.is_superuser:
+            return True
+        path_prefix = f"db/{stored_file_pk}/"
+        for model in apps.get_models():
+            model_admin = self.admin_site._registry.get(model)
+            if model_admin is None:
+                continue
+            for field in database_storage_file_fields(model):
+                obj = (
+                    model._base_manager.exclude(**{field.attname: ""})
+                    .exclude(**{f"{field.attname}__isnull": True})
+                    .filter(**{f"{field.attname}__startswith": path_prefix})
+                    .first()
+                )
+                if obj is not None and model_admin.has_view_permission(request, obj):
+                    return True
+        return False
+
     def serve_file_view(self, request, pk):
         obj = get_object_or_404(DBStoredFile, pk=pk)
+        if not self._can_view_stored_file(request, pk):
+            raise PermissionDenied
         content = bytes(obj.content)
         content_type, encoding = mimetypes.guess_type(obj.filename)
         # A compressed file (e.g. "x.txt.gz" guesses as text/plain, gzip) isn't

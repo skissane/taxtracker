@@ -992,6 +992,8 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
     def summary_view(self, request, pk):
         fy = get_object_or_404(FinancialYear, pk=pk)
+        if not self.has_view_permission(request, fy):
+            raise PermissionDenied
         # Fetch all items in a single query to avoid N+1 for deep hierarchies.
         all_items = list(
             fy.items.prefetch_related("attachments").order_by("order", "title")
@@ -1040,6 +1042,8 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
     def download_zip_view(self, request, pk):
         fy = get_object_or_404(FinancialYear, pk=pk)
+        if not self.has_view_permission(request, fy):
+            raise PermissionDenied
         return _zip_response(_build_zip(fy), f"{fy}_attachments.zip")
 
     # ------------------------------------------------------------------
@@ -1098,6 +1102,10 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
     def copy_to_new_year_view(self, request, pk):
         fy = get_object_or_404(FinancialYear, pk=pk)
+        if not self.has_view_permission(request, fy):
+            raise PermissionDenied
+        if not self.has_add_permission(request):
+            raise PermissionDenied
         new_year_num = fy.year + 1
 
         if FinancialYear.objects.filter(year=new_year_num).exists():

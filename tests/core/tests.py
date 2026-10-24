@@ -27,7 +27,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from django.conf import settings
 from django.contrib import admin
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Permission, User
 from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.staticfiles import finders
 from django.core.exceptions import ImproperlyConfigured, ValidationError
@@ -649,6 +649,29 @@ class ServeFileViewTests(TestCase):
     def _stored_file(self, filename="served.txt", content=b"Hello attachment content"):
         return DBStoredFile.objects.create(filename=filename, content=content)
 
+    def _stored_file_owned_by_attachment(
+        self, filename="served.txt", content=b"Hello attachment content"
+    ):
+        fy = FinancialYear.objects.create(year=2024)
+        item = Item.objects.create(year=fy, title="Owned Item", order=1)
+        attachment = Attachment.objects.create(
+            item=item,
+            title=filename,
+            file=ContentFile(content, name=filename),
+        )
+        stored_file_pk = int(attachment.file.name.split("/", 2)[1])
+        return DBStoredFile.objects.get(pk=stored_file_pk)
+
+    def _staff_client(self, username, *permission_codenames):
+        user = User.objects.create_user(username, f"{username}@example.com", "pass")
+        user.is_staff = True
+        user.save()
+        for codename in permission_codenames:
+            user.user_permissions.add(Permission.objects.get(codename=codename))
+        client = Client()
+        client.force_login(user)
+        return client
+
     def test_serve_file_view(self):
         """The serve_file_view should return the correct file content."""
         User.objects.create_superuser("admin", "a@b.com", "pass")
@@ -756,6 +779,22 @@ class ServeFileViewTests(TestCase):
         # Django admin redirects unauthenticated users to the login page
         self.assertEqual(response.status_code, 302)
         self.assertIn("/login/", response["Location"])
+
+    def test_serve_file_view_requires_owner_model_view_permission(self):
+        obj = self._stored_file_owned_by_attachment("owned.pdf", b"owned")
+        url = reverse("admin:core_dbstoredfile_serve_file", args=[obj.pk])
+        client = self._staff_client("staff-no-view")
+        response = client.get(url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_serve_file_view_allows_owner_model_view_permission(self):
+        content = b"owned content"
+        obj = self._stored_file_owned_by_attachment("owned.pdf", content)
+        url = reverse("admin:core_dbstoredfile_serve_file", args=[obj.pk])
+        client = self._staff_client("staff-view", "view_attachment")
+        response = client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, content)
 
 
 class DatabaseStorageTests(TestCase):
