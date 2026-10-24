@@ -78,7 +78,7 @@ class FinancialYear(models.Model):
 
     @property
     def days_until_lodgement(self):
-        today = timezone.now().date()
+        today = timezone.localdate()
         return (self.effective_lodgement_date - today).days
 
     @property
