@@ -212,24 +212,6 @@ class ItemAdmin(admin.ModelAdmin):
             fields = [f for f in fields if f != "year"]
         return fields
 
-    def save_model(self, request, obj, form, change):
-        super().save_model(request, obj, form, change)
-        if change and "year" in form.changed_data and obj.parent_id is None:
-            # BFS to collect all descendant IDs (one query per depth level),
-            # then a single bulk update — avoids N individual saves.
-            ids_to_update = []
-            current_level = [obj.pk]
-            while current_level:
-                children = list(
-                    Item.objects.filter(parent_id__in=current_level).values_list(
-                        "pk", flat=True
-                    )
-                )
-                ids_to_update.extend(children)
-                current_level = children
-            if ids_to_update:
-                Item.objects.filter(pk__in=ids_to_update).update(year_id=obj.year_id)
-
     def save_formset(self, request, form, formset, change):
         instances = formset.save(commit=False)
         # Batch-fetch year_id for all parent IDs to avoid N+1 queries.

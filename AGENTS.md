@@ -203,7 +203,7 @@ Nothing prunes `client_ip`: each new IP adds a row of a few hundred bytes, which
   Default lodgement date is 31 Oct; overridable.
 - **`Item`** (taxtracker) — tax checklist item, self-referential `parent` (tree).
   Child items always inherit their parent's `year_id`, enforced in both `clean()` and `save()`.
-  Cascade update propagates when a root item's year changes.
+  Whenever an item's year changes, whether a root's year is edited or the item is re-parented under another year's item, `save()` moves all its descendants to the new year too.
   Its tree behaviour (path, status, cycle check) comes from `core.trees.TreeNodeMixin`, shared with `Task`.
 - **`FileType` / `MimeType` / `FileExtension`** (core) — file type registry.
   Each `FileType` must have exactly one primary MIME type and one primary extension; enforced by `_AtLeastOnePrimaryFormSet`.
