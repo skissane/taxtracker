@@ -12,6 +12,7 @@ from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
+from django.utils import timezone
 from django.utils.html import format_html
 
 from lifetracker.core.attachments import extract_date_from_filename
@@ -970,7 +971,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
     @admin.display(description="Status Since")
     def status_since_display(self, obj):
         dt = obj.current_status_transitioned_at
-        return dt.date() if dt else "—"
+        return timezone.localdate(dt) if dt else "—"
 
     def get_queryset(self, request):
         return super().get_queryset(request).prefetch_related("status_history")
