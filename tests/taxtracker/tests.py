@@ -221,6 +221,62 @@ class ItemYearInheritanceTests(TestCase):
         child.refresh_from_db()
         self.assertEqual(child.year_id, self.fy2024.pk)
 
+    def test_reparent_to_other_year_cascades_descendants(self):
+        parent_2025 = Item.objects.create(
+            year=self.fy2025,
+            title="Parent 2025",
+            order=2,
+        )
+        child = Item.objects.create(
+            year=self.fy2024, parent=self.parent, title="Child", order=1
+        )
+        grandchild = Item.objects.create(
+            year=self.fy2024, parent=child, title="Grandchild", order=1
+        )
+
+        child.parent = parent_2025
+        child.save()
+
+        child.refresh_from_db()
+        grandchild.refresh_from_db()
+        self.assertEqual(child.year_id, self.fy2025.pk)
+        self.assertEqual(grandchild.year_id, self.fy2025.pk)
+
+    def test_root_year_change_cascades_descendants_on_model_save(self):
+        child = Item.objects.create(
+            year=self.fy2024, parent=self.parent, title="Child", order=1
+        )
+        grandchild = Item.objects.create(
+            year=self.fy2024, parent=child, title="Grandchild", order=1
+        )
+
+        self.parent.year = self.fy2025
+        self.parent.save()
+
+        child.refresh_from_db()
+        grandchild.refresh_from_db()
+        self.assertEqual(child.year_id, self.fy2025.pk)
+        self.assertEqual(grandchild.year_id, self.fy2025.pk)
+
+    def test_reparent_within_same_year_leaves_descendants(self):
+        other_parent = Item.objects.create(
+            year=self.fy2024, title="Other Parent 2024", order=2
+        )
+        child = Item.objects.create(
+            year=self.fy2024, parent=self.parent, title="Child", order=1
+        )
+        grandchild = Item.objects.create(
+            year=self.fy2024, parent=child, title="Grandchild", order=1
+        )
+
+        child.parent = other_parent
+        with self.assertNumQueries(3):
+            # Stored year, parent's year, then the UPDATE: no descendant walk.
+            child.save()
+
+        grandchild.refresh_from_db()
+        self.assertEqual(grandchild.year_id, self.fy2024.pk)
+
 
 class ReceivedDocumentModelTests(TestCase):
     def setUp(self):
@@ -269,6 +325,15 @@ class CopyItemsTests(TestCase):
         client.login(username="admin", password="password")
         return client
 
+    def _create_cycle(self):
+        first = Item.objects.create(year=self.fy, title="Cycle A", order=9)
+        second = Item.objects.create(
+            year=self.fy, parent=first, title="Cycle B", order=1
+        )
+        first.parent = second
+        first.save(update_fields=["parent"])
+        return first, second
+
     def test_copy_to_new_year_creates_items(self):
         client = self._create_superuser_client()
         url = reverse(
@@ -299,6 +364,57 @@ class CopyItemsTests(TestCase):
         # Should redirect back with error message
         self.assertEqual(response.status_code, 302)
         self.assertFalse(FinancialYear.objects.filter(year=2026).exists())
+
+    def test_copy_to_new_year_race_shows_existing_year_error(self):
+        # Another request creates FY2025 after this one's exists() check, so
+        # the create hits the unique constraint (issue #156).
+        FinancialYear.objects.create(year=2025)
+        client = self._create_superuser_client()
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        with mock.patch.object(FinancialYear.objects, "filter") as mock_filter:
+            mock_filter.return_value.exists.return_value = False
+            response = client.post(url)
+        self.assertRedirects(
+            response,
+            reverse("admin:taxtracker_financialyear_changelist"),
+            fetch_redirect_response=False,
+        )
+        self.assertContains(client.get(response.url), "FY2025 already exists.")
+        new_fy = FinancialYear.objects.get(year=2025)
+        self.assertFalse(new_fy.items.exists())
+
+    def test_copy_to_new_year_warns_about_items_unreachable_from_root(self):
+        cycle_a, cycle_b = self._create_cycle()
+        client = self._create_superuser_client()
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        response = client.get(url)
+        self.assertContains(response, "not reachable from a root item")
+        self.assertContains(response, cycle_a.title)
+        self.assertContains(response, cycle_b.title)
+
+    def test_copy_to_new_year_skips_unreachable_items_with_warning(self):
+        self._create_cycle()
+        client = self._create_superuser_client()
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        response = client.post(url, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "not copied because they are not reachable from a root item",
+        )
+        new_fy = FinancialYear.objects.get(year=2025)
+        self.assertEqual(
+            list(
+                new_fy.items.order_by("order", "title").values_list("title", flat=True)
+            ),
+            ["Child", "Root"],
+        )
 
 
 class ReceivedDocumentAdminViewTests(TestCase):
@@ -395,6 +511,16 @@ class AdminViewTests(TestCase):
         self.fy = FinancialYear.objects.create(year=2024)
         self.item = Item.objects.create(year=self.fy, title="Test Item", order=1)
 
+    def _limited_client(self, username, *permission_codenames):
+        user = User.objects.create_user(username, f"{username}@example.com", "password")
+        user.is_staff = True
+        user.save()
+        for codename in permission_codenames:
+            user.user_permissions.add(Permission.objects.get(codename=codename))
+        client = Client()
+        client.force_login(user)
+        return client
+
     def test_changelist(self):
         url = reverse("admin:taxtracker_financialyear_changelist")
         response = self.client.get(url)
@@ -407,6 +533,27 @@ class AdminViewTests(TestCase):
         self.assertContains(response, "FY2024")
         self.assertContains(response, "Test Item")
 
+    def test_summary_view_lists_items_unreachable_from_root(self):
+        first = Item.objects.create(year=self.fy, title="Cycle A", order=9)
+        second = Item.objects.create(
+            year=self.fy, parent=first, title="Cycle B", order=1
+        )
+        first.parent = second
+        first.save(update_fields=["parent"])
+
+        url = reverse("admin:taxtracker_financialyear_summary", args=[self.fy.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "not reachable from a root item")
+        self.assertContains(response, first.title)
+        self.assertContains(response, second.title)
+
+    def test_summary_view_requires_financialyear_view_permission(self):
+        client = self._limited_client("limited-summary")
+        url = reverse("admin:taxtracker_financialyear_summary", args=[self.fy.pk])
+        response = client.get(url)
+        self.assertEqual(response.status_code, 403)
+
     def test_download_zip_view(self):
         url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
         response = self.client.get(url)
@@ -418,6 +565,103 @@ class AdminViewTests(TestCase):
         self.assertEqual(
             response["Content-Disposition"],
             'attachment; filename="FY2024_attachments.zip"',
+        )
+
+    def test_download_zip_view_handles_parent_cycles(self):
+        first = Item.objects.create(year=self.fy, title="Cycle A", order=9)
+        second = Item.objects.create(
+            year=self.fy, parent=first, title="Cycle B", order=1
+        )
+        first.parent = second
+        first.save(update_fields=["parent"])
+        Attachment.objects.create(
+            item=first,
+            title="cycle.pdf",
+            file=ContentFile(b"cycle", name="cycle.pdf"),
+        )
+
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(response.getvalue())) as zf:
+            self.assertTrue(any(name.endswith("/cycle.pdf") for name in zf.namelist()))
+
+    def test_download_zip_view_requires_financialyear_view_permission(self):
+        client = self._limited_client("limited-zip")
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        response = client.get(url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_copy_to_new_year_requires_financialyear_add_permission(self):
+        client = self._limited_client("limited-copy-add", "view_financialyear")
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        response = client.get(url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_copy_to_new_year_requires_financialyear_view_permission(self):
+        client = self._limited_client("limited-copy-view", "add_financialyear")
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        response = client.get(url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_download_zip_view_requires_item_and_attachment_view_permission(self):
+        """A ZIP holds items' notes and attachments' files: FY view isn't enough."""
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        for username, codenames in [
+            ("zip-fy-only", ["view_financialyear"]),
+            ("zip-no-attachment", ["view_financialyear", "view_item"]),
+            ("zip-no-item", ["view_financialyear", "view_attachment"]),
+        ]:
+            with self.subTest(codenames=codenames):
+                client = self._limited_client(username, *codenames)
+                self.assertEqual(client.get(url).status_code, 403)
+
+    def test_download_zip_view_allowed_with_view_permissions(self):
+        client = self._limited_client(
+            "zip-all", "view_financialyear", "view_item", "view_attachment"
+        )
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        response = client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/zip")
+        with zipfile.ZipFile(io.BytesIO(response.getvalue())) as zf:
+            self.assertIn("index.md", zf.namelist())
+
+    def test_download_multi_zip_requires_attachment_view_permission(self):
+        client = self._limited_client(
+            "multi-no-attachment", "view_financialyear", "view_item"
+        )
+        url = reverse("admin:taxtracker_financialyear_download_multi_zip")
+        self.assertEqual(client.get(url).status_code, 403)
+        response = client.post(url, {"fy_ids": [self.fy.pk], "action": "view_index"})
+        self.assertEqual(response.status_code, 403)
+
+    def test_copy_to_new_year_requires_item_add_permission(self):
+        client = self._limited_client(
+            "copy-no-item", "view_financialyear", "add_financialyear"
+        )
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        self.assertEqual(client.post(url).status_code, 403)
+        self.assertFalse(FinancialYear.objects.filter(year=2025).exists())
+
+    def test_copy_to_new_year_allowed_with_add_permissions(self):
+        client = self._limited_client(
+            "copy-all", "view_financialyear", "add_financialyear", "add_item"
+        )
+        url = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
+        )
+        response = client.post(url)
+        self.assertEqual(response.status_code, 302)
+        new_fy = FinancialYear.objects.get(year=2025)
+        self.assertEqual(
+            list(new_fy.items.values_list("title", flat=True)), ["Test Item"]
         )
 
     def test_download_zip_spooled_to_disk(self):

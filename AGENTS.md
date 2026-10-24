@@ -117,6 +117,7 @@ Rows deleted before that receiver existed left their `DBStoredFile`s behind: cor
 `DatabaseStorage` (in `core/models.py`) is a custom Django storage backend that writes file content to `DBStoredFile` rows.
 Storage paths have the form `db/<pk>/<filename>`.
 Files are served through `DBStoredFileAdmin.serve_file_view` at `/admin/core/dbstoredfile/file/<pk>/`.
+A superuser can open any file; anyone else needs view permission (the model admin's `has_view_permission`) on a row of a registered model whose `DatabaseStorage` field holds `db/<pk>/...`, so orphaned files and those of unregistered models such as `AppIcon` are superuser-only (issue #148).
 It guesses the type from the filename (`application/octet-stream` if it can't, or if the name gives an encoding such as `.gz`) and shows only `INLINE_CONTENT_TYPES` (PDF, common raster images, plain text) inline; anything else, HTML and SVG included, is sent as an `attachment` download, so an attached file can't run script on the admin origin with the viewer's session (issue #140).
 Every response has `X-Content-Type-Options: nosniff`, and all but PDFs `Content-Security-Policy: sandbox; default-src 'none'`; PDFs are left out because browsers' built-in PDF viewers won't run in a sandboxed document.
 
@@ -203,7 +204,7 @@ Nothing prunes `client_ip`: each new IP adds a row of a few hundred bytes, which
   Default lodgement date is 31 Oct; overridable.
 - **`Item`** (taxtracker) — tax checklist item, self-referential `parent` (tree).
   Child items always inherit their parent's `year_id`, enforced in both `clean()` and `save()`.
-  Cascade update propagates when a root item's year changes.
+  Whenever an item's year changes, whether a root's year is edited or the item is re-parented under another year's item, `save()` moves all its descendants to the new year too.
   Its tree behaviour (path, status, cycle check) comes from `core.trees.TreeNodeMixin`, shared with `Task`.
 - **`FileType` / `MimeType` / `FileExtension`** (core) — file type registry.
   Each `FileType` must have exactly one primary MIME type and one primary extension; enforced by `_AtLeastOnePrimaryFormSet`.

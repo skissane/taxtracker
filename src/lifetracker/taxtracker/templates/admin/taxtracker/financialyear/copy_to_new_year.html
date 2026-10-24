@@ -20,6 +20,18 @@
     This will create <strong>FY{{ new_year_num }}</strong> and copy all items
     (title and order only — not notes, status, or attachments) from <strong>{{ fy }}</strong>.
   </p>
+  {% if unreachable_items %}
+    <div class="messagelist">
+      <div class="warning">
+        {{ unreachable_items|length }} item(s) are not reachable from a root item and will not be copied:
+        <ul>
+          {% for item in unreachable_items %}
+            <li><a href="{% url 'admin:taxtracker_item_change' item.pk %}">{{ item.tree_path_str }}</a></li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  {% endif %}
   <form method="post">
     {% csrf_token %}
     <div>

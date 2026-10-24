@@ -7,7 +7,7 @@ from pathlib import Path
 
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.response import TemplateResponse
@@ -17,6 +17,7 @@ from django.utils.html import format_html
 
 from lifetracker.core.attachments import extract_date_from_filename
 from lifetracker.core.models import DBStoredFile
+from lifetracker.core.trees import CYCLE_MARKER
 from lifetracker.taxtracker.archives import (
     UnsupportedArchiveError,
     extract_from_archive_with_skips,
@@ -211,24 +212,6 @@ class ItemAdmin(admin.ModelAdmin):
         if obj and obj.parent_id:
             fields = [f for f in fields if f != "year"]
         return fields
-
-    def save_model(self, request, obj, form, change):
-        super().save_model(request, obj, form, change)
-        if change and "year" in form.changed_data and obj.parent_id is None:
-            # BFS to collect all descendant IDs (one query per depth level),
-            # then a single bulk update — avoids N individual saves.
-            ids_to_update = []
-            current_level = [obj.pk]
-            while current_level:
-                children = list(
-                    Item.objects.filter(parent_id__in=current_level).values_list(
-                        "pk", flat=True
-                    )
-                )
-                ids_to_update.extend(children)
-                current_level = children
-            if ids_to_update:
-                Item.objects.filter(pk__in=ids_to_update).update(year_id=obj.year_id)
 
     def save_formset(self, request, form, formset, change):
         instances = formset.save(commit=False)
@@ -788,12 +771,41 @@ def _folder_path(item, item_map):
     """Return a POSIX path string representing the item hierarchy."""
     parts = []
     current = item
+    visited = set()
     while True:
+        if current.pk in visited:
+            parts.insert(0, _safe_component(CYCLE_MARKER))
+            break
+        visited.add(current.pk)
         parts.insert(0, _safe_component(current.title))
         if current.parent_id is None:
             break
         current = item_map.get(current.parent_id, current.parent)
     return "/".join(parts)
+
+
+def _tree_rows_and_unreachable_items(items):
+    """Return (tree_rows, unreachable_items) for a list of items."""
+    children_map = {}
+    for item in items:
+        children_map.setdefault(item.parent_id, []).append(item)
+
+    visited = set()
+
+    # Each item has one parent, so a walk down from the roots can't revisit an
+    # item; items in a parent cycle (and their descendants) are never reached.
+    def item_tree(item, depth=0):
+        visited.add(item.pk)
+        rows = [{"item": item, "depth": depth}]
+        for child in children_map.get(item.pk, []):
+            rows.extend(item_tree(child, depth + 1))
+        return rows
+
+    tree_rows = []
+    for root_item in children_map.get(None, []):
+        tree_rows.extend(item_tree(root_item))
+    unreachable_items = [item for item in items if item.pk not in visited]
+    return tree_rows, unreachable_items
 
 
 def _build_fy_index_md(fy, prefix="", zf=None):
@@ -1032,25 +1044,13 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
     def summary_view(self, request, pk):
         fy = get_object_or_404(FinancialYear, pk=pk)
+        if not self.has_view_permission(request, fy):
+            raise PermissionDenied
         # Fetch all items in a single query to avoid N+1 for deep hierarchies.
         all_items = list(
             fy.items.prefetch_related("attachments").order_by("order", "title")
         )
-
-        # Build a parent_id → [children] map (order is preserved from queryset).
-        children_map = {}
-        for item in all_items:
-            children_map.setdefault(item.parent_id, []).append(item)
-
-        def item_tree(item, depth=0):
-            rows = [{"item": item, "depth": depth}]
-            for child in children_map.get(item.pk, []):
-                rows.extend(item_tree(child, depth + 1))
-            return rows
-
-        tree_rows = []
-        for root_item in children_map.get(None, []):
-            tree_rows.extend(item_tree(root_item))
+        tree_rows, unreachable_items = _tree_rows_and_unreachable_items(all_items)
 
         total = len(all_items)
         done = sum(1 for i in all_items if i.is_done)
@@ -1065,6 +1065,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
             "title": f"Status Summary – {fy}",
             "fy": fy,
             "tree_rows": tree_rows,
+            "unreachable_items": unreachable_items,
             "total": total,
             "done": done,
             "pending": pending,
@@ -1078,8 +1079,23 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # ZIP download view
     # ------------------------------------------------------------------
 
+    def _check_export_permission(self, request, fy=None):
+        """Raise PermissionDenied unless the user can view what a ZIP exports.
+
+        A ZIP (or its index) holds the year's items, their notes and every
+        attachment's file, so it needs view permission on all three models,
+        not just FinancialYear.
+        """
+        if not self.has_view_permission(request, fy):
+            raise PermissionDenied
+        for model in (Item, Attachment):
+            model_admin = self.admin_site._registry.get(model)
+            if model_admin is None or not model_admin.has_view_permission(request):
+                raise PermissionDenied
+
     def download_zip_view(self, request, pk):
         fy = get_object_or_404(FinancialYear, pk=pk)
+        self._check_export_permission(request, fy)
         return _zip_response(_build_zip(fy), f"{fy}_attachments.zip")
 
     # ------------------------------------------------------------------
@@ -1087,8 +1103,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # ------------------------------------------------------------------
 
     def download_multi_zip_view(self, request):
-        if not self.has_view_permission(request):
-            raise PermissionDenied
+        self._check_export_permission(request)
         all_fys = list(
             FinancialYear.objects.order_by("year").prefetch_related("status_history")
         )
@@ -1138,6 +1153,13 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
     def copy_to_new_year_view(self, request, pk):
         fy = get_object_or_404(FinancialYear, pk=pk)
+        if not self.has_view_permission(request, fy):
+            raise PermissionDenied
+        if not self.has_add_permission(request):
+            raise PermissionDenied
+        item_admin = self.admin_site._registry.get(Item)
+        if item_admin is None or not item_admin.has_add_permission(request):
+            raise PermissionDenied
         new_year_num = fy.year + 1
 
         if FinancialYear.objects.filter(year=new_year_num).exists():
@@ -1148,9 +1170,22 @@ class FinancialYearAdmin(admin.ModelAdmin):
             return redirect(reverse("admin:taxtracker_financialyear_changelist"))
 
         if request.method == "POST":
-            with transaction.atomic():
-                new_fy = FinancialYear.objects.create(year=new_year_num)
-                _copy_items(fy, new_fy)
+            try:
+                with transaction.atomic():
+                    new_fy = FinancialYear.objects.create(year=new_year_num)
+                    skipped_items = _copy_items(fy, new_fy)
+            except IntegrityError:
+                messages.error(
+                    request,
+                    f"FY{new_year_num} already exists.",
+                )
+                return redirect(reverse("admin:taxtracker_financialyear_changelist"))
+            if skipped_items:
+                messages.warning(
+                    request,
+                    f"{len(skipped_items)} item(s) were not copied because they are "
+                    "not reachable from a root item.",
+                )
             messages.success(
                 request,
                 f"Created FY{new_year_num} with items copied from {fy}.",
@@ -1159,11 +1194,15 @@ class FinancialYearAdmin(admin.ModelAdmin):
                 reverse("admin:taxtracker_financialyear_change", args=[new_fy.pk])
             )
 
+        _, unreachable_items = _tree_rows_and_unreachable_items(
+            list(fy.items.order_by("order", "title"))
+        )
         context = {
             **self.admin_site.each_context(request),
             "title": f"Copy {fy} to FY{new_year_num}",
             "fy": fy,
             "new_year_num": new_year_num,
+            "unreachable_items": unreachable_items,
             "opts": self.model._meta,
         }
         return render(
@@ -1208,19 +1247,16 @@ def _copy_items(source_fy, dest_fy):
 
     Notes, status and attachments are NOT copied.
     """
+    source_items = list(source_fy.items.order_by("order", "title"))
+    tree_rows, unreachable_items = _tree_rows_and_unreachable_items(source_items)
     old_to_new = {}
-
-    # Copy root items first, then children in order so parents always exist.
-    def copy_item(item, new_parent=None):
+    for row in tree_rows:
+        item = row["item"]
         new_item = Item.objects.create(
             year=dest_fy,
-            parent=new_parent,
+            parent=old_to_new.get(item.parent_id),
             title=item.title,
             order=item.order,
         )
         old_to_new[item.pk] = new_item
-        for child in item.children.order_by("order", "title"):
-            copy_item(child, new_parent=new_item)
-
-    for root in source_fy.items.filter(parent=None).order_by("order", "title"):
-        copy_item(root)
+    return unreachable_items
