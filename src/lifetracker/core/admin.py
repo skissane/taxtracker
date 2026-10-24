@@ -13,6 +13,8 @@ from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils import timezone
+from django.utils.html import format_html_join
+from django.utils.safestring import mark_safe
 from django.utils.timesince import timesince
 
 from lifetracker.core import client_ips, idle_watchdog, uptime_log
@@ -685,6 +687,12 @@ def _utc_iso_from_timestamp(timestamp):
 
 def _client_ip_row(row):
     row = dict(row)
+    if "ip" in row:
+        # An IPv6 address can be 39 characters: let it wrap after a colon
+        # rather than widen the table.
+        row["ip_html"] = format_html_join(
+            mark_safe(":<wbr>"), "{}", ((part,) for part in row["ip"].split(":"))
+        )
     for name in ("first_seen", "last_seen", "first_logged_in", "last_logged_in"):
         if name in row:
             row[name] = _utc_iso_from_timestamp(row[name])

@@ -788,9 +788,12 @@ class ClientIPsAdminViewTests(TempDirMixin, TestCase):
         connection.close()
 
     def _ips(self, response):
-        return re.findall(
-            r'<td class="lt-nowrap">([0-9a-f.:]+)</td>', response.content.decode()
-        )
+        return [
+            ip.replace("<wbr>", "")
+            for ip in re.findall(
+                r'<td class="lt-ip">(.*?)</td>', response.content.decode()
+            )
+        ]
 
     def test_url(self):
         self.assertEqual(reverse("admin:client_ips"), self.URL)
@@ -834,6 +837,17 @@ class ClientIPsAdminViewTests(TempDirMixin, TestCase):
         networks = response.content.decode().split("<h2>IPs</h2>")[0]
         self.assertIn("AS64500", networks)
         self.assertNotIn("198.51.100.1", networks)
+
+    def test_ipv6_wraps_after_colons(self):
+        connection = client_ips.connect(self.db_path)
+        client_ips.record(
+            connection, [request(ip="2001:db8::1")], client_ips.GeoIP(None)
+        )
+        connection.close()
+        response = self.client.get(self.URL)
+        self.assertContains(
+            response, '<td class="lt-ip">2001:<wbr>db8:<wbr>:<wbr>1</td>'
+        )
 
     def test_logged_in_only(self):
         self._record()

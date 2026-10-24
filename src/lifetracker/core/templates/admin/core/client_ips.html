@@ -15,7 +15,12 @@
     white-space: nowrap;
   }
 
+  .lt-client-ips .lt-ip {
+    min-width: 9em;
+  }
+
   .lt-client-ips .lt-detail {
+    min-width: 11em;
     overflow-wrap: anywhere;
   }
   </style>
@@ -121,7 +126,7 @@
           <tbody>
             {% for ip in ips %}
               <tr>
-                <td class="lt-nowrap">{{ ip.ip }}</td>
+                <td class="lt-ip">{{ ip.ip_html }}</td>
                 <td>
                   {% if ip.country %}<abbr title="{{ ip.country_name|default:ip.country }}">{{ ip.country }}</abbr>{% endif %}
                 </td>

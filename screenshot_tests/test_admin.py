@@ -175,7 +175,8 @@ def test_uptime(admin_user, page, monkeypatch, tmp_path):
 
 def test_client_ips(admin_user, page, monkeypatch, tmp_path):
     # A few made-up IPs (from the documentation ranges): the owner's home and
-    # phone networks, logged in, and two scanners Envoy turned away.
+    # phone networks, logged in, and three scanners Envoy turned away, one
+    # over IPv6.
     (tmp_path / "geoip").mkdir()
     write_mmdb(
         tmp_path / "geoip" / "dbip-country-lite-2026-10.mmdb",
@@ -186,6 +187,7 @@ def test_client_ips(admin_user, page, monkeypatch, tmp_path):
                 ("198.51.100.0/24", "US", "United States"),
                 ("192.0.2.0/24", "NL", "Netherlands"),
                 ("2001:db8::/32", "AU", "Australia"),
+                ("3fff::/20", "DE", "Germany"),
             )
         },
     )
@@ -201,6 +203,7 @@ def test_client_ips(admin_user, page, monkeypatch, tmp_path):
                 ("2001:db8::/32", 64501, "Example Mobile"),
                 ("198.51.100.0/24", 64502, "Example Cloud Hosting"),
                 ("192.0.2.0/24", 64503, "Example Servers B.V."),
+                ("3fff::/20", 64504, "Example Hosting GmbH"),
             )
         },
     )
@@ -214,7 +217,23 @@ def test_client_ips(admin_user, page, monkeypatch, tmp_path):
             for h in (50, 26, 2)
         ),
         client_ips.Request(
-            "2001:db8::42", now - 600, "GET /admin/uptime/", 200, browser, False, True
+            "2001:db8:4a1c:7f00:1d3e:9b2a:c4f1:8e07",
+            now - 600,
+            "GET /admin/uptime/",
+            200,
+            browser,
+            False,
+            True,
+        ),
+        # A full-length IPv6 address, the widest an IP gets.
+        client_ips.Request(
+            "3fff:db8:85a3:4e21:9c7d:2b6f:a810:73e5",
+            now - 1200,
+            "GET /admin/config.php",
+            302,
+            "python-requests/2.32.3",
+            True,
+            False,
         ),
         *(
             client_ips.Request(

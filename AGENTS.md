@@ -252,6 +252,7 @@ The screenshot tests set the browser's time zone to `Australia/Sydney`, so their
 
 The superuser-only **Client IPs** page (`/admin/client-ips/`, URL name `admin:client_ips`) is served and linked the same way, by `core.admin.client_ips_view`, reading the client IP record read-only (`client_ips.connect_read_only`): a table of the networks (ASNs) requests with a valid JWT came from (`logged_in_networks`), then the `_CLIENT_IPS_LIMIT` (500) IPs seen most recently (`recent_ips`), or only those with logged-in requests with `?logged_in=1`.
 Times are UTC in the HTML, shown in the browser's time zone by `local_times.js`.
+An IP can wrap after each colon (`_client_ip_row` adds `<wbr>`), so a 39-character IPv6 address doesn't widen the table.
 It links db-ip.com, as DB-IP Lite's CC BY 4.0 licence asks of anything showing its data.
 
 Every admin page's footer shows how long the page took to generate ("Page generated in 0.042 seconds").
