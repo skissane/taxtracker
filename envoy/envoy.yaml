@@ -143,6 +143,27 @@ static_resources:
                       log_format:
                         text_format_source:
                           inline_string: "envoy: %REQ(FLY-CLIENT-IP)% [%START_TIME%] \"%REQ(:METHOD)% %REQ(:PATH)% %PROTOCOL%\" %RESPONSE_CODE% %RESPONSE_FLAGS% %RESPONSE_CODE_DETAILS% %BYTES_SENT% %DURATION%ms \"%REQ(USER-AGENT)%\"\n"
+                  # Every request, as a JSON line, for the client IP record
+                  # (lifetracker/core/client_ips.py, issue #201), whose
+                  # collector reads and empties this file. /dev/null when
+                  # that's off. jwt_failure is set when jwt_authn turned the
+                  # request away, jwt_sub when it had a valid JWT; each is
+                  # null otherwise.
+                  - name: envoy.access_loggers.file
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
+                      path: @REQUEST_LOG@
+                      log_format:
+                        json_format:
+                          time: "%START_TIME(%s.%3f)%"
+                          fly_client_ip: "%REQ(FLY-CLIENT-IP)%"
+                          peer: "%DOWNSTREAM_DIRECT_REMOTE_ADDRESS_WITHOUT_PORT%"
+                          method: "%REQ(:METHOD)%"
+                          path: "%REQ(:PATH)%"
+                          status: "%RESPONSE_CODE%"
+                          user_agent: "%REQ(USER-AGENT)%"
+                          jwt_failure: "%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_failure)%"
+                          jwt_sub: "%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:sub)%"
                 route_config:
                   virtual_hosts:
                     - name: app
@@ -217,8 +238,9 @@ static_resources:
                             - name: authorization
                               value_prefix: "Bearer "
                           forward: true
-                          # For the access log's filter.
+                          # For the access logs.
                           failed_status_in_metadata: jwt_failure
+                          payload_in_metadata: jwt_payload
                       # The first rule whose match fits applies. The whitelist
                       # comes first, one rule per path and method, needing no
                       # JWT (one that's there isn't checked, so a stale cookie

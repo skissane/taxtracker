@@ -14,7 +14,8 @@ from unittest import mock
 import pytest
 from playwright.sync_api import sync_playwright
 
-from lifetracker.core import uptime_log
+from lifetracker.core import client_ips, uptime_log
+from tests.core.mmdb_writer import write_mmdb
 
 SCREENSHOT_DIR = Path(__file__).resolve().parent.parent / "screenshots"
 
@@ -170,3 +171,92 @@ def test_uptime(admin_user, page, monkeypatch, tmp_path):
     page.get_by_role("link", name="2", exact=True).first.click()
     page.wait_for_url("**/admin/uptime/*/?days=8")
     _screenshot(page, "uptime-day")
+
+
+def test_client_ips(admin_user, page, monkeypatch, tmp_path):
+    # A few made-up IPs (from the documentation ranges): the owner's home and
+    # phone networks, logged in, and three scanners Envoy turned away, one
+    # over IPv6.
+    (tmp_path / "geoip").mkdir()
+    write_mmdb(
+        tmp_path / "geoip" / "dbip-country-lite-2026-10.mmdb",
+        {
+            network: {"country": {"iso_code": code, "names": {"en": name}}}
+            for network, code, name in (
+                ("203.0.113.0/24", "AU", "Australia"),
+                ("198.51.100.0/24", "US", "United States"),
+                ("192.0.2.0/24", "NL", "Netherlands"),
+                ("2001:db8::/32", "AU", "Australia"),
+                ("3fff::/20", "DE", "Germany"),
+            )
+        },
+    )
+    write_mmdb(
+        tmp_path / "geoip" / "dbip-asn-lite-2026-10.mmdb",
+        {
+            network: {
+                "autonomous_system_number": asn,
+                "autonomous_system_organization": org,
+            }
+            for network, asn, org in (
+                ("203.0.113.0/24", 64500, "Example Broadband"),
+                ("2001:db8::/32", 64501, "Example Mobile"),
+                ("198.51.100.0/24", 64502, "Example Cloud Hosting"),
+                ("192.0.2.0/24", 64503, "Example Servers B.V."),
+                ("3fff::/20", 64504, "Example Hosting GmbH"),
+            )
+        },
+    )
+    now = datetime.datetime.now(datetime.UTC).timestamp()
+    browser = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Firefox/140.0"
+    requests = [
+        *(
+            client_ips.Request(
+                "203.0.113.7", now - 3600 * h, "GET /admin/", 200, browser, False, True
+            )
+            for h in (50, 26, 2)
+        ),
+        client_ips.Request(
+            "2001:db8:4a1c:7f00:1d3e:9b2a:c4f1:8e07",
+            now - 600,
+            "GET /admin/uptime/",
+            200,
+            browser,
+            False,
+            True,
+        ),
+        # A full-length IPv6 address, the widest an IP gets.
+        client_ips.Request(
+            "3fff:db8:85a3:4e21:9c7d:2b6f:a810:73e5",
+            now - 1200,
+            "GET /admin/config.php",
+            302,
+            "python-requests/2.32.3",
+            True,
+            False,
+        ),
+        *(
+            client_ips.Request(
+                "198.51.100.23",
+                now - 60 * m,
+                path,
+                302,
+                "Mozilla/5.0 zgrab/0.x",
+                True,
+                False,
+            )
+            for m, path in ((90, "GET /.env"), (89, "GET /wp-login.php"))
+        ),
+        client_ips.Request(
+            "192.0.2.9", now - 300, "GET /admin/login/", 200, "curl/8.5.0", False, False
+        ),
+    ]
+    connection = client_ips.connect(tmp_path / "client_ips.sqlite3")
+    geoip = client_ips.GeoIP(tmp_path / "geoip")
+    client_ips.record(connection, requests, geoip)
+    geoip.close()
+    connection.close()
+    monkeypatch.setenv("LIFETRACKER_CLIENT_IP_DB", str(tmp_path / "client_ips.sqlite3"))
+    _log_in(page, admin_user)
+    page.goto("/admin/client-ips/")
+    _screenshot(page, "client-ips")

@@ -68,8 +68,9 @@ def _port(name, value):
     return value
 
 
-def render(template, *, listen_host, listen_port, upstream_port):
-    """``template`` with every placeholder filled in.
+def render(template, *, listen_host, listen_port, upstream_port, request_log):
+    """``template`` with every placeholder filled in. ``request_log`` is the
+    file Envoy logs every request to, for ``client_ips``.
 
     Raises ``ValueError`` if ``listen_host`` isn't an IP address, either port
     isn't from 1 to 65535, the two ports are the same, or the template has a
@@ -93,6 +94,7 @@ def render(template, *, listen_host, listen_port, upstream_port):
         "JWKS_FILE": str(settings.LIFETRACKER_JWT_JWKS_FILE),
         "JWT_RULES": jwt_rules(),
         "LOGIN_REDIRECT": login_redirect(),
+        "REQUEST_LOG": str(request_log),
     }
 
     def replace(match):

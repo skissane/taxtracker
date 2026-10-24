@@ -24,6 +24,7 @@
   {% if user.is_active and user.is_superuser %}
     <a href="{% url 'admin:idle_watchdog' %}">Idle Watchdog</a> /
     <a href="{% url 'admin:uptime_report' %}">Uptime</a> /
+    <a href="{% url 'admin:client_ips' %}">Client IPs</a> /
     {% if fly_machine_url %}
       <a href="{{ fly_machine_url }}"
          target="_blank"

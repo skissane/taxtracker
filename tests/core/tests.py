@@ -59,7 +59,7 @@ from lifetracker.admin_site import (
     _build_admin_site_header,
 )
 from lifetracker.asgi import application as asgi_application
-from lifetracker.core import idle_watchdog, jwt_auth, uptime_log
+from lifetracker.core import client_ips, idle_watchdog, jwt_auth, uptime_log
 from lifetracker.core.admin import (
     DBStoredFileAdmin,
     MimeTypeFormSet,
@@ -3412,10 +3412,14 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
 
     def test_gunicorn_when_ready_spawns_for_master(self):
         server = mock.Mock(pid=1234)
-        with mock.patch.object(idle_watchdog, "spawn") as spawn:
+        with (
+            mock.patch.object(idle_watchdog, "spawn") as spawn,
+            mock.patch.object(client_ips, "spawn") as spawn_collector,
+        ):
             gunicorn_conf.when_ready(server)
 
         spawn.assert_called_once_with(1234)
+        spawn_collector.assert_called_once_with(1234)
 
     def test_main_usage(self):
         with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:

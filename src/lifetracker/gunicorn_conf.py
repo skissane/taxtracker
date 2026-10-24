@@ -5,7 +5,7 @@ command line."""
 import os
 import sys
 
-from lifetracker.core import idle_watchdog
+from lifetracker.core import client_ips, idle_watchdog
 
 # Gunicorn's default access log format, with the client's IP first. The
 # default's %(h)s is the connection's peer, which on Fly is always Fly Proxy;
@@ -25,6 +25,7 @@ def when_ready(server):
     # Runs once, in the master, after it starts listening; workers never run
     # it, so they never start a watchdog of their own.
     idle_watchdog.spawn(server.pid)
+    client_ips.spawn(server.pid)
 
 
 def post_request(worker, req, environ, resp):

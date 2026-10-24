@@ -1,6 +1,7 @@
 import datetime
 import logging
 import mimetypes
+import sqlite3
 import time
 from urllib.parse import quote
 
@@ -12,9 +13,11 @@ from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils import timezone
+from django.utils.html import format_html_join
+from django.utils.safestring import mark_safe
 from django.utils.timesince import timesince
 
-from lifetracker.core import idle_watchdog, uptime_log
+from lifetracker.core import client_ips, idle_watchdog, uptime_log
 from lifetracker.core.backup import (
     CLOUD_BACKUP_ERRORS,
     CloudBackupStatusUpdateError,
@@ -668,3 +671,88 @@ def uptime_day_view(request, date):
     }
     context["title"] = f"Uptime on {context['date'].isoformat()}"
     return render(request, "admin/core/uptime_day.html", context)
+
+
+# How many IPs the client IPs page lists at most.
+_CLIENT_IPS_LIMIT = 500
+
+
+def _utc_iso_from_timestamp(timestamp):
+    """A POSIX time as e.g. "2026-10-20T09:05:03Z", or None for None."""
+    if timestamp is None:
+        return None
+    moment = datetime.datetime.fromtimestamp(timestamp, datetime.UTC)
+    return moment.replace(tzinfo=None, microsecond=0).isoformat() + "Z"
+
+
+def _client_ip_row(row):
+    row = dict(row)
+    if "ip" in row:
+        # An IPv6 address can be 39 characters: let it wrap after a colon
+        # rather than widen the table.
+        row["ip_html"] = format_html_join(
+            mark_safe(":<wbr>"), "{}", ((part,) for part in row["ip"].split(":"))
+        )
+    for name in ("first_seen", "last_seen", "first_logged_in", "last_logged_in"):
+        if name in row:
+            row[name] = _utc_iso_from_timestamp(row[name])
+    return row
+
+
+def client_ips_page_context(logged_in_only=False):
+    """The client IPs page's context, from the collector's database (see
+    ``client_ips``)."""
+    config = client_ips.config_from_env()
+    context = {
+        "config": config,
+        "logged_in_only": logged_in_only,
+        "limit": _CLIENT_IPS_LIMIT,
+        "error": None,
+        "ips": None,
+        "networks": None,
+        "geoip_files": [],
+    }
+    if config.db_path is None:
+        return context
+    if config.geoip_dir is not None and config.geoip_dir.is_dir():
+        context["geoip_files"] = [
+            path.name
+            for name in client_ips.GEOIP_DATABASES
+            for path in client_ips.geoip_files(config.geoip_dir, name)[:1]
+        ]
+    if not config.db_path.exists():
+        return context
+    try:
+        connection = client_ips.connect_read_only(config.db_path)
+        try:
+            context["ips"] = [
+                _client_ip_row(row)
+                for row in client_ips.recent_ips(
+                    connection, logged_in_only=logged_in_only, limit=_CLIENT_IPS_LIMIT
+                )
+            ]
+            context["total"] = client_ips.ip_count(
+                connection, logged_in_only=logged_in_only
+            )
+            context["networks"] = [
+                _client_ip_row(row) for row in client_ips.logged_in_networks(connection)
+            ]
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        context["error"] = f"Couldn't read {config.db_path}: {exc}"
+    return context
+
+
+def client_ips_view(request):
+    """The superuser-only client IPs page, served and linked like the idle
+    watchdog page (see ``idle_watchdog_view``)."""
+    if not request.user.is_superuser:
+        raise PermissionDenied
+
+    context = {
+        **admin.site.each_context(request),
+        **client_ips_page_context(request.GET.get("logged_in") == "1"),
+        "title": "Client IPs",
+    }
+    return render(request, "admin/core/client_ips.html", context)
