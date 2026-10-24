@@ -23,6 +23,7 @@ import tempfile
 
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 
 from lifetracker.core.backup import (
     CLOUD_BACKUP_ERRORS,
@@ -84,24 +85,27 @@ class Command(BaseCommand):
                 ) from exc
             self.stdout.write(f"Backed up the current database as {current_key}.")
 
+            # Nothing else should record a backup in the meantime, as the
+            # command is to be run while nobody's using the app.
             status = CloudBackupStatus.objects.filter(pk=CLOUD_BACKUP_STATUS_PK).first()
             try:
                 restore_database(path)
             except CLOUD_BACKUP_ERRORS as exc:
                 raise CommandError(
-                    f"Restoring {object_key} failed, so the database is unchanged: "
-                    f"{exc}"
+                    f"Restoring {object_key} failed, so the database should be "
+                    f"unchanged: {exc}"
                 ) from exc
-        self.stdout.write(f"Restored {object_key}.")
-
-        CloudBackupStatus.objects.filter(pk=CLOUD_BACKUP_STATUS_PK).delete()
-        if status is not None:
-            status.save(force_insert=True)
-        call_command("migrate", interactive=False, stdout=self.stdout)
+        # Printed before anything else can fail.
         self.stdout.write(
-            f"Done. To undo, restore {current_key}, which holds the database as "
-            "it was before."
+            f"Restored {object_key}. To undo, restore {current_key}, which holds "
+            "the database as it was before."
         )
+
+        with transaction.atomic():
+            CloudBackupStatus.objects.filter(pk=CLOUD_BACKUP_STATUS_PK).delete()
+            if status is not None:
+                status.save(force_insert=True)
+        call_command("migrate", interactive=False, stdout=self.stdout)
 
     def _confirm(self, object_key):
         self.stdout.write(

@@ -2997,8 +2997,10 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
             "migrate", interactive=False, stdout=mock.ANY
         )
         self.assertIn(f"Backed up the current database as {current_key}.", output)
-        self.assertIn(f"Restored {self.KEY}.", output)
-        self.assertIn(f"To undo, restore {current_key}", output)
+        self.assertIn(
+            f"Restored {self.KEY}. To undo, restore {current_key}, which holds",
+            output,
+        )
 
     def test_confirmed(self):
         with mock.patch("builtins.input", return_value="yes") as mock_input:
@@ -3080,7 +3082,7 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
         ):
             with self.assertRaisesMessage(
                 CommandError,
-                f"Restoring {self.KEY} failed, so the database is unchanged: "
+                f"Restoring {self.KEY} failed, so the database should be unchanged: "
                 "page sizes differ",
             ):
                 self.call("--no-input")
