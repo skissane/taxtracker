@@ -699,6 +699,35 @@ def _client_ip_row(row):
     return row
 
 
+def _geoip_status_rows(geoip_dir):
+    """The client IPs page's table of DB-IP downloads, from ``update_geoip``'s
+    status file (None if there's none), and an error message or None."""
+    path = geoip_dir / client_ips.GEOIP_STATUS_NAME
+    try:
+        statuses = client_ips.read_geoip_status(geoip_dir)
+    except (OSError, ValueError) as exc:
+        return None, f"Couldn't read {path}: {exc}"
+    if statuses is None:
+        return None, None
+    rows = []
+    try:
+        for name in client_ips.GEOIP_DATABASES:
+            if name in statuses:
+                status = statuses[name]
+                rows.append(
+                    {
+                        **status,
+                        "name": name,
+                        "failed": status.get("outcome") == client_ips.FAILED,
+                        "attempted": _utc_iso_from_timestamp(status.get("attempted")),
+                        "succeeded": _utc_iso_from_timestamp(status.get("succeeded")),
+                    }
+                )
+    except (TypeError, ValueError, OverflowError, OSError) as exc:
+        return None, f"Unexpected contents in {path}: {exc}"
+    return rows, None
+
+
 def client_ips_page_context(logged_in_only=False):
     """The client IPs page's context, from the collector's database (see
     ``client_ips``)."""
@@ -711,6 +740,8 @@ def client_ips_page_context(logged_in_only=False):
         "ips": None,
         "networks": None,
         "geoip_files": [],
+        "geoip_status": None,
+        "geoip_status_error": None,
     }
     if config.db_path is None:
         return context
@@ -720,6 +751,10 @@ def client_ips_page_context(logged_in_only=False):
             for name in client_ips.GEOIP_DATABASES
             for path in client_ips.geoip_files(config.geoip_dir, name)[:1]
         ]
+    if config.geoip_dir is not None:
+        context["geoip_status"], context["geoip_status_error"] = _geoip_status_rows(
+            config.geoip_dir
+        )
     if not config.db_path.exists():
         return context
     try:

@@ -23,6 +23,10 @@
     min-width: 11em;
     overflow-wrap: anywhere;
   }
+
+  .lt-client-ips pre {
+    white-space: pre-wrap;
+  }
   </style>
 {% endblock extrastyle %}
 {% block extrahead %}
@@ -55,6 +59,61 @@
         No DB-IP databases in <code>{{ config.geoip_dir }}</code> yet, so no locations: run <code>manage.py update_geoip</code>.
       {% endif %}
     </p>
+    <h2>DB-IP downloads</h2>
+    {% if geoip_status_error %}<p class="errornote">{{ geoip_status_error }}</p>{% endif %}
+    {% if geoip_status %}
+      <table class="lt-client-ips">
+        <thead>
+          <tr>
+            <th scope="col">Database</th>
+            <th scope="col">Last attempt</th>
+            <th scope="col">Outcome</th>
+            <th scope="col">Last success</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for status in geoip_status %}
+            <tr>
+              <td class="lt-nowrap"><code>{{ status.name }}</code></td>
+              <td class="lt-nowrap">
+                {% if status.attempted %}
+                  <time data-lt-local datetime="{{ status.attempted }}">{{ status.attempted }}</time>
+                {% endif %}
+              </td>
+              <td class="lt-detail">
+                {% if status.failed %}
+                  <strong>Failed</strong>: {{ status.error }}
+                {% else %}
+                  {{ status.outcome|capfirst }}
+                {% endif %}
+                {% if status.fell_back %}(this month's isn't out yet, so last month's){% endif %}
+                {% if status.url %}
+                  <br>
+                  <code>{{ status.url }}</code>
+                {% endif %}
+                {% if status.traceback %}
+                  <details>
+                    <summary>Traceback</summary>
+                    <pre>{{ status.traceback }}</pre>
+                  </details>
+                {% endif %}
+              </td>
+              <td class="lt-nowrap">
+                {% if status.succeeded %}
+                  <time data-lt-local datetime="{{ status.succeeded }}">{{ status.succeeded }}</time>
+                {% else %}
+                  Never
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% elif not geoip_status_error %}
+      <p>
+        No download tried yet{% if not config.download %} (<code>LIFETRACKER_GEOIP_DOWNLOAD=0</code>){% endif %}.
+      </p>
+    {% endif %}
     {% if ips is None %}
       {% if not error %}<p>Nothing recorded yet.</p>{% endif %}
     {% else %}
