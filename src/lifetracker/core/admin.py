@@ -179,6 +179,22 @@ class FileExtensionAdmin(admin.ModelAdmin):
 # ---------------------------------------------------------------------------
 
 
+# Content types serve_file_view shows in the browser rather than downloading:
+# ones a browser renders without running any of the file's script on this
+# origin. Not SVG, HTML, XML or anything else a browser can treat as a page.
+INLINE_CONTENT_TYPES = frozenset(
+    {
+        "application/pdf",
+        "image/avif",
+        "image/gif",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "text/plain",
+    }
+)
+
+
 @admin.register(DBStoredFile)
 class DBStoredFileAdmin(admin.ModelAdmin):
     """Registered only to host the serve-file URL; hidden from the admin index."""
@@ -211,7 +227,21 @@ class DBStoredFileAdmin(admin.ModelAdmin):
         content_type, _ = mimetypes.guess_type(obj.filename)
         if not content_type:
             content_type = "application/octet-stream"
+        # Attachments can come from anywhere, and one rendered as a page on
+        # this origin (HTML, SVG, XML...) could run script with the viewer's
+        # admin session, so only types that can't are shown inline; anything
+        # else is downloaded.
+        disposition = "inline" if content_type in INLINE_CONTENT_TYPES else "attachment"
         response = HttpResponse(content, content_type=content_type)
+        # Never let the browser second-guess the type into something riskier.
+        response["X-Content-Type-Options"] = "nosniff"
+        # And should anything still render as a document, give it a unique
+        # origin with no script. Not for PDFs: browsers' built-in PDF viewers
+        # refuse to run in a sandboxed document (Chrome shows "This page has
+        # been blocked"), and a PDF's own JavaScript, if the viewer runs it at
+        # all, can't reach the page's origin.
+        if content_type != "application/pdf":
+            response["Content-Security-Policy"] = "sandbox; default-src 'none'"
         filename_encoded = quote(obj.filename, safe="")
         filename_ascii = (
             obj.filename.encode("ascii", errors="ignore")
@@ -220,7 +250,7 @@ class DBStoredFileAdmin(admin.ModelAdmin):
             .replace('"', '\\"')
         )
         cd = (
-            f'inline; filename="{filename_ascii}";'
+            f'{disposition}; filename="{filename_ascii}";'
             f" filename*=UTF-8''{filename_encoded}"
         )
         response["Content-Disposition"] = cd
