@@ -31,6 +31,7 @@ packages = ["src/lifetracker"]
 dev = [
     "coverage>=7.16.2",
     "djlint>=1.46.4",
+    "jactionlint>=2.3.0",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "pytest-django>=4.14.0",
@@ -40,9 +41,6 @@ dev = [
 ]
 screenshots = [
     "playwright>=1.64.0",
-]
-workflow-lint = [
-    "jactionlint>=2.3.0",
 ]
 
 [tool.ruff]

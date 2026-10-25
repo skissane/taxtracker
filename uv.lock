@@ -435,6 +435,7 @@ dependencies = [
 dev = [
     { name = "coverage" },
     { name = "djlint" },
+    { name = "jactionlint" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-django" },
@@ -444,9 +445,6 @@ dev = [
 ]
 screenshots = [
     { name = "playwright" },
-]
-workflow-lint = [
-    { name = "jactionlint" },
 ]
 
 [package.metadata]
@@ -467,6 +465,7 @@ requires-dist = [
 dev = [
     { name = "coverage", specifier = ">=7.16.2" },
     { name = "djlint", specifier = ">=1.46.4" },
+    { name = "jactionlint", specifier = ">=2.3.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "pytest-django", specifier = ">=4.14.0" },
@@ -475,7 +474,6 @@ dev = [
     { name = "ruff", specifier = ">=0.17.0" },
 ]
 screenshots = [{ name = "playwright", specifier = ">=1.64.0" }]
-workflow-lint = [{ name = "jactionlint", specifier = ">=2.3.0" }]
 
 [[package]]
 name = "loguru"
