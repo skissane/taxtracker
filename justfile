@@ -1,3 +1,6 @@
+set minimum-version := '1.58.0'
+_ := shell('./scripts/git-config-setup.sh')
+
 # List available recipes
 default:
     @just --list
@@ -194,8 +197,13 @@ docker-shell *args:
 fly-setup *args:
     ./fly-setup.sh "$@"
 
-# Run every whitespace, screenshots/, ruff and djlint check (no fixes, no tests)
-check: whitespace-check screenshots-dir-check lint fmt-check lint-templates fmt-check-templates
+# Ensures that 'set lazy' is disabled in the justfile
+justfile-check:
+    test "$({{quote(just_executable())}} --json --justfile {{quote(justfile())}} | jq .settings.lazy)" = "false" || \
+        (echo "ERROR: 'set lazy' is incompatible with this justfile" >&2; exit 1)
+
+# Run every whitespace, screenshots/, ruff, djlint and justfile check (no fixes, no tests)
+check: whitespace-check screenshots-dir-check lint fmt-check lint-templates fmt-check-templates justfile-check
 
 # Autofix lint issues and reformat code/templates
 fix: lint-fix fmt fmt-templates

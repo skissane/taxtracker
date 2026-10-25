@@ -60,6 +60,9 @@ jobs:
       - name: Check formatting with djlint
         run: just fmt-check-templates
 
+      - name: Check the justfile doesn't use set lazy
+        run: just justfile-check
+
       # tests/core/test_envoy.py runs the real Envoy with Docker, and fails
       # rather than being skipped without Docker when LIFETRACKER_REQUIRE_ENVOY
       # is set.
