@@ -482,6 +482,8 @@ Propose a new dimension or value to the owner rather than inventing one.
 `pyproject.toml`'s `[tool.uv] environments` restricts resolution to `darwin`, and to `linux` on `x86_64`/`aarch64` only, which keeps wheels for other Linux architectures (ppc64le, s390x, armv7l, riscv64) out of `uv.lock`.
 `just lock-os-arch-check` (part of `just ci` and the `test` job; `scripts/validate_uv_lock_os_arch.py`, stdlib-only) fails if `uv.lock` has a wheel whose platform tag splits into an (OS, arch) pair that its `_classify_platform` doesn't classify as `SUPPORTED` (the platforms `environments` is meant to allow) or `TOLERATED` (iOS and Emscripten, which aren't supported but whose wheels uv keeps despite `environments`).
 Don't flag or "fix" Windows portability issues (e.g. relying on `HOME`, POSIX shell syntax in the `justfile` or scripts, `/` path separators, file permission bits), and don't add Windows-specific workarounds.
+musl Linux (e.g. Alpine) isn't supported either, though `uv.lock` can't exclude it (environment markers can't tell glibc from musl): some dev tools, such as jactionlint, ship only glibc (manylinux) and macOS wheels, so `uv sync` fails there.
+Don't move such a tool to its own dependency group, or otherwise work around it, for musl's sake.
 
 **`except A, B, C:` is valid Python 3 syntax.**
 Do not flag comma-separated exception types (without parentheses) as "Python 2-style syntax" or a SyntaxError.
