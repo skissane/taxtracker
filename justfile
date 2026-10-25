@@ -42,6 +42,10 @@ whitespace-check:
 screenshots-dir-check:
     uv run --no-project python scripts/check_screenshots_dir.py
 
+# Check .git-blame-ignore-revs lists real commits that are ancestors of target
+blame-ignore-revs-check target="HEAD":
+    uv run --no-project python scripts/check_blame_ignore_revs.py {{quote(target)}}
+
 # Lint Python code with ruff
 lint:
     uv run --group dev ruff check .
@@ -207,8 +211,8 @@ justfile-check:
     test "$({{quote(just_executable())}} --json --justfile {{quote(justfile())}} | jq .settings.lazy)" = "false" || \
         (echo "ERROR: 'set lazy' is incompatible with this justfile" >&2; exit 1)
 
-# Run every whitespace, screenshots/, ruff, djlint and justfile check (no fixes, no tests)
-check: whitespace-check screenshots-dir-check lint fmt-check lint-templates fmt-check-templates justfile-check
+# Run every whitespace, screenshots/, blame-ignore-revs, ruff, djlint and justfile check (no fixes, no tests)
+check: whitespace-check screenshots-dir-check blame-ignore-revs-check lint fmt-check lint-templates fmt-check-templates justfile-check
 
 # Autofix lint issues and reformat code/templates
 fix: lint-fix fmt fmt-templates

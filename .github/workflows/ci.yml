@@ -16,6 +16,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -47,6 +49,13 @@ jobs:
 
       - name: Check nothing is committed under screenshots/
         run: just screenshots-dir-check
+
+      # On a PR, check against the base branch, which is what the squash merge lands on:
+      # a commit from the PR itself would pass against HEAD but not once merged.
+      - name: Check .git-blame-ignore-revs entries
+        env:
+          TARGET: ${{ github.event.pull_request.base.sha || 'HEAD' }}
+        run: just blame-ignore-revs-check "$TARGET"
 
       - name: Lint with ruff
         run: just lint
