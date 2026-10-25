@@ -438,7 +438,7 @@ Every boot runs `migrate` against the only copy of the data, so run a cloud back
 
 ## Linting config
 
-Ruff: rules E, F, W, I, UP; line length 88; migrations excluded. djlint: profile=django, indent=2.
+Ruff: rules E, F, W, I, UP, TID252, PLC0415, RUF100; line length 88; migrations excluded. djlint: profile=django, indent=2.
 
 ## Test warnings policy
 
