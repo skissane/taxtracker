@@ -24,6 +24,7 @@ For a Markdown hard line break, end the line with a backslash rather than two tr
 
 **Git config and `git blame`:** the `justfile`'s top-level `_ := shell('./scripts/git-config-setup.sh')` runs that script whenever `just` runs a recipe (plain `just` included, as it runs `default`; not `just --list`, which evaluates no assignments), so it sets the repo's local `blame.ignoreRevsFile` to `.git-blame-ignore-revs` if it isn't already, printing an `INFO:` line to stderr when it changes it.
 Outside a Git checkout (e.g. a `git archive` copy) the script does nothing, rather than failing every recipe.
+With Git 2.53 or later it sets `:(optional).git-blame-ignore-revs`, so `git blame` on a checkout from before the file existed doesn't fail with `could not open object name list`; older Git keeps the plain path, as before 2.52 the prefix would be taken as part of the file name, and 2.52.0's blame reads an uninitialised pointer when an optional file is missing.
 `.git-blame-ignore-revs` lists commits `git blame` should skip, such as bulk reformatting; add a commit's hash from `master` once it has merged, as a squash merge gives it a new one.
 `set minimum-version` makes older `just` versions refuse the `justfile`.
 The assignment works only because `just` evaluates every top-level assignment eagerly; under `set lazy` the unused `_` would never be evaluated and the script would never run.

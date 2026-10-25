@@ -18,4 +18,14 @@ ensure_setting() {
     fi
 }
 
-ensure_setting "blame.ignoreRevsFile" ".git-blame-ignore-revs"
+# Git 2.52 added the ":(optional)" prefix, so `git blame` doesn't fail on a
+# checkout from before .git-blame-ignore-revs existed, but 2.52.0's blame reads
+# an uninitialised pointer when the file is missing (fixed in 2.53.0). Older
+# Git would take the prefix as part of the file name.
+ignore_revs_file=".git-blame-ignore-revs"
+if [[ "$(git version)" =~ ^git\ version\ ([0-9]+)\.([0-9]+) ]] &&
+    (( BASH_REMATCH[1] > 2 || (BASH_REMATCH[1] == 2 && BASH_REMATCH[2] >= 53) )); then
+    ignore_revs_file=":(optional)$ignore_revs_file"
+fi
+
+ensure_setting "blame.ignoreRevsFile" "$ignore_revs_file"
