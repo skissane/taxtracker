@@ -1,3 +1,11 @@
+"""Check that .git-blame-ignore-revs lists only real commits from this branch's history.
+
+Git silently ignores an entry naming no commit, so a typo or a pre-squash hash
+would leave the reformatting commit it was meant to hide in `git blame`. This
+fails unless every non-comment line is a full lowercase hash of a commit that's
+an ancestor of HEAD (so CI needs the full history).
+"""
+
 import re
 import subprocess
 from pathlib import Path

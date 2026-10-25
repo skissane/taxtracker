@@ -10,6 +10,7 @@ from unittest import mock
 
 from django.test import SimpleTestCase
 
+from scripts import check_blame_ignore_revs
 from scripts.check_blame_ignore_revs import main as blame_ignore_revs_main
 from scripts.check_deploy import check_once
 from scripts.check_deploy import main as check_deploy_main
@@ -769,6 +770,27 @@ class CheckBlameIgnoreRevsTests(SimpleTestCase):
         code, stdout = self._run(["{side}"])
         self.assertEqual(code, 1)
         self.assertIn("is not an ancestor of HEAD", stdout)
+
+    def test_ancestor_check_error_fails(self):
+        real_git = check_blame_ignore_revs._git
+
+        def fake_git(*args):
+            if args[0] == "merge-base":
+                return subprocess.CompletedProcess(["git", *args], 128, "", "fatal: bad object\n")
+            return real_git(*args)
+
+        with mock.patch.object(check_blame_ignore_revs, "_git", fake_git):
+            code, stdout = self._run(["{ancestor}"])
+        self.assertEqual(code, 1)
+        self.assertIn("couldn't check whether", stdout)
+        self.assertIn("(exit 128)", stdout)
+
+    def test_missing_file_fails(self):
+        stdout = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp), contextlib.redirect_stdout(stdout):
+            code = blame_ignore_revs_main()
+        self.assertEqual(code, 1)
+        self.assertIn(".git-blame-ignore-revs is missing", stdout.getvalue())
 
 
 class DependabotRelockTests(SimpleTestCase):
