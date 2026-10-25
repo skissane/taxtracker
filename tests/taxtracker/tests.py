@@ -2308,13 +2308,12 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
         )
         self.assertTrue(ReceivedDocument.objects.filter(title="2024-new.pdf").exists())
 
-    def test_post_zip_allows_existing_filename_in_different_financial_year(self):
-        fy2025 = FinancialYear.objects.create(year=2025)
-        existing_doc = ReceivedDocument.objects.create(
-            year=fy2025, title="2025-existing.pdf"
-        )
-        existing = Attachment(received_document=existing_doc)
-        existing.file.save("2025-existing.pdf", ContentFile(PDF_MAGIC), save=False)
+    def test_post_zip_allows_existing_filename_on_item(self):
+        # The file's year prefix picks its FY, so only another received
+        # document in that FY can hold the same name; an item's can't block it.
+        item = Item.objects.create(year=self.fy2024, title="Item", order=1)
+        existing = Attachment(item=item)
+        existing.file.save("2024-existing.pdf", ContentFile(PDF_MAGIC), save=False)
         existing.save()
 
         zip_bytes = _make_zip_archive([("2024-existing.pdf", PDF_MAGIC)])
@@ -2324,7 +2323,9 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
             self._import_url(), {"archive": upload}, follow=True
         )
         self.assertContains(response, "Imported 1 received document(s)")
-        self.assertTrue(ReceivedDocument.objects.filter(title="2024-existing.pdf").exists())
+        self.assertTrue(
+            ReceivedDocument.objects.filter(title="2024-existing.pdf").exists()
+        )
 
     def test_post_missing_file_shows_form_error(self):
         """Posting without a file should re-render the form with an error."""
