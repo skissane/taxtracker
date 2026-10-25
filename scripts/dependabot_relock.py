@@ -33,9 +33,7 @@ def _locked_versions(lock_text: str) -> dict[str, tuple[str, ...]]:
     return {name: tuple(sorted(v)) for name, v in versions.items()}
 
 
-def _upgrade_args(
-    base: dict[str, tuple[str, ...]], target: dict[str, tuple[str, ...]]
-) -> list[str]:
+def _upgrade_args(base: dict[str, tuple[str, ...]], target: dict[str, tuple[str, ...]]) -> list[str]:
     # Packages Dependabot dropped need no argument: re-locking drops them if
     # nothing needs them any more, and the check after it catches it if not.
     args = []
@@ -53,9 +51,7 @@ def _upgrade_args(
 
 
 def _git(*args: str) -> str:
-    return subprocess.run(
-        ["git", *args], check=True, capture_output=True, text=True
-    ).stdout
+    return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
 
 
 def main(base_ref: str) -> int:
@@ -77,8 +73,7 @@ def main(base_ref: str) -> int:
         for name in sorted(relocked.keys() | target.keys()):
             if relocked.get(name) != target.get(name):
                 print(
-                    f"{name}: Dependabot locked {target.get(name)}, "
-                    f"re-locking gave {relocked.get(name)}",
+                    f"{name}: Dependabot locked {target.get(name)}, re-locking gave {relocked.get(name)}",
                     file=sys.stderr,
                 )
         LOCK_PATH.write_text(branch_lock, encoding="utf-8")

@@ -46,17 +46,13 @@ class TaskType(models.Model):
                 ),
                 name="tasktype_pk1_iff_name_generic",
                 violation_error_message=(
-                    "Task type id=1 must be named 'Generic', and no other "
-                    "task type may be named 'Generic'."
+                    "Task type id=1 must be named 'Generic', and no other task type may be named 'Generic'."
                 ),
             ),
             models.CheckConstraint(
-                condition=~models.Q(pk=_GENERIC_TASK_TYPE_PK)
-                | models.Q(content_type__isnull=True),
+                condition=~models.Q(pk=_GENERIC_TASK_TYPE_PK) | models.Q(content_type__isnull=True),
                 name="tasktype_pk1_has_no_content_type",
-                violation_error_message=(
-                    "The built-in 'Generic' task type cannot be linked to a model."
-                ),
+                violation_error_message=("The built-in 'Generic' task type cannot be linked to a model."),
             ),
         ]
 
@@ -68,21 +64,10 @@ class TaskType(models.Model):
         is_generic_name = self.name == "Generic"
         if is_generic_pk != is_generic_name:
             raise ValidationError(
-                {
-                    "name": (
-                        "Task type id=1 must be named 'Generic', and no other "
-                        "task type may be named 'Generic'."
-                    )
-                }
+                {"name": ("Task type id=1 must be named 'Generic', and no other task type may be named 'Generic'.")}
             )
         if is_generic_pk and self.content_type_id is not None:
-            raise ValidationError(
-                {
-                    "content_type": (
-                        "The built-in 'Generic' task type cannot be linked to a model."
-                    )
-                }
-            )
+            raise ValidationError({"content_type": ("The built-in 'Generic' task type cannot be linked to a model.")})
 
     def delete(self, *args, **kwargs):
         if self.pk == self.GENERIC_PK:
@@ -138,12 +123,7 @@ class Task(TreeNodeMixin, models.Model):
 
         if (self.content_type_id is None) != (self.object_id is None):
             raise ValidationError(
-                {
-                    "content_type": (
-                        "Content type and object ID must either both be set or both "
-                        "be blank."
-                    )
-                }
+                {"content_type": ("Content type and object ID must either both be set or both be blank.")}
             )
 
         allowed_content_type_id = None
@@ -152,24 +132,9 @@ class Task(TreeNodeMixin, models.Model):
 
         if allowed_content_type_id is None:
             if self.content_type_id is not None or self.object_id is not None:
-                raise ValidationError(
-                    {
-                        "content_type": (
-                            "This task type does not allow linking to another object."
-                        )
-                    }
-                )
-        elif (
-            self.content_type_id is not None
-            and self.content_type_id != allowed_content_type_id
-        ):
-            raise ValidationError(
-                {
-                    "content_type": (
-                        "Content type must match the task type's allowed linked model."
-                    )
-                }
-            )
+                raise ValidationError({"content_type": ("This task type does not allow linking to another object.")})
+        elif self.content_type_id is not None and self.content_type_id != allowed_content_type_id:
+            raise ValidationError({"content_type": ("Content type must match the task type's allowed linked model.")})
 
 
 class TaskAttachment(AttachmentAutofillMixin, models.Model):

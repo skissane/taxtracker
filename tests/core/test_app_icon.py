@@ -23,11 +23,7 @@ def make_png(width, height=None, color_type=2, trns=False, pixel=b"\x00"):
     height = width if height is None else height
     channels = {2: 3, 6: 4}[color_type]
     row = b"\x00" + pixel * (channels * width)
-    header = (
-        width.to_bytes(4, "big")
-        + height.to_bytes(4, "big")
-        + bytes([8, color_type, 0, 0, 0])
-    )
+    header = width.to_bytes(4, "big") + height.to_bytes(4, "big") + bytes([8, color_type, 0, 0, 0])
     return (
         b"\x89PNG\r\n\x1a\n"
         + _chunk(b"IHDR", header)
@@ -95,9 +91,7 @@ class AppIconTests(TestCase):
         app_icon.save_icon(second)
         self.assertEqual(AppIcon.objects.get().width, 1024)
         # The first one's file went with its row.
-        self.assertEqual(
-            list(DBStoredFile.objects.values_list("content", flat=True)), [second]
-        )
+        self.assertEqual(list(DBStoredFile.objects.values_list("content", flat=True)), [second])
 
         app_icon.reset_icon()
         self.assertFalse(AppIcon.objects.exists())
@@ -113,9 +107,7 @@ class AppIconTests(TestCase):
 
     def test_view_redirects_to_default(self):
         response = self.client.get("/app-icon.png")
-        self.assertRedirects(
-            response, "/static/core/app_icon.png", fetch_redirect_response=False
-        )
+        self.assertRedirects(response, "/static/core/app_icon.png", fetch_redirect_response=False)
         self.assertIn("no-cache", response["Cache-Control"])
 
     def test_view_serves_upload(self):
@@ -151,12 +143,8 @@ class AppIconTests(TestCase):
             [{"src": url, "sizes": "1024x1024", "type": "image/png"}],
         )
         response = self.client.get(reverse("admin:login"))
-        self.assertContains(
-            response, f'<link rel="apple-touch-icon" href="{url}">', html=True
-        )
-        self.assertContains(
-            response, f'<link rel="icon" type="image/png" href="{url}">', html=True
-        )
+        self.assertContains(response, f'<link rel="apple-touch-icon" href="{url}">', html=True)
+        self.assertContains(response, f'<link rel="icon" type="image/png" href="{url}">', html=True)
 
 
 class AppIconPageTests(TestCase):

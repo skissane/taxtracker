@@ -11,9 +11,7 @@ def filter_zip(input_path, output_path, reject_substring):
     try:
         # Open the input zip for reading and the output zip for writing
         with zipfile.ZipFile(input_path, "r") as zin:
-            with zipfile.ZipFile(
-                output_path, "w", compression=zipfile.ZIP_DEFLATED
-            ) as zout:
+            with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
                 skipped_count = 0
                 kept_count = 0
 

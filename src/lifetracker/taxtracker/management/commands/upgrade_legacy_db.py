@@ -89,10 +89,7 @@ class Command(BaseCommand):
             )
 
         with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT DISTINCT app FROM django_migrations "
-                "WHERE app IN ('tracker', 'core', 'taxtracker')"
-            )
+            cursor.execute("SELECT DISTINCT app FROM django_migrations WHERE app IN ('tracker', 'core', 'taxtracker')")
             apps_present = {row[0] for row in cursor.fetchall()}
         if apps_present - {"tracker"}:
             raise CommandError(
@@ -115,8 +112,7 @@ class Command(BaseCommand):
 
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT DISTINCT app_label FROM django_content_type "
-                "WHERE app_label IN ('core', 'taxtracker')"
+                "SELECT DISTINCT app_label FROM django_content_type WHERE app_label IN ('core', 'taxtracker')"
             )
             if cursor.fetchall():
                 raise CommandError(
@@ -136,10 +132,7 @@ class Command(BaseCommand):
                 # Defensive: SQLite >= 3.25 already updates sqlite_sequence rows
                 # as part of ALTER TABLE ... RENAME TO, but guard against older
                 # versions/edge cases with a no-op-safe UPDATE.
-                cursor.execute(
-                    "SELECT name FROM sqlite_master "
-                    "WHERE type='table' AND name='sqlite_sequence'"
-                )
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sqlite_sequence'")
                 if cursor.fetchone():
                     for old_name, new_name in TABLE_RENAMES.items():
                         cursor.execute(
@@ -161,10 +154,7 @@ class Command(BaseCommand):
                     TAXTRACKER_MODELS,
                 )
 
-                cursor.execute(
-                    "SELECT COUNT(*) FROM django_content_type "
-                    "WHERE app_label = 'tracker'"
-                )
+                cursor.execute("SELECT COUNT(*) FROM django_content_type WHERE app_label = 'tracker'")
                 remaining = cursor.fetchone()[0]
                 if remaining:
                     raise CommandError(
@@ -181,9 +171,7 @@ class Command(BaseCommand):
                 cursor.execute("PRAGMA foreign_key_check")
                 violations = cursor.fetchall()
                 if violations:
-                    raise CommandError(
-                        f"Foreign key check failed after upgrade: {violations}"
-                    )
+                    raise CommandError(f"Foreign key check failed after upgrade: {violations}")
 
         self.stdout.write(
             self.style.SUCCESS(

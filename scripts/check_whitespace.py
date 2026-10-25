@@ -51,9 +51,7 @@ def main() -> int:
     failures = []
     for path in _text_files():
         for line, message in _problems(Path(path).read_bytes()):
-            failures.append(
-                f"{path}:{line}: {message}" if line else f"{path}: {message}"
-            )
+            failures.append(f"{path}:{line}: {message}" if line else f"{path}: {message}")
     if failures:
         print("Whitespace problems in Git-tracked text files:")
         for failure in failures:

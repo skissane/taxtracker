@@ -35,9 +35,7 @@ def _parse_json_object(text: str) -> dict:
     show_default=True,
     help="The Machines API socket.",
 )
-def fly_api_command(
-    path: str, post: bool, json_text: str | None, socket_path: str
-) -> None:
+def fly_api_command(path: str, post: bool, json_text: str | None, socket_path: str) -> None:
     """Call PATH on the Fly Machines API, on a Fly Machine, without a token.
 
     {app} and {machine} in PATH become $FLY_APP_NAME and $FLY_MACHINE_ID, e.g.

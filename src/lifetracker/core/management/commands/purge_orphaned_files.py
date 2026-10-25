@@ -43,10 +43,7 @@ class Command(BaseCommand):
         with transaction.atomic():
             pks = orphaned_stored_file_pks()
             size = sum(
-                DBStoredFile.objects.filter(pk__in=batch).aggregate(
-                    size=Sum(Length("content"))
-                )["size"]
-                or 0
+                DBStoredFile.objects.filter(pk__in=batch).aggregate(size=Sum(Length("content")))["size"] or 0
                 for batch in _batches(pks)
             )
             summary = f"{len(pks)} orphaned stored file(s), {size} bytes"

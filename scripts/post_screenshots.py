@@ -28,9 +28,7 @@ def _screenshot_paths(directory: Path) -> list[Path]:
         raise ValueError(f"no screenshots (*.png) in {directory}")
     for path in paths:
         if not _NAME_RE.fullmatch(path.name):
-            raise ValueError(
-                f"screenshot name {path.name!r} doesn't match {_NAME_RE.pattern}"
-            )
+            raise ValueError(f"screenshot name {path.name!r} doesn't match {_NAME_RE.pattern}")
     return paths
 
 
@@ -48,8 +46,7 @@ def _build_body(urls: dict[str, str], commit: str | None, run_url: str | None) -
     # image syntax, which GitHub only renders after a blank line inside <details>.
     for name, url in urls.items():
         lines += [
-            f'<details><summary>{name}</summary><img src="{url}" alt="{name}">'
-            "</details>",
+            f'<details><summary>{name}</summary><img src="{url}" alt="{name}"></details>',
             "",
         ]
     return "\n".join(lines)
@@ -122,20 +119,14 @@ def _screenshot_comments(repo: str, pr: int, author: str, token: str) -> list[di
             f"{API_URL}/repos/{repo}/issues/{pr}/comments?per_page=100&page={page}",
             token,
         )
-        comments += [
-            c
-            for c in batch
-            if c["user"]["login"] == author and c["body"].startswith(MARKER)
-        ]
+        comments += [c for c in batch if c["user"]["login"] == author and c["body"].startswith(MARKER)]
         if len(batch) < 100:
             return comments
         page += 1
 
 
 def _gh_output(*args: str) -> str:
-    return subprocess.run(
-        ["gh", *args], capture_output=True, text=True, check=True
-    ).stdout.strip()
+    return subprocess.run(["gh", *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
 def main(argv: list[str]) -> int:
@@ -149,8 +140,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--dir", type=Path, default=Path("screenshots"))
     parser.add_argument(
         "--commit",
-        help="commit the screenshots are of; if it isn't (a prefix of) the PR's "
-        "head, nothing is posted",
+        help="commit the screenshots are of; if it isn't (a prefix of) the PR's head, nothing is posted",
     )
     parser.add_argument("--run-url", help="URL of the workflow run that took them")
     parser.add_argument(
@@ -172,29 +162,18 @@ def main(argv: list[str]) -> int:
         return 1
 
     try:
-        upload_token = os.environ.get("SCREENSHOTS_TOKEN") or _gh_output(
-            "auth", "token"
-        )
+        upload_token = os.environ.get("SCREENSHOTS_TOKEN") or _gh_output("auth", "token")
         comment_token = os.environ.get("GITHUB_TOKEN") or _gh_output("auth", "token")
-        repo = args.repo or _gh_output(
-            "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"
-        )
-        author = (
-            args.author or _request("GET", f"{API_URL}/user", comment_token)["login"]
-        )
+        repo = args.repo or _gh_output("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
+        author = args.author or _request("GET", f"{API_URL}/user", comment_token)["login"]
         if args.commit:
             # A run for an older commit can finish after the run for a newer
             # one (CI queues posts per PR, but not in commit order), so post
             # only screenshots of the PR's current head, rather than overwrite
             # newer ones with stale ones.
-            head = _request(
-                "GET", f"{API_URL}/repos/{repo}/pulls/{args.pr}", comment_token
-            )["head"]["sha"]
+            head = _request("GET", f"{API_URL}/repos/{repo}/pulls/{args.pr}", comment_token)["head"]["sha"]
             if not head.startswith(args.commit):
-                print(
-                    f"Not posting: screenshots are of {args.commit}, but PR "
-                    f"#{args.pr}'s head is now {head}."
-                )
+                print(f"Not posting: screenshots are of {args.commit}, but PR #{args.pr}'s head is now {head}.")
                 return 0
         repository_id = _request("GET", f"{API_URL}/repos/{repo}", comment_token)["id"]
         urls = {path.stem: _upload(path, repository_id, upload_token) for path in paths}

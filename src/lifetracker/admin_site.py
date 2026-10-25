@@ -20,9 +20,7 @@ _TEXT_COLOR = "var(--header-branding-color)"
 _TEXT_STYLE = f"color: {_TEXT_COLOR};"
 
 
-def _build_admin_site_header(
-    *, site_name, commit_id, commit_url_base, instance_name, link_commit
-):
+def _build_admin_site_header(*, site_name, commit_id, commit_url_base, instance_name, link_commit):
     if commit_id and link_commit:
         return format_html(
             '{} <code style="{}"><a href="{}" target="_blank" rel="noopener noreferrer"'
@@ -110,11 +108,7 @@ class LifetrackerAdminSite(admin.AdminSite):
     def each_context(self, request):
         context = super().each_context(request)
         authenticated = request.user.is_authenticated
-        site_name = (
-            _SITE_NAME
-            if authenticated
-            else settings.LIFETRACKER_UNAUTHENTICATED_SITE_NAME
-        )
+        site_name = _SITE_NAME if authenticated else settings.LIFETRACKER_UNAUTHENTICATED_SITE_NAME
         context["site_title"] = site_name
         context["site_header"] = _build_admin_site_header(
             site_name=site_name,

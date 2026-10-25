@@ -45,10 +45,7 @@ INITIAL_ADMIN_PASSWORD_FILE = _initial_admin_password_file()
 
 
 class Command(BaseCommand):
-    help = (
-        "Ensure a superuser account exists. "
-        "Creates or repairs the account non-interactively."
-    )
+    help = "Ensure a superuser account exists. Creates or repairs the account non-interactively."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -73,20 +70,12 @@ class Command(BaseCommand):
             initial = self._read_initial_password()
             if initial is not None:
                 initial_password, source = initial
-                User.objects.create_superuser(
-                    username=username, email=email, password=initial_password
-                )
-                self.stdout.write(
-                    f"Created superuser '{username}' using password from {source}."
-                )
+                User.objects.create_superuser(username=username, email=email, password=initial_password)
+                self.stdout.write(f"Created superuser '{username}' using password from {source}.")
             else:
                 password = secrets.token_hex(16)
-                User.objects.create_superuser(
-                    username=username, email=email, password=password
-                )
-                self.stdout.write(
-                    f"Created superuser '{username}' with password: {password}"
-                )
+                User.objects.create_superuser(username=username, email=email, password=password)
+                self.stdout.write(f"Created superuser '{username}' with password: {password}")
                 self.stdout.write("Change this password after first login.")
             return
 

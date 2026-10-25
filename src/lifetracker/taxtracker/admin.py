@@ -219,20 +219,14 @@ class ItemAdmin(admin.ModelAdmin):
     def save_formset(self, request, form, formset, change):
         instances = formset.save(commit=False)
         # Batch-fetch year_id for all parent IDs to avoid N+1 queries.
-        parent_ids = {
-            i.parent_id for i in instances if isinstance(i, Item) and i.parent_id
-        }
+        parent_ids = {i.parent_id for i in instances if isinstance(i, Item) and i.parent_id}
         year_by_parent_id = {}
         if parent_ids:
-            year_by_parent_id = dict(
-                Item.objects.filter(pk__in=parent_ids).values_list("pk", "year_id")
-            )
+            year_by_parent_id = dict(Item.objects.filter(pk__in=parent_ids).values_list("pk", "year_id"))
         for instance in instances:
             # Auto-inherit year from parent for inline-created child items.
             if isinstance(instance, Item) and instance.parent_id:
-                instance.year_id = year_by_parent_id.get(
-                    instance.parent_id, instance.parent.year_id
-                )
+                instance.year_id = year_by_parent_id.get(instance.parent_id, instance.parent.year_id)
             instance.save()
         formset.save_m2m()
         for obj in formset.deleted_objects:
@@ -251,18 +245,12 @@ class ItemAdmin(admin.ModelAdmin):
         prev_fy = FinancialYear.objects.filter(year=item.year.year - 1).first()
         next_fy = FinancialYear.objects.filter(year=item.year.year + 1).first()
 
-        response.context_data["import_archive_url"] = reverse(
-            "admin:taxtracker_item_import_archive", args=[object_id]
-        )
+        response.context_data["import_archive_url"] = reverse("admin:taxtracker_item_import_archive", args=[object_id])
         response.context_data["reassign_attachments_url"] = reverse(
             "admin:taxtracker_item_reassign_attachments", args=[object_id]
         )
-        response.context_data["prev_item"] = (
-            _find_equivalent_item(path_signature, prev_fy) if prev_fy else None
-        )
-        response.context_data["next_item"] = (
-            _find_equivalent_item(path_signature, next_fy) if next_fy else None
-        )
+        response.context_data["prev_item"] = _find_equivalent_item(path_signature, prev_fy) if prev_fy else None
+        response.context_data["next_item"] = _find_equivalent_item(path_signature, next_fy) if next_fy else None
         return response
 
     # ------------------------------------------------------------------
@@ -292,9 +280,7 @@ class ItemAdmin(admin.ModelAdmin):
 
             had_error = False
             try:
-                extracted, archive_skipped_names = extract_from_archive_with_skips(
-                    file_bytes, filename
-                )
+                extracted, archive_skipped_names = extract_from_archive_with_skips(file_bytes, filename)
             except UnsupportedArchiveError as exc:
                 messages.error(request, str(exc))
                 extracted = []
@@ -305,9 +291,7 @@ class ItemAdmin(admin.ModelAdmin):
             if extracted:
                 existing_names = {
                     Path(file_name).name
-                    for file_name in Attachment.objects.filter(item=item).values_list(
-                        "file", flat=True
-                    )
+                    for file_name in Attachment.objects.filter(item=item).values_list("file", flat=True)
                     if file_name
                 }
                 importable: list[tuple[str, bytes]] = []
@@ -342,8 +326,7 @@ class ItemAdmin(admin.ModelAdmin):
                 unique_skipped = list(dict.fromkeys(archive_skipped_names))
                 messages.warning(
                     request,
-                    f"Skipped {len(unique_skipped)} non-PDF file(s): "
-                    f"{', '.join(unique_skipped)}.",
+                    f"Skipped {len(unique_skipped)} non-PDF file(s): {', '.join(unique_skipped)}.",
                 )
             if duplicate_names:
                 unique_duplicates = list(dict.fromkeys(duplicate_names))
@@ -379,9 +362,7 @@ class ItemAdmin(admin.ModelAdmin):
         if not self.has_change_permission(request, item):
             raise PermissionDenied
         attachment_admin = self.admin_site._registry.get(Attachment)
-        if attachment_admin is None or not attachment_admin.has_change_permission(
-            request
-        ):
+        if attachment_admin is None or not attachment_admin.has_change_permission(request):
             raise PermissionDenied
 
         attachments = list(item.attachments.all().order_by("date", "title", "pk"))
@@ -390,10 +371,7 @@ class ItemAdmin(admin.ModelAdmin):
         rows = []
 
         for attachment in attachments:
-            if (
-                attachment.date is None
-                or item.year.start_date <= attachment.date <= item.year.end_date
-            ):
+            if attachment.date is None or item.year.start_date <= attachment.date <= item.year.end_date:
                 continue
 
             target_year_num = _financial_year_number_for_date(attachment.date)
@@ -404,9 +382,7 @@ class ItemAdmin(admin.ModelAdmin):
                 warning = f"Financial year FY{target_year_num} not found."
             else:
                 if target_fy.pk not in target_cache:
-                    target_cache[target_fy.pk] = _find_equivalent_item(
-                        path_signature, target_fy
-                    )
+                    target_cache[target_fy.pk] = _find_equivalent_item(path_signature, target_fy)
                 target_item = target_cache[target_fy.pk]
                 if target_item is None:
                     warning = f"Equivalent item not found in FY{target_year_num}."
@@ -433,11 +409,7 @@ class ItemAdmin(admin.ModelAdmin):
         result_rows = []
         result_summary = None
         if request.method == "POST":
-            selected_ids = {
-                int(v)
-                for v in request.POST.getlist("move_attachment_ids")
-                if v.isdigit()
-            }
+            selected_ids = {int(v) for v in request.POST.getlist("move_attachment_ids") if v.isdigit()}
             with transaction.atomic():
                 for row in rows:
                     attachment = row["attachment"]
@@ -459,15 +431,9 @@ class ItemAdmin(admin.ModelAdmin):
 
             result_summary = {
                 "total_out_of_year": len(rows),
-                "moved_count": sum(
-                    1 for row in result_rows if row.get("status") == "Moved"
-                ),
-                "not_selected_count": sum(
-                    1 for row in result_rows if row.get("status") == "Not selected"
-                ),
-                "unmovable_count": sum(
-                    1 for row in result_rows if row.get("status") == "Unmovable"
-                ),
+                "moved_count": sum(1 for row in result_rows if row.get("status") == "Moved"),
+                "not_selected_count": sum(1 for row in result_rows if row.get("status") == "Not selected"),
+                "unmovable_count": sum(1 for row in result_rows if row.get("status") == "Unmovable"),
             }
 
         context = {
@@ -480,9 +446,7 @@ class ItemAdmin(admin.ModelAdmin):
             "result_summary": result_summary,
             "opts": self.model._meta,
         }
-        return render(
-            request, "admin/taxtracker/item/reassign_attachments.html", context
-        )
+        return render(request, "admin/taxtracker/item/reassign_attachments.html", context)
 
 
 # ---------------------------------------------------------------------------
@@ -603,9 +567,7 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
             missing_fy_names: list[str] = []
             created_count = 0
             try:
-                extracted, archive_skipped_names = extract_from_archive_with_skips(
-                    file_bytes, filename
-                )
+                extracted, archive_skipped_names = extract_from_archive_with_skips(file_bytes, filename)
             except UnsupportedArchiveError as exc:
                 messages.error(request, str(exc))
                 extracted = []
@@ -627,9 +589,7 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
 
                         year_num = int(match.group(1))
                         if year_num not in fy_cache:
-                            fy_cache[year_num] = FinancialYear.objects.filter(
-                                year=year_num
-                            ).first()
+                            fy_cache[year_num] = FinancialYear.objects.filter(year=year_num).first()
                         fy = fy_cache[year_num]
                         if fy is None:
                             missing_fy_names.append(f"{base_name} (FY{year_num})")
@@ -637,9 +597,9 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
                         if year_num not in existing_names_by_year:
                             existing_names_by_year[year_num] = {
                                 Path(file_name).name
-                                for file_name in Attachment.objects.filter(
-                                    received_document__year=fy
-                                ).values_list("file", flat=True)
+                                for file_name in Attachment.objects.filter(received_document__year=fy).values_list(
+                                    "file", flat=True
+                                )
                                 if file_name
                             }
                         existing_names = existing_names_by_year[year_num]
@@ -665,16 +625,14 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
                 if created_count:
                     messages.success(
                         request,
-                        f"Imported {created_count} received document(s) "
-                        f"from '{filename}'.",
+                        f"Imported {created_count} received document(s) from '{filename}'.",
                     )
 
             if archive_skipped_names:
                 unique_skipped = list(dict.fromkeys(archive_skipped_names))
                 messages.warning(
                     request,
-                    f"Skipped {len(unique_skipped)} non-PDF file(s): "
-                    f"{', '.join(unique_skipped)}.",
+                    f"Skipped {len(unique_skipped)} non-PDF file(s): {', '.join(unique_skipped)}.",
                 )
             if duplicate_names:
                 unique_duplicates = list(dict.fromkeys(duplicate_names))
@@ -697,12 +655,7 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
                     f"Skipped {len(unique_missing_fy)} file(s) with no matching "
                     f"Financial Year record: {', '.join(unique_missing_fy)}.",
                 )
-            if (
-                not had_error
-                and not extracted
-                and not archive_skipped_names
-                and not duplicate_names
-            ):
+            if not had_error and not extracted and not archive_skipped_names and not duplicate_names:
                 messages.warning(
                     request,
                     f"No attachments could be extracted from '{filename}'.",
@@ -958,9 +911,7 @@ def _zip_buffer():
 
 def _zip_response(buf, filename):
     """Stream the ZIP in *buf* as a download, closing *buf* once it's sent."""
-    return FileResponse(
-        buf, as_attachment=True, filename=filename, content_type="application/zip"
-    )
+    return FileResponse(buf, as_attachment=True, filename=filename, content_type="application/zip")
 
 
 def _build_zip(fy):
@@ -1101,9 +1052,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
-        extra_context["download_multi_zip_url"] = reverse(
-            "admin:taxtracker_financialyear_download_multi_zip"
-        )
+        extra_context["download_multi_zip_url"] = reverse("admin:taxtracker_financialyear_download_multi_zip")
         return super().changelist_view(request, extra_context)
 
     # ------------------------------------------------------------------
@@ -1115,9 +1064,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
         if not self.has_view_permission(request, fy):
             raise PermissionDenied
         # Fetch all items in a single query to avoid N+1 for deep hierarchies.
-        all_items = list(
-            fy.items.prefetch_related("attachments").order_by("order", "title")
-        )
+        all_items = list(fy.items.prefetch_related("attachments").order_by("order", "title"))
         tree_rows, unreachable_items = _tree_rows_and_unreachable_items(all_items)
 
         total = len(all_items)
@@ -1172,23 +1119,17 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
     def download_multi_zip_view(self, request):
         self._check_export_permission(request)
-        all_fys = list(
-            FinancialYear.objects.order_by("year").prefetch_related("status_history")
-        )
+        all_fys = list(FinancialYear.objects.order_by("year").prefetch_related("status_history"))
         error = None
 
         if request.method == "POST":
             selected_pks = request.POST.getlist("fy_ids")
-            selected_fys = list(
-                FinancialYear.objects.filter(pk__in=selected_pks).order_by("year")
-            )
+            selected_fys = list(FinancialYear.objects.filter(pk__in=selected_pks).order_by("year"))
             if not selected_fys:
                 error = "Please select at least one financial year."
             elif request.POST.get("action") == "view_index":
                 content = _build_multi_index_md(selected_fys)
-                return HttpResponse(
-                    content, content_type="text/markdown; charset=utf-8"
-                )
+                return HttpResponse(content, content_type="text/markdown; charset=utf-8")
             else:
                 buf = _build_multi_zip(selected_fys)
                 years = sorted(fy.year for fy in selected_fys)
@@ -1251,20 +1192,15 @@ class FinancialYearAdmin(admin.ModelAdmin):
             if skipped_items:
                 messages.warning(
                     request,
-                    f"{len(skipped_items)} item(s) were not copied because they are "
-                    "not reachable from a root item.",
+                    f"{len(skipped_items)} item(s) were not copied because they are not reachable from a root item.",
                 )
             messages.success(
                 request,
                 f"Created FY{new_year_num} with items copied from {fy}.",
             )
-            return redirect(
-                reverse("admin:taxtracker_financialyear_change", args=[new_fy.pk])
-            )
+            return redirect(reverse("admin:taxtracker_financialyear_change", args=[new_fy.pk]))
 
-        _, unreachable_items = _tree_rows_and_unreachable_items(
-            list(fy.items.order_by("order", "title"))
-        )
+        _, unreachable_items = _tree_rows_and_unreachable_items(list(fy.items.order_by("order", "title")))
         context = {
             **self.admin_site.each_context(request),
             "title": f"Copy {fy} to FY{new_year_num}",
@@ -1285,23 +1221,15 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
     def change_view(self, request, object_id, form_url="", extra_context=None):
         extra_context = extra_context or {}
-        extra_context["summary_url"] = reverse(
-            "admin:taxtracker_financialyear_summary", args=[object_id]
-        )
-        extra_context["download_zip_url"] = reverse(
-            "admin:taxtracker_financialyear_download_zip", args=[object_id]
-        )
+        extra_context["summary_url"] = reverse("admin:taxtracker_financialyear_summary", args=[object_id])
+        extra_context["download_zip_url"] = reverse("admin:taxtracker_financialyear_download_zip", args=[object_id])
         extra_context["copy_to_new_year_url"] = reverse(
             "admin:taxtracker_financialyear_copy_to_new_year", args=[object_id]
         )
         fy = FinancialYear.objects.filter(pk=object_id).first()
         if fy:
-            extra_context["prev_fy"] = FinancialYear.objects.filter(
-                year=fy.year - 1
-            ).first()
-            extra_context["next_fy"] = FinancialYear.objects.filter(
-                year=fy.year + 1
-            ).first()
+            extra_context["prev_fy"] = FinancialYear.objects.filter(year=fy.year - 1).first()
+            extra_context["next_fy"] = FinancialYear.objects.filter(year=fy.year + 1).first()
         return super().change_view(request, object_id, form_url, extra_context)
 
 

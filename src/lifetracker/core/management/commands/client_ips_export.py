@@ -26,18 +26,13 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         config = client_ips.config_from_env()
         if config.db_path is None:
-            raise CommandError(
-                "Client IPs aren't recorded: set LIFETRACKER_CLIENT_IP_DB or"
-                " LIFETRACKER_DATA_DIR."
-            )
+            raise CommandError("Client IPs aren't recorded: set LIFETRACKER_CLIENT_IP_DB or LIFETRACKER_DATA_DIR.")
         try:
             connection = client_ips.connect_read_only(config.db_path)
         except sqlite3.OperationalError as exc:
             raise CommandError(f"Couldn't open {config.db_path}: {exc}")
         try:
-            for row in client_ips.export_rows(
-                connection, logged_in_only=options["logged_in"]
-            ):
+            for row in client_ips.export_rows(connection, logged_in_only=options["logged_in"]):
                 self.stdout.write(json.dumps(row))
         finally:
             connection.close()

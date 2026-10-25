@@ -19,16 +19,8 @@ def _git(*args: str) -> bytes:
 
 
 def _problems() -> list[str]:
-    tracked = [
-        path.decode()
-        for path in _git("ls-files", "-z", "--", "screenshots/").split(b"\0")
-        if path
-    ]
-    problems = [
-        f"{path} is tracked; only {GITIGNORE} should be"
-        for path in tracked
-        if path != GITIGNORE
-    ]
+    tracked = [path.decode() for path in _git("ls-files", "-z", "--", "screenshots/").split(b"\0") if path]
+    problems = [f"{path} is tracked; only {GITIGNORE} should be" for path in tracked if path != GITIGNORE]
     if GITIGNORE not in tracked:
         problems.append(f"{GITIGNORE} isn't tracked")
     elif _git("show", f":{GITIGNORE}") != EXPECTED:

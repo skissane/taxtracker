@@ -34,9 +34,7 @@ class _UInt64(int):
 
 def _encode(value):
     if isinstance(value, dict):
-        return _control(7, len(value)) + b"".join(
-            _encode(k) + _encode(v) for k, v in value.items()
-        )
+        return _control(7, len(value)) + b"".join(_encode(k) + _encode(v) for k, v in value.items())
     if isinstance(value, list):
         return _control(11, len(value)) + b"".join(_encode(v) for v in value)
     if isinstance(value, str):
@@ -45,9 +43,7 @@ def _encode(value):
     if isinstance(value, int):
         # libmaxminddb (which maxminddb uses if it can) checks the metadata's
         # types, so some are uint16 or uint64 rather than uint32.
-        type_ = (
-            5 if isinstance(value, _UInt16) else 9 if isinstance(value, _UInt64) else 6
-        )
+        type_ = 5 if isinstance(value, _UInt16) else 9 if isinstance(value, _UInt64) else 6
         data = value.to_bytes((value.bit_length() + 7) // 8, "big") if value else b""
         return _control(type_, len(data)) + data
     raise TypeError(value)
@@ -86,9 +82,7 @@ def write_mmdb(path, networks, database_type="DBIP-Test"):
         return number if kind == "node" else count + 16 + number
 
     tree = b"".join(
-        struct.pack(">I", record_value(left))[1:]
-        + struct.pack(">I", record_value(right))[1:]
-        for left, right in nodes
+        struct.pack(">I", record_value(left))[1:] + struct.pack(">I", record_value(right))[1:] for left, right in nodes
     )
     metadata = {
         "node_count": count,
@@ -101,9 +95,7 @@ def write_mmdb(path, networks, database_type="DBIP-Test"):
         "build_epoch": _UInt64(1_760_000_000),
         "description": {"en": "test"},
     }
-    Path(path).write_bytes(
-        tree + b"\0" * 16 + data + _METADATA_MARKER + _encode(metadata)
-    )
+    Path(path).write_bytes(tree + b"\0" * 16 + data + _METADATA_MARKER + _encode(metadata))
 
 
 def write_geoip(directory, month="2026-10"):
@@ -111,9 +103,7 @@ def write_geoip(directory, month="2026-10"):
     write_mmdb(
         directory / f"dbip-country-lite-{month}.mmdb",
         {
-            "203.0.113.0/24": {
-                "country": {"iso_code": "AU", "names": {"en": "Australia"}}
-            },
+            "203.0.113.0/24": {"country": {"iso_code": "AU", "names": {"en": "Australia"}}},
             "2001:db8::/32": {"country": {"iso_code": "NZ", "names": {"en": "NZ"}}},
         },
     )

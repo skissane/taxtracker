@@ -98,6 +98,4 @@ def zip_eml_to_pdf_command(input_zip: str, output_zip: str) -> None:
 
     converted = convert_eml_zip_to_pdf(input_zip, output_zip)
     if converted:
-        click.echo(
-            f"\nBatch complete! Your converted files are saved in {output_zip!r}."
-        )
+        click.echo(f"\nBatch complete! Your converted files are saved in {output_zip!r}.")

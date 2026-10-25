@@ -90,8 +90,7 @@ class AutoBackup:
             if now - self.last_started_at < TIMEOUT_SECONDS:
                 return
             self.log(
-                f"automatic backup ({self.reason}) still running after"
-                f" {TIMEOUT_SECONDS / 60:g} minutes, killing it"
+                f"automatic backup ({self.reason}) still running after {TIMEOUT_SECONDS / 60:g} minutes, killing it"
             )
             self.process.kill()
             exit_status = self.process.wait()
@@ -101,10 +100,7 @@ class AutoBackup:
         if exit_status == 0:
             self.log(f"automatic backup ({self.reason}) finished")
         else:
-            self.log(
-                f"automatic backup ({self.reason}) failed with exit status"
-                f" {exit_status}"
-            )
+            self.log(f"automatic backup ({self.reason}) failed with exit status {exit_status}")
 
     def tick(self, now: float) -> None:
         """Called on every wake: note a finished backup, and start the next

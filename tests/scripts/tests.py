@@ -29,10 +29,7 @@ from scripts.validate_uv_lock_os_arch import main as os_arch_main
 
 
 def _lock(*packages: tuple[str, str]) -> str:
-    return "".join(
-        f'[[package]]\nname = "{name}"\nversion = "{version}"\n\n'
-        for name, version in packages
-    )
+    return "".join(f'[[package]]\nname = "{name}"\nversion = "{version}"\n\n' for name, version in packages)
 
 
 class RequirementsMinVersionsTests(SimpleTestCase):
@@ -108,9 +105,7 @@ class RequirementsMinVersionsTests(SimpleTestCase):
         )
 
     def test_ignores_dependencies_without_minimum(self):
-        pyproject = (
-            '[project]\ndependencies = ["click==8.0", "boto3~=1.0", "ruff", ""]\n'
-        )
+        pyproject = '[project]\ndependencies = ["click==8.0", "boto3~=1.0", "ruff", ""]\n'
         code, stdout, _, result = self._run("check", pyproject, _lock())
         self.assertEqual(code, 0)
         self.assertIn("match uv.lock", stdout)
@@ -232,9 +227,7 @@ class ValidateUvLockOsArchTests(SimpleTestCase):
     def _run(self, *filenames: str) -> tuple[int, str]:
         """Run main() in a temp dir whose uv.lock has one package with a wheel
         for each of the given filenames; return its exit code and stdout."""
-        return self._run_wheels(
-            *(f'url = "https://example.com/{f}"' for f in filenames)
-        )
+        return self._run_wheels(*(f'url = "https://example.com/{f}"' for f in filenames))
 
     def _run_wheels(self, *wheels: str) -> tuple[int, str]:
         """Like _run, but each wheel is given as the body of its TOML inline
@@ -314,9 +307,7 @@ class PostScreenshotsTests(SimpleTestCase):
             if fail and method == fail[0] and url.startswith(fail[1]):
                 if len(fail) > 2:
                     raise fail[2]
-                raise urllib.error.HTTPError(
-                    url, 403, "Forbidden", {}, io.BytesIO(b"nope")
-                )
+                raise urllib.error.HTTPError(url, 403, "Forbidden", {}, io.BytesIO(b"nope"))
             if url == "https://api.github.com/user":
                 return {"login": "me"}
             if url == "https://api.github.com/repos/o/r":
@@ -385,9 +376,7 @@ class PostScreenshotsTests(SimpleTestCase):
         # No user lookup when --author is given (an installation token can't).
         self.assertNotIn("https://api.github.com/user", [r[1] for r in requests])
         (post,) = self._writes(requests)[2:]
-        self.assertEqual(
-            post[:2], ("POST", "https://api.github.com/repos/o/r/issues/7/comments")
-        )
+        self.assertEqual(post[:2], ("POST", "https://api.github.com/repos/o/r/issues/7/comments"))
         body = post[3]["body"]
         self.assertTrue(body.startswith(MARKER + "\n"))
         self.assertIn(
@@ -396,12 +385,10 @@ class PostScreenshotsTests(SimpleTestCase):
         )
         self.assertLess(
             body.index(
-                '<details><summary>index</summary><img src="https://example.com/'
-                'index.png" alt="index"></details>'
+                '<details><summary>index</summary><img src="https://example.com/index.png" alt="index"></details>'
             ),
             body.index(
-                '<details><summary>login</summary><img src="https://example.com/'
-                'login.png" alt="login"></details>'
+                '<details><summary>login</summary><img src="https://example.com/login.png" alt="login"></details>'
             ),
         )
         self.assertNotIn("notes", body)
@@ -418,9 +405,7 @@ class PostScreenshotsTests(SimpleTestCase):
     def test_stale_commit_posts_nothing(self):
         # An older commit's run finishing after the newer commit's has posted.
         comments = [{"id": 1, "user": {"login": "me"}, "body": MARKER + "\nnew"}]
-        code, _, requests = self._run(
-            ["index.png"], "--commit", "0ld0ld0", comments=comments
-        )
+        code, _, requests = self._run(["index.png"], "--commit", "0ld0ld0", comments=comments)
         self.assertEqual(code, 0)
         # Not even the uploads.
         self.assertEqual(self._writes(requests), [])
@@ -441,18 +426,12 @@ class PostScreenshotsTests(SimpleTestCase):
         )
 
     def test_paginates_comments(self):
-        comments = [
-            {"id": n, "user": {"login": "me"}, "body": "chatter"} for n in range(150)
-        ]
+        comments = [{"id": n, "user": {"login": "me"}, "body": "chatter"} for n in range(150)]
         comments[120]["body"] = MARKER + "\nold"
         code, _, requests = self._run(["index.png"], comments=comments)
         self.assertEqual(code, 0)
         self.assertEqual(
-            [
-                r[1].rsplit("&", 1)[1]
-                for r in requests
-                if r[0] == "GET" and "/7/" in r[1]
-            ],
+            [r[1].rsplit("&", 1)[1] for r in requests if r[0] == "GET" and "/7/" in r[1]],
             ["page=1", "page=2"],
         )
         self.assertEqual(
@@ -461,9 +440,7 @@ class PostScreenshotsTests(SimpleTestCase):
         )
 
     def test_failed_upload_posts_nothing(self):
-        code, stderr, requests = self._run(
-            ["index.png"], fail=("POST", "https://uploads.")
-        )
+        code, stderr, requests = self._run(["index.png"], fail=("POST", "https://uploads."))
         self.assertEqual(code, 1)
         self.assertIn("HTTP 403", stderr)
         self.assertIn("nope", stderr)
@@ -534,17 +511,11 @@ class PostScreenshotsRequestTests(SimpleTestCase):
         return response
 
     def _redirect(self, url, location):
-        return urllib.error.HTTPError(
-            url, 307, "Redirect", {"Location": location}, None
-        )
+        return urllib.error.HTTPError(url, 307, "Redirect", {"Location": location}, None)
 
     def test_sends_json_with_token(self):
-        with mock.patch(
-            "urllib.request.urlopen", return_value=self._response(b'{"a": 1}')
-        ) as urlopen:
-            result = _request(
-                "POST", "https://api.github.com/x", "tok", json_body={"b": 2}
-            )
+        with mock.patch("urllib.request.urlopen", return_value=self._response(b'{"a": 1}')) as urlopen:
+            result = _request("POST", "https://api.github.com/x", "tok", json_body={"b": 2})
         self.assertEqual(result, {"a": 1})
         request = urlopen.call_args.args[0]
         self.assertEqual(urlopen.call_args.kwargs, {"timeout": 60})
@@ -560,15 +531,11 @@ class PostScreenshotsRequestTests(SimpleTestCase):
     def test_follows_redirects_dropping_token_off_host(self):
         responses = [
             self._redirect("https://uploads.github.com/a", "/b"),
-            self._redirect(
-                "https://uploads.github.com/b", "https://elsewhere.example/c"
-            ),
+            self._redirect("https://uploads.github.com/b", "https://elsewhere.example/c"),
             self._response(b'{"url": "u"}'),
         ]
         with mock.patch("urllib.request.urlopen", side_effect=responses) as urlopen:
-            result = _request(
-                "POST", "https://uploads.github.com/a", "tok", data=b"png"
-            )
+            result = _request("POST", "https://uploads.github.com/a", "tok", data=b"png")
         self.assertEqual(result, {"url": "u"})
         sent = [c.args[0] for c in urlopen.call_args_list]
         self.assertEqual(
@@ -594,9 +561,7 @@ class PostScreenshotsRequestTests(SimpleTestCase):
             _request("GET", "https://api.github.com/x", "tok")
 
     def test_other_errors_raised(self):
-        error = urllib.error.HTTPError(
-            "https://api.github.com/x", 404, "Not Found", {}, None
-        )
+        error = urllib.error.HTTPError("https://api.github.com/x", 404, "Not Found", {}, None)
         with (
             error,
             mock.patch("urllib.request.urlopen", side_effect=error),
@@ -698,13 +663,10 @@ class CheckScreenshotsDirTests(SimpleTestCase):
         self.assertIn("unchanged", stdout)
 
     def test_force_added_file_fails(self):
-        code, stdout = self._run(
-            lambda path: self._git("add", "-f", "screenshots/index-light.png")
-        )
+        code, stdout = self._run(lambda path: self._git("add", "-f", "screenshots/index-light.png"))
         self.assertEqual(code, 1)
         self.assertIn(
-            "- screenshots/index-light.png is tracked; only screenshots/.gitignore"
-            " should be",
+            "- screenshots/index-light.png is tracked; only screenshots/.gitignore should be",
             stdout,
         )
 
@@ -717,19 +679,13 @@ class CheckScreenshotsDirTests(SimpleTestCase):
         self.assertEqual(code, 1)
         self.assertIn("- screenshots/index-light.png is tracked", stdout)
         self.assertIn("- screenshots/.gitignore isn't tracked", stdout)
-        self.assertIn(
-            "- screenshots/.gitignore is missing from the working tree", stdout
-        )
+        self.assertIn("- screenshots/.gitignore is missing from the working tree", stdout)
 
     def test_unstaged_deletion_fails(self):
-        code, stdout = self._run(
-            lambda path: (path / "screenshots" / ".gitignore").unlink()
-        )
+        code, stdout = self._run(lambda path: (path / "screenshots" / ".gitignore").unlink())
         self.assertEqual(code, 1)
         self.assertNotIn("isn't tracked", stdout)
-        self.assertIn(
-            "- screenshots/.gitignore is missing from the working tree", stdout
-        )
+        self.assertIn("- screenshots/.gitignore is missing from the working tree", stdout)
 
     def test_modified_gitignore_fails(self):
         def setup(path):
@@ -752,9 +708,7 @@ class CheckScreenshotsDirTests(SimpleTestCase):
 class DependabotRelockTests(SimpleTestCase):
     BASE = _lock(("certifi", "1.0"), ("click", "8.0"))
 
-    def _run(
-        self, branch_lock: str, relocked: str | None
-    ) -> tuple[int | None, str, list[list[str]], str]:
+    def _run(self, branch_lock: str, relocked: str | None) -> tuple[int | None, str, list[list[str]], str]:
         """Run main() in a temp dir whose uv.lock is branch_lock, with
         `git show` of the merge base giving BASE and `uv lock` writing relocked
         (or failing, if None); return the exit code (None if `uv lock`'s
@@ -795,15 +749,11 @@ class DependabotRelockTests(SimpleTestCase):
     def test_relocks_changed_packages_from_base(self):
         # A virtual project has no version, and is never upgraded.
         virtual = '[[package]]\nname = "virtual"\nsource = { virtual = "." }\n\n'
-        branch = (
-            "revision = 5\n" + _lock(("certifi", "2.0"), ("click", "8.0")) + virtual
-        )
+        branch = "revision = 5\n" + _lock(("certifi", "2.0"), ("click", "8.0")) + virtual
         relocked = _lock(("certifi", "2.0"), ("click", "8.0"))
         code, _, uv_calls, result = self._run(branch, relocked)
         self.assertEqual(code, 0)
-        self.assertEqual(
-            uv_calls, [["uv", "lock", "--upgrade-package", "certifi==2.0"]]
-        )
+        self.assertEqual(uv_calls, [["uv", "lock", "--upgrade-package", "certifi==2.0"]])
         self.assertEqual(result, relocked)
 
     def test_added_and_multi_version_packages(self):
@@ -840,9 +790,7 @@ class DependabotRelockTests(SimpleTestCase):
         relocked = _lock(("certifi", "2.0"), ("click", "8.1"))
         code, stderr, _, result = self._run(branch, relocked)
         self.assertEqual(code, 1)
-        self.assertIn(
-            "click: Dependabot locked ('8.0',), re-locking gave ('8.1',)", stderr
-        )
+        self.assertIn("click: Dependabot locked ('8.0',), re-locking gave ('8.1',)", stderr)
         self.assertEqual(result, branch)
 
     def test_uv_lock_failure_restores_branch_lock(self):
@@ -863,14 +811,10 @@ class CheckDeployTests(SimpleTestCase):
         return response
 
     def _http_error(self, status: int, payload: bytes):
-        return urllib.error.HTTPError(
-            self.URL, status, "Error", {}, io.BytesIO(payload)
-        )
+        return urllib.error.HTTPError(self.URL, status, "Error", {}, io.BytesIO(payload))
 
     def _check(self, result):
-        kwargs = {
-            "side_effect" if isinstance(result, Exception) else "return_value": result
-        }
+        kwargs = {"side_effect" if isinstance(result, Exception) else "return_value": result}
         with mock.patch("urllib.request.urlopen", **kwargs) as urlopen:
             problem = check_once(self.URL, self.COMMIT, 7)
         self.assertEqual(urlopen.call_args.kwargs, {"timeout": 7})
@@ -895,12 +839,8 @@ class CheckDeployTests(SimpleTestCase):
         )
 
     def test_not_json(self):
-        self.assertEqual(
-            self._check(self._http_error(502, b"<html>")), "HTTP 502, not JSON"
-        )
-        self.assertEqual(
-            self._check(self._response(200, b"[]")), "HTTP 200, unexpected JSON"
-        )
+        self.assertEqual(self._check(self._http_error(502, b"<html>")), "HTTP 502, not JSON")
+        self.assertEqual(self._check(self._response(200, b"[]")), "HTTP 200, unexpected JSON")
 
     def test_request_failed(self):
         self.assertEqual(
@@ -927,9 +867,7 @@ class CheckDeployTests(SimpleTestCase):
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),
         ):
-            code = check_deploy_main(
-                [self.URL, self.COMMIT, *args], clock=lambda: now[0], sleep=sleep
-            )
+            code = check_deploy_main([self.URL, self.COMMIT, *args], clock=lambda: now[0], sleep=sleep)
         return code, sleeps, out.getvalue(), err.getvalue()
 
     def test_retries_until_healthy(self):
@@ -943,9 +881,7 @@ class CheckDeployTests(SimpleTestCase):
         self.assertNotIn(self.URL, out)
 
     def test_gives_up_after_timeout(self):
-        code, sleeps, out, err = self._main(
-            ["down"] * 10, "--timeout", "10", "--interval", "4"
-        )
+        code, sleeps, out, err = self._main(["down"] * 10, "--timeout", "10", "--interval", "4")
         self.assertEqual(code, 1)
         self.assertEqual(sleeps, [4, 4])
         self.assertEqual(out.count("down"), 3)

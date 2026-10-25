@@ -59,9 +59,7 @@ class TreeNodeMixin:
         # (e.g. inline formsets re-validate unchanged rows, which would
         # otherwise surface an invisible "Please correct the error below"
         # message when the parent field is hidden).
-        original_parent_id = (
-            manager.filter(pk=self.pk).values_list("parent_id", flat=True).first()
-        )
+        original_parent_id = manager.filter(pk=self.pk).values_list("parent_id", flat=True).first()
         if original_parent_id == self.parent_id:
             return
         # Walk the ancestor chain; if we encounter self, there is a cycle.
@@ -69,12 +67,6 @@ class TreeNodeMixin:
         current_id = self.parent_id
         while current_id is not None:
             if current_id in visited:
-                raise ValidationError(
-                    {"parent": "Setting this parent would create a circular reference."}
-                )
+                raise ValidationError({"parent": "Setting this parent would create a circular reference."})
             visited.add(current_id)
-            current_id = (
-                manager.filter(pk=current_id)
-                .values_list("parent_id", flat=True)
-                .first()
-            )
+            current_id = manager.filter(pk=current_id).values_list("parent_id", flat=True).first()

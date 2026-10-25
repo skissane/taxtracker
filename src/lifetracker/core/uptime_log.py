@@ -188,9 +188,7 @@ def day_periods(directory: Path, day: int, now: float) -> DayPeriods:
     periods = up_periods(data)
     last_second = SECONDS_PER_DAY - 1
     from_previous = bool(periods) and periods[0].start == 0
-    from_previous = from_previous and _second_is_up(
-        read_day(directory, day - 1), last_second
-    )
+    from_previous = from_previous and _second_is_up(read_day(directory, day - 1), last_second)
     into_next = bool(periods) and periods[-1].end == last_second
     into_next = into_next and _second_is_up(read_day(directory, day + 1), 0)
     # The latest second the watchdog can have recorded is the one before now's,
@@ -198,14 +196,8 @@ def day_periods(directory: Path, day: int, now: float) -> DayPeriods:
     # MAX_FILLED_GAP_SECONDS after that, so a period ending that recently may
     # still be going.
     latest_recorded = int(now) % SECONDS_PER_DAY - 1
-    ongoing = (
-        day == today
-        and bool(periods)
-        and periods[-1].end >= latest_recorded - MAX_FILLED_GAP_SECONDS
-    )
-    return DayPeriods(
-        day_date(day), periods, from_previous, into_next, ongoing, day == today
-    )
+    ongoing = day == today and bool(periods) and periods[-1].end >= latest_recorded - MAX_FILLED_GAP_SECONDS
+    return DayPeriods(day_date(day), periods, from_previous, into_next, ongoing, day == today)
 
 
 class UptimeLog:
@@ -228,10 +220,7 @@ class UptimeLog:
         second = int(now // 1)
         if since is not None:
             first = min(int(since // 1), second)
-        elif (
-            self.last_second is not None
-            and 0 < second - self.last_second <= MAX_FILLED_GAP_SECONDS
-        ):
+        elif self.last_second is not None and 0 < second - self.last_second <= MAX_FILLED_GAP_SECONDS:
             first = self.last_second + 1
         else:
             first = second

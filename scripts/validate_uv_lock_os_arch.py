@@ -59,13 +59,9 @@ def main() -> int:
         wheels: list[dict] = package.get("wheels", [])
         for wheel in wheels:
             # Registry wheels have a `url`; local ones a `path` or `filename`.
-            location: str | None = (
-                wheel.get("url") or wheel.get("path") or wheel.get("filename")
-            )
+            location: str | None = wheel.get("url") or wheel.get("path") or wheel.get("filename")
             if location is None:
-                raise ValueError(
-                    f"wheel in {package['name']} has no url, path or filename"
-                )
+                raise ValueError(f"wheel in {package['name']} has no url, path or filename")
             filename = location.rsplit("/", 1)[-1]
             for platform in _wheel_platforms(filename):
                 try:

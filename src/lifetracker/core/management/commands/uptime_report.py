@@ -28,10 +28,7 @@ class Command(BaseCommand):
             raise CommandError("--days must be at least 1.")
         directory = uptime_log.uptime_dir_from_env()
         if directory is None:
-            raise CommandError(
-                "Uptime isn't recorded: set LIFETRACKER_UPTIME_DIR or"
-                " LIFETRACKER_DATA_DIR."
-            )
+            raise CommandError("Uptime isn't recorded: set LIFETRACKER_UPTIME_DIR or LIFETRACKER_DATA_DIR.")
         for row in uptime_log.daily_report(directory, days, time.time()):
             date = row.date.isoformat()
             if row.up_seconds is None:
@@ -39,6 +36,5 @@ class Command(BaseCommand):
                 continue
             self.stdout.write(
                 f"{date}  {row.share:7.2%}  up {row.up_seconds} of"
-                f" {row.elapsed_seconds} s, {row.starts} starts"
-                + ("  (so far)" if row.today else "")
+                f" {row.elapsed_seconds} s, {row.starts} starts" + ("  (so far)" if row.today else "")
             )

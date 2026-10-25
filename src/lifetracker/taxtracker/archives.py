@@ -29,10 +29,7 @@ __all__ = [
 ]
 
 PDF_MAGIC = b"%PDF-"
-FIDELITY_URL_PREFIX = (
-    "https://netbenefitsww.fidelity.com"
-    "/mybenefitsww/spshistoryservices/activities/record/c:"
-)
+FIDELITY_URL_PREFIX = "https://netbenefitsww.fidelity.com/mybenefitsww/spshistoryservices/activities/record/c:"
 
 
 class UnsupportedArchiveError(Exception):
@@ -60,9 +57,7 @@ def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
     try:
         har = json.loads(file_bytes.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise UnsupportedArchiveError(
-            f"Could not parse file as a HAR archive: {exc}"
-        ) from exc
+        raise UnsupportedArchiveError(f"Could not parse file as a HAR archive: {exc}") from exc
 
     entries = har.get("log", {}).get("entries", [])
     results: list[tuple[str, bytes]] = []
@@ -162,9 +157,7 @@ def _extract_from_zip(file_bytes: bytes) -> tuple[list[tuple[str, bytes]], list[
                 results.append((entry_name, pdf_bytes))
             return results, skipped
     except zipfile.BadZipFile as exc:
-        raise UnsupportedArchiveError(
-            f"Could not parse file as a ZIP archive: {exc}"
-        ) from exc
+        raise UnsupportedArchiveError(f"Could not parse file as a ZIP archive: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -182,15 +175,11 @@ def extract_from_archive(file_bytes: bytes, filename: str) -> list[tuple[str, by
     return extracted
 
 
-def extract_from_archive_with_skips(
-    file_bytes: bytes, filename: str
-) -> tuple[list[tuple[str, bytes]], list[str]]:
+def extract_from_archive_with_skips(file_bytes: bytes, filename: str) -> tuple[list[tuple[str, bytes]], list[str]]:
     """Extract files from *file_bytes* and return ``(extracted, skipped_names)``."""
     lower = filename.lower()
     if lower.endswith(".har"):
         return _extract_from_har(file_bytes), []
     if lower.endswith(".zip"):
         return _extract_from_zip(file_bytes)
-    raise UnsupportedArchiveError(
-        f"Unrecognised archive format for '{filename}'. Supported formats: .har, .zip"
-    )
+    raise UnsupportedArchiveError(f"Unrecognised archive format for '{filename}'. Supported formats: .har, .zip")

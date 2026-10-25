@@ -101,10 +101,7 @@ def check_icon(data):
     if info.width != info.height:
         raise InvalidIcon(f"The image is {info.width}x{info.height}, not square.")
     if info.width < MIN_SIZE:
-        raise InvalidIcon(
-            f"The image is {info.width}x{info.height}, smaller than "
-            f"{MIN_SIZE}x{MIN_SIZE}."
-        )
+        raise InvalidIcon(f"The image is {info.width}x{info.height}, smaller than {MIN_SIZE}x{MIN_SIZE}.")
     return info
 
 
@@ -181,9 +178,7 @@ def app_icon(request):
     with icon.image.open("rb") as f:
         response = HttpResponse(f.read(), content_type="image/png")
     if request.GET.get("v") == icon.version:
-        patch_cache_control(
-            response, public=True, max_age=_YEAR_SECONDS, immutable=True
-        )
+        patch_cache_control(response, public=True, max_age=_YEAR_SECONDS, immutable=True)
     else:
         add_never_cache_headers(response)
     return response

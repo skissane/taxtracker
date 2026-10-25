@@ -26,10 +26,7 @@ class FinancialYear(models.Model):
 
     year = models.PositiveSmallIntegerField(
         unique=True,
-        help_text=(
-            "The year in which the FY ends, e.g. 2024 for FY2024 "
-            "(1 July 2023 – 30 June 2024)."
-        ),
+        help_text=("The year in which the FY ends, e.g. 2024 for FY2024 (1 July 2023 – 30 June 2024)."),
     )
     status = models.CharField(
         max_length=30,
@@ -83,10 +80,7 @@ class FinancialYear(models.Model):
 
     @property
     def current_status_transitioned_at(self):
-        if (
-            hasattr(self, "_prefetched_objects_cache")
-            and "status_history" in self._prefetched_objects_cache
-        ):
+        if hasattr(self, "_prefetched_objects_cache") and "status_history" in self._prefetched_objects_cache:
             matching = [
                 history
                 for history in self._prefetched_objects_cache["status_history"]
@@ -98,11 +92,7 @@ class FinancialYear(models.Model):
                 matching,
                 key=lambda history: (history.transitioned_at, history.pk),
             ).transitioned_at
-        latest = (
-            self.status_history.filter(to_status=self.status)
-            .order_by("-transitioned_at", "-pk")
-            .first()
-        )
+        latest = self.status_history.filter(to_status=self.status).order_by("-transitioned_at", "-pk").first()
         return latest.transitioned_at if latest else None
 
     def save(self, *args, **kwargs):
@@ -112,9 +102,7 @@ class FinancialYear(models.Model):
         if not self._state.adding and status_being_saved:
             previous_status = getattr(self, "_loaded_status", None)
             if previous_status is None and self.pk is not None:
-                previous_status = (
-                    FinancialYear.objects.only("status").get(pk=self.pk).status
-                )
+                previous_status = FinancialYear.objects.only("status").get(pk=self.pk).status
         super().save(*args, **kwargs)
         if status_being_saved:
             if previous_status != self.status:
@@ -157,10 +145,7 @@ class FinancialYearStatusHistory(models.Model):
                 f"{self.financial_year}: {self.get_from_status_display()} → "
                 f"{self.get_to_status_display()} @ {self.transitioned_at}"
             )
-        return (
-            f"{self.financial_year}: {self.get_to_status_display()} @ "
-            f"{self.transitioned_at}"
-        )
+        return f"{self.financial_year}: {self.get_to_status_display()} @ {self.transitioned_at}"
 
 
 class Item(TreeNodeMixin, models.Model):
@@ -224,9 +209,7 @@ class Item(TreeNodeMixin, models.Model):
         # fixtures, scripts) also respect the invariant without requiring full_clean().
         if self.parent_id is not None:
             try:
-                self.year_id = (
-                    Item.objects.only("year_id").get(pk=self.parent_id).year_id
-                )
+                self.year_id = Item.objects.only("year_id").get(pk=self.parent_id).year_id
             except Item.DoesNotExist:
                 pass
         super().save(*args, **kwargs)
@@ -237,11 +220,7 @@ class Item(TreeNodeMixin, models.Model):
             ids_to_update = []
             current_level = [self.pk]
             while current_level:
-                children = list(
-                    Item.objects.filter(parent_id__in=current_level).values_list(
-                        "pk", flat=True
-                    )
-                )
+                children = list(Item.objects.filter(parent_id__in=current_level).values_list("pk", flat=True))
                 ids_to_update.extend(children)
                 current_level = children
             if ids_to_update:
@@ -342,11 +321,8 @@ class Attachment(AttachmentAutofillMixin, models.Model):
         # validation time even though the in-memory relation is set — the FK
         # id is only populated once the parent is actually saved.
         has_item = self.item_id is not None or self.item is not None
-        has_received_document = (
-            self.received_document_id is not None or self.received_document is not None
-        )
+        has_received_document = self.received_document_id is not None or self.received_document is not None
         if has_item == has_received_document:
             raise ValidationError(
-                "Attachment must belong to exactly one of Item or Received "
-                "Document, not both or neither."
+                "Attachment must belong to exactly one of Item or Received Document, not both or neither."
             )

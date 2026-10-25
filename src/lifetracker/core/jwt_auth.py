@@ -161,9 +161,7 @@ def signing_key():
 def session_id_claim(session_key):
     """The ``sid`` claim for a session: keyed by ``SECRET_KEY``, so the cookie
     reveals nothing about the session key."""
-    return salted_hmac(
-        "lifetracker.core.jwt_auth.sid", session_key, algorithm="sha256"
-    ).hexdigest()
+    return salted_hmac("lifetracker.core.jwt_auth.sid", session_key, algorithm="sha256").hexdigest()
 
 
 def issue_token(user, session_key, expires_at):
@@ -224,11 +222,7 @@ class JWTCookieMiddleware:
         if stored is None or not request.user.is_authenticated:
             return
         cookie = request.COOKIES.get(JWT_COOKIE_NAME)
-        problem = (
-            token_problem(cookie, request.user, request.session.session_key)
-            if cookie
-            else "it's missing"
-        )
+        problem = token_problem(cookie, request.user, request.session.session_key) if cookie else "it's missing"
         if problem is None:
             return
         logger.warning("Logging out user %s: JWT cookie: %s", request.user.pk, problem)
@@ -250,11 +244,7 @@ class JWTCookieMiddleware:
         # session, which it does when it's modified (or on every request, with
         # SESSION_SAVE_EVERY_REQUEST). Logging in (which changes the session
         # key) also modifies it.
-        if (
-            session.get(SESSION_KEY) == record
-            and not session.modified
-            and not settings.SESSION_SAVE_EVERY_REQUEST
-        ):
+        if session.get(SESSION_KEY) == record and not session.modified and not settings.SESSION_SAVE_EVERY_REQUEST:
             return
         session[SESSION_KEY] = record
         token = issue_token(user, session.session_key, session.get_expiry_date())
@@ -262,11 +252,7 @@ class JWTCookieMiddleware:
             JWT_COOKIE_NAME,
             token,
             # Like Django's session cookie.
-            max_age=(
-                None
-                if session.get_expire_at_browser_close()
-                else session.get_expiry_age()
-            ),
+            max_age=(None if session.get_expire_at_browser_close() else session.get_expiry_age()),
             path="/",
             # Off only with DEBUG on, so it works over plain HTTP locally.
             secure=settings.SESSION_COOKIE_SECURE,

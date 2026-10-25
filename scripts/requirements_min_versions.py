@@ -27,9 +27,7 @@ def _parse_dependency(dep: str) -> tuple[str, str] | None:
     minimum_version_match = re.search(r"(>=\s*)([^,\s;]+)", dep.split(";", 1)[0])
     if minimum_version_match is None:
         return None
-    return _normalize_package_name(
-        dependency_name_match.group(1)
-    ), minimum_version_match.group(2)
+    return _normalize_package_name(dependency_name_match.group(1)), minimum_version_match.group(2)
 
 
 def main(mode: str) -> int:

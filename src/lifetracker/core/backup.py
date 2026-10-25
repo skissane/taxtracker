@@ -102,15 +102,9 @@ def missing_cloud_backup_settings():
     return [
         key
         for key, value in {
-            "LIFETRACKER_BACKUP_S3_BUCKET_NAME": (
-                settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME
-            ),
-            "LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID": (
-                settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID
-            ),
-            "LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY": (
-                settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY
-            ),
+            "LIFETRACKER_BACKUP_S3_BUCKET_NAME": (settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME),
+            "LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID": (settings.LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID),
+            "LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY": (settings.LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY),
         }.items()
         if not value
     ]
@@ -120,10 +114,7 @@ def require_cloud_backup_settings():
     """Raise ``RuntimeError`` naming any required cloud backup settings unset."""
     missing_required = missing_cloud_backup_settings()
     if missing_required:
-        raise RuntimeError(
-            "Cloud backup settings are incomplete. Missing: "
-            f"{', '.join(missing_required)}."
-        )
+        raise RuntimeError(f"Cloud backup settings are incomplete. Missing: {', '.join(missing_required)}.")
 
 
 def cloud_backup_s3_client():
@@ -155,10 +146,7 @@ def run_cloud_backup():
     with backup_database() as backup_file:
         backup_size = os.fstat(backup_file.fileno()).st_size
         backup_time = timezone.now()
-        object_key = (
-            f"{settings.LIFETRACKER_BACKUP_HOSTNAME}/"
-            f"db-backup.{backup_timestamp(backup_time)}.sqlite3"
-        )
+        object_key = f"{settings.LIFETRACKER_BACKUP_HOSTNAME}/db-backup.{backup_timestamp(backup_time)}.sqlite3"
         s3_client = cloud_backup_s3_client()
         # Streams the file, in parts (a multipart upload) once it's big enough.
         s3_client.upload_fileobj(
@@ -269,11 +257,7 @@ def database_changed():
     if state is None:
         return True
     signature = database_signature()
-    return (
-        signature is None
-        or state.get("database") != signature
-        or state.get("destination") != _backup_destination()
-    )
+    return signature is None or state.get("database") != signature or state.get("destination") != _backup_destination()
 
 
 def list_cloud_backups(prefix):
@@ -310,9 +294,7 @@ def download_cloud_backup(object_key, path):
     require_cloud_backup_settings()
     s3_client = cloud_backup_s3_client()
     with open(path, "wb") as dest:
-        s3_client.download_fileobj(
-            settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME, object_key, dest
-        )
+        s3_client.download_fileobj(settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME, object_key, dest)
 
 
 def _page_size(conn):
@@ -334,12 +316,9 @@ def check_backup_file(path):
             # e.g. "file is not a database".
             raise RuntimeError(f"The backup isn't a valid database: {exc}") from exc
         if problems != ["ok"]:
-            raise RuntimeError(
-                "The backup failed SQLite's integrity check: " + "; ".join(problems)
-            )
+            raise RuntimeError("The backup failed SQLite's integrity check: " + "; ".join(problems))
         has_migrations = source.execute(
-            "SELECT 1 FROM sqlite_master"
-            " WHERE type = 'table' AND name = 'django_migrations'"
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'django_migrations'"
         ).fetchone()
         if not has_migrations:
             raise RuntimeError("The backup has no django_migrations table.")

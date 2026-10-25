@@ -33,17 +33,14 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         if options["if_changed"] and not database_changed():
-            self.stdout.write(
-                "The database hasn't changed since the last cloud backup; skipping."
-            )
+            self.stdout.write("The database hasn't changed since the last cloud backup; skipping.")
             return
         try:
             object_key = run_cloud_backup()
         except CloudBackupStatusUpdateError as exc:
             # Chained, so --traceback shows why recording the status failed.
             raise CommandError(
-                f"Cloud backup uploaded successfully as {exc.object_key}, "
-                "but failed to record backup status."
+                f"Cloud backup uploaded successfully as {exc.object_key}, but failed to record backup status."
             ) from exc
         except CLOUD_BACKUP_ERRORS as exc:
             raise CommandError(f"Cloud backup failed: {exc}") from exc
