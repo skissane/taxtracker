@@ -1127,7 +1127,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
             for value in request.POST.getlist("fy_ids"):
                 try:
                     selected_pks.append(int(value))
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     continue
             selected_fys = list(FinancialYear.objects.filter(pk__in=selected_pks).order_by("year"))
             if not selected_fys:
@@ -1235,7 +1235,9 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
         context_data["summary_url"] = reverse("admin:taxtracker_financialyear_summary", args=[object_id])
         context_data["download_zip_url"] = reverse("admin:taxtracker_financialyear_download_zip", args=[object_id])
-        context_data["copy_to_new_year_url"] = reverse("admin:taxtracker_financialyear_copy_to_new_year", args=[object_id])
+        context_data["copy_to_new_year_url"] = reverse(
+            "admin:taxtracker_financialyear_copy_to_new_year", args=[object_id]
+        )
         fy = context_data.get("original")
         if fy:
             context_data["prev_fy"] = FinancialYear.objects.filter(year=fy.year - 1).first()
