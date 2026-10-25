@@ -52,7 +52,7 @@ lint:
 
 # Autofix Python lint issues with ruff
 lint-fix:
-    uv run --group dev ruff check --fix .
+    uv run --group dev ruff check --fix --exit-zero .
 
 # Check Python formatting with ruff
 fmt-check:
