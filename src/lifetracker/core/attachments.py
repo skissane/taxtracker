@@ -64,8 +64,7 @@ def database_storage_file_fields(model):
     return [
         field
         for field in model._meta.concrete_fields
-        if isinstance(field, models.FileField)
-        and isinstance(field.storage, DatabaseStorage)
+        if isinstance(field, models.FileField) and isinstance(field.storage, DatabaseStorage)
     ]
 
 
@@ -104,8 +103,4 @@ def orphaned_stored_file_pks():
                     referenced.add(field.storage._name_to_pk(name))
                 except ValueError:
                     pass
-    return [
-        pk
-        for pk in DBStoredFile.objects.order_by("pk").values_list("pk", flat=True)
-        if pk not in referenced
-    ]
+    return [pk for pk in DBStoredFile.objects.order_by("pk").values_list("pk", flat=True) if pk not in referenced]

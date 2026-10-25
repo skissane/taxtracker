@@ -60,9 +60,7 @@ def _build_eml_with_nested() -> bytes:
     outer["Subject"] = "Test Email"
     outer["Date"] = "Mon, 01 Jul 2024 10:00:00 +0000"
     outer.set_content("Hello body")
-    outer.add_attachment(
-        PDF_MAGIC, maintype="application", subtype="pdf", filename="doc.pdf"
-    )
+    outer.add_attachment(PDF_MAGIC, maintype="application", subtype="pdf", filename="doc.pdf")
     outer.add_attachment(nested, subtype="rfc822")
     return bytes(outer)
 
@@ -77,9 +75,7 @@ def _build_eml_with_nested_pdf_attachment() -> bytes:
     nested["Subject"] = "Payslip"
     nested["Date"] = "Tue, 02 Jul 2024 08:30:00 +0000"
     nested.set_content("Payslip body")
-    nested.add_attachment(
-        PDF_MAGIC, maintype="application", subtype="pdf", filename="payslip.pdf"
-    )
+    nested.add_attachment(PDF_MAGIC, maintype="application", subtype="pdf", filename="payslip.pdf")
 
     outer = EmailMessage()
     outer["From"] = "Sender <sender@example.com>"
@@ -266,11 +262,7 @@ class ExtractFidelityPdfsTests(TestCase):
             if body_text is None:
                 file_content_b64 = base64.b64encode(pdf_bytes).decode()
                 body_json = json.dumps({"fileContent": file_content_b64})
-                body_text = (
-                    base64.b64encode(body_json.encode()).decode()
-                    if body_encoding == "base64"
-                    else body_json
-                )
+                body_text = base64.b64encode(body_json.encode()).decode() if body_encoding == "base64" else body_json
             entry = {
                 "request": {
                     "method": method,
@@ -294,9 +286,7 @@ class ExtractFidelityPdfsTests(TestCase):
             count = extract_pdfs(har_path, out_dir)
 
             self.assertEqual(count, 1)
-            self.assertEqual(
-                (out_dir / "statement-2023-07-20.pdf").read_bytes(), PDF_MAGIC
-            )
+            self.assertEqual((out_dir / "statement-2023-07-20.pdf").read_bytes(), PDF_MAGIC)
 
     def test_skips_non_get_requests(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -312,9 +302,7 @@ class ExtractFidelityPdfsTests(TestCase):
             entries = [
                 {
                     "request": {"method": "GET", "url": "https://example.com/other"},
-                    "response": {
-                        "content": {"mimeType": "application/json", "text": "{}"}
-                    },
+                    "response": {"content": {"mimeType": "application/json", "text": "{}"}},
                 }
             ]
             har_path.write_bytes(self._make_har(entries=entries))
@@ -383,9 +371,7 @@ class ExtractFidelityPdfsTests(TestCase):
     def test_skips_undecodable_base64_body(self):
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
-            har_path.write_bytes(
-                self._make_har(body_encoding="base64", body_text="not-base64!!")
-            )
+            har_path.write_bytes(self._make_har(body_encoding="base64", body_text="not-base64!!"))
             out_dir = Path(tmp) / "out"
 
             self.assertEqual(extract_pdfs(har_path, out_dir), 0)
@@ -401,9 +387,7 @@ class ExtractFidelityPdfsTests(TestCase):
     def test_skips_undecodable_base64_file_content(self):
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
-            har_path.write_bytes(
-                self._make_har(body_text=json.dumps({"fileContent": "abc"}))
-            )
+            har_path.write_bytes(self._make_har(body_text=json.dumps({"fileContent": "abc"})))
             out_dir = Path(tmp) / "out"
 
             self.assertEqual(extract_pdfs(har_path, out_dir), 0)
@@ -424,9 +408,7 @@ class ExtractFidelityPdfsTests(TestCase):
             har_path.write_bytes(self._make_har())
             out_dir = Path(tmp) / "out"
 
-            result = runner.invoke(
-                extract_fidelity_pdfs_command, [str(har_path), str(out_dir)]
-            )
+            result = runner.invoke(extract_fidelity_pdfs_command, [str(har_path), str(out_dir)])
 
             self.assertEqual(result.exit_code, 0, result.output)
             self.assertTrue((out_dir / "statement-2023-07-20.pdf").exists())
@@ -465,9 +447,7 @@ class FilterZipTests(TestCase):
     def test_missing_input_file_exits(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(SystemExit) as ctx:
-                filter_zip(
-                    str(Path(tmp) / "missing.zip"), str(Path(tmp) / "out.zip"), "x"
-                )
+                filter_zip(str(Path(tmp) / "missing.zip"), str(Path(tmp) / "out.zip"), "x")
             self.assertEqual(ctx.exception.code, 1)
 
     def test_bad_zip_file_exits(self):
@@ -487,9 +467,7 @@ class FilterZipTests(TestCase):
                 zf.writestr("reject_me.txt", b"reject")
             output_zip = Path(tmp) / "out.zip"
 
-            result = runner.invoke(
-                filter_zip_command, [str(input_zip), str(output_zip), "reject"]
-            )
+            result = runner.invoke(filter_zip_command, [str(input_zip), str(output_zip), "reject"])
 
             self.assertEqual(result.exit_code, 0, result.output)
             self.assertIn("kept: 1", result.output)
@@ -502,12 +480,8 @@ class ProcessDatesTests(TestCase):
         self.assertEqual(get_financial_year(datetime.date(2024, 7, 1)), 2025)
 
     def test_read_dates_parses_iso_and_ordinal_formats(self):
-        dates = read_dates(
-            ["2024-01-15\n", "November 20th 2024\n", "\n", "2024-01-15\n"], 0
-        )
-        self.assertEqual(
-            dates, {datetime.date(2024, 1, 15), datetime.date(2024, 11, 20)}
-        )
+        dates = read_dates(["2024-01-15\n", "November 20th 2024\n", "\n", "2024-01-15\n"], 0)
+        self.assertEqual(dates, {datetime.date(2024, 1, 15), datetime.date(2024, 11, 20)})
 
     def test_read_dates_applies_add_days(self):
         dates = read_dates(["2024-01-15\n"], 5)
@@ -534,17 +508,13 @@ class ProcessDatesTests(TestCase):
         self.assertEqual(rendered, "# FY2024 (1 date)")
 
     def test_render_markdown_year_filter(self):
-        groups = group_by_financial_year(
-            {datetime.date(2023, 1, 1), datetime.date(2024, 1, 1)}
-        )
+        groups = group_by_financial_year({datetime.date(2023, 1, 1), datetime.date(2024, 1, 1)})
         rendered = render_markdown(groups, summary=True, year=2024)
         self.assertEqual(rendered, "# FY2024 (1 date)")
 
     def test_cli_end_to_end(self):
         runner = CliRunner()
-        result = runner.invoke(
-            process_dates_command, ["--summary"], input="2024-01-01\n2024-08-01\n"
-        )
+        result = runner.invoke(process_dates_command, ["--summary"], input="2024-01-01\n2024-08-01\n")
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("FY2024", result.output)
         self.assertIn("FY2025", result.output)
@@ -634,9 +604,7 @@ class ZipEmlToPdfTests(TestCase):
                 "lifetracker.cli.zip_eml_to_pdf.pdfkit.from_string",
                 return_value=b"%PDF-FAKE",
             ):
-                result = runner.invoke(
-                    zip_eml_to_pdf_command, [str(input_zip), str(output_zip)]
-                )
+                result = runner.invoke(zip_eml_to_pdf_command, [str(input_zip), str(output_zip)])
 
             self.assertEqual(result.exit_code, 0, result.output)
             self.assertIn("Batch complete!", result.output)
@@ -697,9 +665,7 @@ class ZipEmlToTxtTests(TestCase):
                 zf.writestr("plain.eml", _build_plain_eml())
             output_zip = Path(tmp) / "out.zip"
 
-            result = runner.invoke(
-                zip_eml_to_txt_command, [str(input_zip), str(output_zip)]
-            )
+            result = runner.invoke(zip_eml_to_txt_command, [str(input_zip), str(output_zip)])
 
             self.assertEqual(result.exit_code, 0, result.output)
             self.assertIn("Batch complete!", result.output)

@@ -33,12 +33,8 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("template", type=Path, help="envoy/envoy.yaml")
         parser.add_argument("output", type=Path, help="Where to write the config.")
-        parser.add_argument(
-            "--listen-host", required=True, help="The IP address Envoy listens on."
-        )
-        parser.add_argument(
-            "--listen-port", type=int, required=True, help="Envoy's port."
-        )
+        parser.add_argument("--listen-host", required=True, help="The IP address Envoy listens on.")
+        parser.add_argument("--listen-port", type=int, required=True, help="Envoy's port.")
         parser.add_argument(
             "--upstream-port",
             type=int,
@@ -46,9 +42,7 @@ class Command(BaseCommand):
             help="Gunicorn's port on 127.0.0.1.",
         )
 
-    def handle(
-        self, *args, template, output, listen_host, listen_port, upstream_port, **opts
-    ):
+    def handle(self, *args, template, output, listen_host, listen_port, upstream_port, **opts):
         try:
             config = envoy_config.render(
                 template.read_text(encoding="utf-8"),

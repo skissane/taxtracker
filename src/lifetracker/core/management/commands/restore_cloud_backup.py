@@ -37,16 +37,12 @@ from lifetracker.core.models import CLOUD_BACKUP_STATUS_PK, CloudBackupStatus
 
 
 class Command(BaseCommand):
-    help = (
-        "Replace the database with a cloud backup, after uploading a cloud "
-        "backup of the current one."
-    )
+    help = "Replace the database with a cloud backup, after uploading a cloud backup of the current one."
 
     def add_arguments(self, parser):
         parser.add_argument(
             "object_key",
-            help="The backup's object key, e.g. "
-            "host.example/db-backup.2026-10-24.01.02.03.sqlite3.",
+            help="The backup's object key, e.g. host.example/db-backup.2026-10-24.01.02.03.sqlite3.",
         )
         parser.add_argument(
             "--noinput",
@@ -80,9 +76,7 @@ class Command(BaseCommand):
                 # missing, and restoring would overwrite that anyway.
                 current_key = exc.object_key
             except CLOUD_BACKUP_ERRORS as exc:
-                raise CommandError(
-                    f"Not restoring: backing up the current database failed: {exc}"
-                ) from exc
+                raise CommandError(f"Not restoring: backing up the current database failed: {exc}") from exc
             self.stdout.write(f"Backed up the current database as {current_key}.")
 
             # Nothing else should record a backup in the meantime, as the
@@ -92,13 +86,11 @@ class Command(BaseCommand):
                 restore_database(path)
             except CLOUD_BACKUP_ERRORS as exc:
                 raise CommandError(
-                    f"Restoring {object_key} failed, so the database should be "
-                    f"unchanged: {exc}"
+                    f"Restoring {object_key} failed, so the database should be unchanged: {exc}"
                 ) from exc
         # Printed before anything else can fail.
         self.stdout.write(
-            f"Restored {object_key}. To undo, restore {current_key}, which holds "
-            "the database as it was before."
+            f"Restored {object_key}. To undo, restore {current_key}, which holds the database as it was before."
         )
 
         with transaction.atomic():

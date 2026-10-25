@@ -159,9 +159,7 @@ def eml_to_zip(eml_file_path: str, output_zip_path: str, prefix: str = "") -> No
                     content_type = message_body.get_content_type()
             click.echo(f"Added to ZIP: {zip_filename} ({content_type})")
 
-    click.echo(
-        f"\nSUCCESS: Extracted {attachment_count} attachments to {output_zip_path!r}"
-    )
+    click.echo(f"\nSUCCESS: Extracted {attachment_count} attachments to {output_zip_path!r}")
 
 
 @click.command("extract-eml")

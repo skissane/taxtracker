@@ -183,9 +183,7 @@ def run_step(step: dict, job_env: dict, workspace, dry_run):
 
 
 def main():
-    ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("workflow", help="path to .github/workflows/*.yml")
     ap.add_argument("--job", help="job name (default: first job in the workflow)")
     ap.add_argument("--list", action="store_true", help="list jobs/steps and exit")
@@ -199,9 +197,7 @@ def main():
         action="append",
         help="skip steps whose name contains this substring (repeatable)",
     )
-    ap.add_argument(
-        "--dry-run", action="store_true", help="print commands without executing"
-    )
+    ap.add_argument("--dry-run", action="store_true", help="print commands without executing")
     ap.add_argument(
         "--workspace",
         default=os.getcwd(),
@@ -230,9 +226,7 @@ def main():
 
     for step in steps:
         step_name: str = step.get("name", "")
-        if args.only and not any(
-            str(o).lower() in step_name.lower() for o in args.only
-        ):
+        if args.only and not any(str(o).lower() in step_name.lower() for o in args.only):
             continue
         if args.skip and any(str(s).lower() in step_name.lower() for s in args.skip):
             print(f"—  SKIP (--skip match) — {step_name}")

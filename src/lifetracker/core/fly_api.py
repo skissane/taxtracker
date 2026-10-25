@@ -63,9 +63,7 @@ def expand_path(path: str, environ=os.environ) -> str:
     return path
 
 
-def get(
-    path: str, socket_path: str = SOCKET_PATH, timeout: float = TIMEOUT_SECONDS
-) -> Response:
+def get(path: str, socket_path: str = SOCKET_PATH, timeout: float = TIMEOUT_SECONDS) -> Response:
     """GET ``path`` (e.g. ``/v1/apps/<app>/machines``) through the socket.
 
     Raises ``OSError`` if the socket can't be reached (``FileNotFoundError``
@@ -89,9 +87,7 @@ def post(
     return _request("POST", path, body, socket_path, timeout)
 
 
-def _request(
-    method: str, path: str, body: bytes | None, socket_path: str, timeout: float
-) -> Response:
+def _request(method: str, path: str, body: bytes | None, socket_path: str, timeout: float) -> Response:
     headers = {} if body is None else {"Content-Type": "application/json"}
     conn = _UnixHTTPConnection(socket_path, timeout)
     try:

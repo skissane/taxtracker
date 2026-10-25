@@ -316,9 +316,7 @@ def _download(url: str, destination: Path) -> bool:
         if response.status_code == 404:
             return False
         response.raise_for_status()
-        fd, temp_name = tempfile.mkstemp(
-            dir=destination.parent, prefix=f".{destination.name}."
-        )
+        fd, temp_name = tempfile.mkstemp(dir=destination.parent, prefix=f".{destination.name}.")
         try:
             with os.fdopen(fd, "wb") as temp_file:
                 with gzip.GzipFile(fileobj=response.raw) as unzipped:
@@ -332,9 +330,7 @@ def _download(url: str, destination: Path) -> bool:
     return True
 
 
-def _update_one(
-    geoip_dir: Path, name: str, months: tuple[str, str], download, tried: list[str]
-) -> dict:
+def _update_one(geoip_dir: Path, name: str, months: tuple[str, str], download, tried: list[str]) -> dict:
     """``update_geoip`` for one database: its outcome, and whether it fell back
     to last month's. Each URL is added to ``tried`` before it's downloaded."""
     this_month, last_month = months
@@ -465,9 +461,7 @@ def read_geoip_status(geoip_dir: Path) -> dict[str, dict] | None:
     if status is None:
         return None
     databases = status.get("databases")
-    if not isinstance(databases, dict) or not all(
-        isinstance(entry, dict) for entry in databases.values()
-    ):
+    if not isinstance(databases, dict) or not all(isinstance(entry, dict) for entry in databases.values()):
         raise ValueError("it doesn't hold each database's status")
     return databases
 
@@ -562,9 +556,7 @@ def build_relay_ranges(lines: Iterable[str], destination: Path) -> int:
     """Write the ranges in ``lines`` (Apple's list) to a new SQLite file,
     replacing ``destination`` with it; returns how many there were. Lines that
     aren't ranges are skipped; ValueError if none are."""
-    fd, temp_name = tempfile.mkstemp(
-        dir=destination.parent, prefix=f".{destination.name}."
-    )
+    fd, temp_name = tempfile.mkstemp(dir=destination.parent, prefix=f".{destination.name}.")
     os.close(fd)
     try:
         connection = sqlite3.connect(temp_name, isolation_level=None)
@@ -597,15 +589,11 @@ def _download_relay_ranges(url: str, destination: Path, etag: str | None):
     ``build_relay_ranges``), unless it's unchanged since the one with ``etag``.
     Returns the new list's ETag ("" if it has none), or None if unchanged."""
     headers = {"If-None-Match": etag} if etag else {}
-    with requests.get(
-        url, headers=headers, stream=True, timeout=GEOIP_TIMEOUT_SECONDS
-    ) as response:
+    with requests.get(url, headers=headers, stream=True, timeout=GEOIP_TIMEOUT_SECONDS) as response:
         if response.status_code == 304:
             return None
         response.raise_for_status()
-        lines = (
-            line.decode("utf-8", errors="replace") for line in response.iter_lines()
-        )
+        lines = (line.decode("utf-8", errors="replace") for line in response.iter_lines())
         build_relay_ranges(lines, destination)
         return response.headers.get("ETag", "")
 
@@ -650,8 +638,7 @@ class RelayRanges:
         key = _range_key(ipaddress.ip_address(ip))
         try:
             row = connection.execute(
-                "SELECT * FROM relay_range WHERE start <= ?"
-                " ORDER BY start DESC LIMIT 1",
+                "SELECT * FROM relay_range WHERE start <= ? ORDER BY start DESC LIMIT 1",
                 (key,),
             ).fetchone()
         except sqlite3.Error:
@@ -679,9 +666,7 @@ def connect(path: Path) -> sqlite3.Connection:
     connection.execute("PRAGMA journal_mode=WAL")
     with _transaction(connection):
         connection.execute(_SCHEMA)
-        columns = {
-            row["name"] for row in connection.execute("PRAGMA table_info(client_ip)")
-        }
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(client_ip)")}
         for column, type_ in _ADDED_COLUMNS.items():
             if column not in columns:
                 connection.execute(f"ALTER TABLE client_ip ADD COLUMN {column} {type_}")
@@ -692,9 +677,7 @@ def connect(path: Path) -> sqlite3.Connection:
 def connect_read_only(path: Path) -> sqlite3.Connection:
     """Open the collector's database read-only (``sqlite3.OperationalError``
     if it doesn't exist)."""
-    connection = sqlite3.connect(
-        f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=30
-    )
+    connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
     connection.row_factory = sqlite3.Row
     return connection
 
@@ -711,9 +694,7 @@ def _transaction(connection: sqlite3.Connection):
     connection.execute("COMMIT")
 
 
-def record(
-    connection: sqlite3.Connection, requests_: Iterable[Request], geoip: GeoIP
-) -> int:
+def record(connection: sqlite3.Connection, requests_: Iterable[Request], geoip: GeoIP) -> int:
     """Add ``requests_`` to the per-IP totals in one transaction; returns how
     many IPs were updated. A new IP, or one without a location yet, is looked
     up in ``geoip``, and every IP is checked against its relay ranges (unless
@@ -728,16 +709,12 @@ def record(
             ip_requests.sort(key=lambda request: request.time)
             latest = ip_requests[-1]
             logged_in_times = [r.time for r in ip_requests if r.logged_in]
-            row = connection.execute(
-                "SELECT * FROM client_ip WHERE ip = ?", (ip,)
-            ).fetchone()
+            row = connection.execute("SELECT * FROM client_ip WHERE ip = ?", (ip,)).fetchone()
             row = dict(row) if row is not None else None
             if row is None or (row["country"] is None and row["asn"] is None):
                 location = geoip.lookup(ip)
             else:
-                location = Location(
-                    row["country"], row["country_name"], row["asn"], row["as_org"]
-                )
+                location = Location(row["country"], row["country_name"], row["asn"], row["as_org"])
             relay = geoip.relay(ip)
             if relay.private_relay is None and row is not None:
                 relay = Relay(*(row[field.name] for field in dataclasses.fields(Relay)))
@@ -796,15 +773,12 @@ def fill_in_locations(connection: sqlite3.Connection, geoip: GeoIP) -> int:
     were downloaded); returns how many it found."""
     found = 0
     with _transaction(connection):
-        rows = connection.execute(
-            "SELECT ip FROM client_ip WHERE country IS NULL AND asn IS NULL"
-        ).fetchall()
+        rows = connection.execute("SELECT ip FROM client_ip WHERE country IS NULL AND asn IS NULL").fetchall()
         for row in rows:
             location = geoip.lookup(row["ip"])
             if location:
                 connection.execute(
-                    "UPDATE client_ip SET country = ?, country_name = ?, asn = ?,"
-                    " as_org = ? WHERE ip = ?",
+                    "UPDATE client_ip SET country = ?, country_name = ?, asn = ?, as_org = ? WHERE ip = ?",
                     (*dataclasses.astuple(location), row["ip"]),
                 )
                 found += 1
@@ -817,9 +791,7 @@ def fill_in_relay(connection: sqlite3.Connection, geoip: GeoIP) -> int:
     checked."""
     checked = 0
     with _transaction(connection):
-        rows = connection.execute(
-            "SELECT ip FROM client_ip WHERE private_relay IS NULL"
-        ).fetchall()
+        rows = connection.execute("SELECT ip FROM client_ip WHERE private_relay IS NULL").fetchall()
         for row in rows:
             relay = geoip.relay(row["ip"])
             if relay.private_relay is None:
@@ -862,15 +834,11 @@ def refresh_geoip(config: Config, connection: sqlite3.Connection, geoip: GeoIP):
         log(f"checked {checked} IPs seen earlier against the Private Relay ranges")
 
 
-def recent_ips(
-    connection: sqlite3.Connection, *, logged_in_only: bool = False, limit: int
-) -> list[sqlite3.Row]:
+def recent_ips(connection: sqlite3.Connection, *, logged_in_only: bool = False, limit: int) -> list[sqlite3.Row]:
     """Up to ``limit`` IPs, most recently seen first; only those with a valid
     JWT if ``logged_in_only``."""
     where = "WHERE logged_in > 0" if logged_in_only else ""
-    return connection.execute(
-        f"SELECT * FROM client_ip {where} ORDER BY last_seen DESC LIMIT ?", (limit,)
-    ).fetchall()
+    return connection.execute(f"SELECT * FROM client_ip {where} ORDER BY last_seen DESC LIMIT ?", (limit,)).fetchall()
 
 
 def ip_count(connection: sqlite3.Connection, *, logged_in_only: bool = False) -> int:
@@ -880,9 +848,7 @@ def ip_count(connection: sqlite3.Connection, *, logged_in_only: bool = False) ->
 
 # The client_ip columns holding POSIX times, which export_rows gives as ISO
 # 8601 UTC.
-TIME_COLUMNS = frozenset(
-    {"first_seen", "last_seen", "first_logged_in", "last_logged_in"}
-)
+TIME_COLUMNS = frozenset({"first_seen", "last_seen", "first_logged_in", "last_logged_in"})
 
 
 def _iso_utc(posix_time: float) -> str:
@@ -893,23 +859,17 @@ def _iso_utc(posix_time: float) -> str:
     )
 
 
-def export_rows(
-    connection: sqlite3.Connection, *, logged_in_only: bool = False
-) -> Iterable[dict]:
+def export_rows(connection: sqlite3.Connection, *, logged_in_only: bool = False) -> Iterable[dict]:
     """Every IP's row (only those with a valid JWT if ``logged_in_only``),
     first seen first, as a dict in the table's column order (so columns a
     later schema adds come last), with times as ISO 8601 UTC strings and
     missing values ``None``."""
     where = "WHERE logged_in > 0" if logged_in_only else ""
-    cursor = connection.execute(
-        f"SELECT * FROM client_ip {where} ORDER BY first_seen, ip"
-    )
+    cursor = connection.execute(f"SELECT * FROM client_ip {where} ORDER BY first_seen, ip")
     columns = [description[0] for description in cursor.description]
     for row in cursor:
         yield {
-            column: _iso_utc(value)
-            if column in TIME_COLUMNS and value is not None
-            else value
+            column: _iso_utc(value) if column in TIME_COLUMNS and value is not None else value
             for column, value in zip(columns, row, strict=True)
         }
 
@@ -967,9 +927,7 @@ def _collect(config, master_pid, connection, geoip, sleep, getppid) -> int:
     failing = False
     while True:
         try:
-            pending.extend(
-                request for request in map(parse_line, reader.read()) if request
-            )
+            pending.extend(request for request in map(parse_line, reader.read()) if request)
             record(connection, pending, geoip)
             pending.clear()
         except (OSError, sqlite3.Error) as exc:
@@ -993,9 +951,7 @@ def spawn(master_pid: int, environ: Mapping[str, str] = os.environ):
     no database to record in. Returns the ``Popen`` or None."""
     if config_from_env(environ).db_path is None:
         return None
-    return subprocess.Popen(
-        [sys.executable, "-m", __name__, str(master_pid)], env=dict(environ)
-    )
+    return subprocess.Popen([sys.executable, "-m", __name__, str(master_pid)], env=dict(environ))
 
 
 def _exit_quietly(signum, frame):

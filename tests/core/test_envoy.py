@@ -37,11 +37,7 @@ from django.utils import timezone
 from lifetracker.core import client_ips, envoy_config, jwt_auth
 from lifetracker.core.auth_whitelist import auth_whitelist
 
-REPO_ROOT = next(
-    parent
-    for parent in Path(__file__).resolve().parents
-    if (parent / "manage.py").exists()
-)
+REPO_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "manage.py").exists())
 TEMPLATE = (REPO_ROOT / "envoy" / "envoy.yaml").read_text(encoding="utf-8")
 
 
@@ -63,9 +59,7 @@ class EnvoyConfigRenderTests(SimpleTestCase):
         config = _render()
         self.assertNotRegex(config, r"@[A-Z_]+@")
         self.assertIn('address: "0.0.0.0"\n          port_value: 8000\n', config)
-        self.assertIn(
-            "address: 127.0.0.1\n                      port_value: 8001\n", config
-        )
+        self.assertIn("address: 127.0.0.1\n                      port_value: 8001\n", config)
         self.assertIn(f'issuer: "{jwt_auth.JWT_ISSUER}"', config)
         self.assertIn(f'audiences: ["{jwt_auth.JWT_AUDIENCE}"]', config)
         self.assertIn(f'from_cookies: ["{jwt_auth.JWT_COOKIE_NAME}"]', config)
@@ -81,11 +75,7 @@ class EnvoyConfigRenderTests(SimpleTestCase):
 
     def test_rules_whitelist_each_path_and_method_then_require_the_jwt(self):
         rules = envoy_config.jwt_rules()
-        expected = [
-            (entry.path, entry.prefix, method)
-            for entry in auth_whitelist()
-            for method in entry.methods
-        ]
+        expected = [(entry.path, entry.prefix, method) for entry in auth_whitelist() for method in entry.methods]
         self.assertEqual(
             [
                 (
@@ -165,9 +155,7 @@ class EnvoyConfigCommandTests(SimpleTestCase):
                     "--listen-port=9000",
                     "--upstream-port=9001",
                 )
-                expected = _render(
-                    listen_host="127.0.0.1", listen_port=9000, upstream_port=9001
-                )
+                expected = _render(listen_host="127.0.0.1", listen_port=9000, upstream_port=9001)
             self.assertEqual(output.read_text(), expected)
             self.assertTrue(jwks.exists())
 
@@ -197,9 +185,7 @@ class EnvoyConfigCommandTests(SimpleTestCase):
     def test_reports_bad_settings(self):
         with tempfile.TemporaryDirectory() as tempdir:
             output = Path(tempdir) / "envoy.yaml"
-            with self.assertRaisesMessage(
-                CommandError, "The listen and upstream ports must differ: 9000"
-            ):
+            with self.assertRaisesMessage(CommandError, "The listen and upstream ports must differ: 9000"):
                 call_command(
                     "envoy_config",
                     str(REPO_ROOT / "envoy" / "envoy.yaml"),
@@ -273,21 +259,14 @@ class EnvoyAuthTests(SimpleTestCase):
         docker = None if envoy else _docker()
         if not envoy and docker is None:
             if os.environ.get("LIFETRACKER_REQUIRE_ENVOY"):
-                raise RuntimeError(
-                    "Docker isn't available to run Envoy, and"
-                    " LIFETRACKER_REQUIRE_ENVOY is set"
-                )
+                raise RuntimeError("Docker isn't available to run Envoy, and LIFETRACKER_REQUIRE_ENVOY is set")
             raise unittest.SkipTest("Docker isn't available to run Envoy")
         if docker is not None:
             image = _envoy_image()
             # Pulled here, so the wait for Envoy below doesn't include it.
-            inspect = subprocess.run(
-                [docker, "image", "inspect", image], capture_output=True
-            )
+            inspect = subprocess.run([docker, "image", "inspect", image], capture_output=True)
             if inspect.returncode != 0:
-                subprocess.run(
-                    [docker, "pull", image], check=True, stdout=subprocess.DEVNULL
-                )
+                subprocess.run([docker, "pull", image], check=True, stdout=subprocess.DEVNULL)
 
         tempdir = tempfile.TemporaryDirectory()
         cls.addClassCleanup(tempdir.cleanup)
@@ -399,9 +378,7 @@ class EnvoyAuthTests(SimpleTestCase):
         changed if given."""
         expires_at = timezone.now() + datetime.timedelta(seconds=expires_in)
         with self.key_settings:
-            token = jwt_auth.issue_token(
-                types.SimpleNamespace(pk=1), "session-key", expires_at
-            )
+            token = jwt_auth.issue_token(types.SimpleNamespace(pk=1), "session-key", expires_at)
             own_key, kid = jwt_auth.signing_key()
         if key is None and not claims:
             return token
@@ -434,9 +411,7 @@ class EnvoyAuthTests(SimpleTestCase):
     def assertRedirectsToLogin(self, method, path, next_value, **kwargs):
         status, headers, echoed = self._request(method, path, **kwargs)
         self.assertEqual(status, 302, (method, path))
-        self.assertEqual(
-            headers["Location"], f"{reverse('admin:login')}?next={next_value}"
-        )
+        self.assertEqual(headers["Location"], f"{reverse('admin:login')}?next={next_value}")
         self.assertIsNone(echoed)
 
     def assertPassedThrough(self, method, path, upstream_path=None, **kwargs):
@@ -468,12 +443,8 @@ class EnvoyAuthTests(SimpleTestCase):
     def test_valid_jwt_passes_cookie_on(self):
         token = self._token()
         echoed = self.assertPassedThrough("GET", "/admin/", token=token)
-        self.assertEqual(
-            echoed["cookie"], f"other=1; {jwt_auth.JWT_COOKIE_NAME}={token}"
-        )
-        self.assertPassedThrough(
-            "POST", "/admin/taxtracker/item/add/", token=token, body="x=1"
-        )
+        self.assertEqual(echoed["cookie"], f"other=1; {jwt_auth.JWT_COOKIE_NAME}={token}")
+        self.assertPassedThrough("POST", "/admin/taxtracker/item/add/", token=token, body="x=1")
 
     def test_invalid_jwts_redirect_to_login(self):
         other_key = Ed25519PrivateKey.generate()
@@ -494,13 +465,9 @@ class EnvoyAuthTests(SimpleTestCase):
                 self.assertRedirectsToLogin("GET", "/admin/", "/admin/", token=token)
 
     def test_bearer_header(self):
-        self.assertPassedThrough(
-            "GET", "/admin/", headers={"Authorization": f"Bearer {self._token()}"}
-        )
+        self.assertPassedThrough("GET", "/admin/", headers={"Authorization": f"Bearer {self._token()}"})
         # Not from a browser, so a 401 rather than a redirect.
-        status, headers, echoed = self._request(
-            "GET", "/admin/", headers={"Authorization": "Bearer not-a-jwt"}
-        )
+        status, headers, echoed = self._request("GET", "/admin/", headers={"Authorization": "Bearer not-a-jwt"})
         self.assertEqual(status, 401)
         self.assertNotIn("Location", headers)
         self.assertIsNone(echoed)
@@ -508,9 +475,7 @@ class EnvoyAuthTests(SimpleTestCase):
     def test_any_invalid_jwt_is_rejected(self):
         token = self._token()
         self.assertEqual(
-            self._request(
-                "GET", "/admin/", token=token, headers={"Authorization": "Bearer x"}
-            )[0],
+            self._request("GET", "/admin/", token=token, headers={"Authorization": "Bearer x"})[0],
             401,
         )
         self.assertEqual(
@@ -606,13 +571,9 @@ class EnvoyAuthTests(SimpleTestCase):
     def test_request_log(self):
         user_agent = f"test-{uuid.uuid4().hex}"
         headers = {"User-Agent": user_agent, "Fly-Client-IP": "203.0.113.7"}
-        self.assertRedirectsToLogin(
-            "GET", "/admin/?a=1", "/admin/%3Fa%3D1", headers=headers
-        )
+        self.assertRedirectsToLogin("GET", "/admin/?a=1", "/admin/%3Fa%3D1", headers=headers)
         self.assertPassedThrough("GET", "/admin/", token=self._token(), headers=headers)
-        self.assertPassedThrough(
-            "GET", reverse("admin:login"), headers={"User-Agent": user_agent}
-        )
+        self.assertPassedThrough("GET", reverse("admin:login"), headers={"User-Agent": user_agent})
         deadline = time.monotonic() + 20
         while len(found := self._logged_requests(user_agent)) < 3:
             self.assertLess(time.monotonic(), deadline, found)

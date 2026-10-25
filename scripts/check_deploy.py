@@ -79,9 +79,7 @@ def main(argv=None, *, clock=time.monotonic, sleep=time.sleep) -> int:
         attempt += 1
         # Don't let one slow request run far past the deadline.
         remaining = max(deadline - clock(), 1)
-        problem = check_once(
-            args.url, args.commit, min(args.request_timeout, remaining)
-        )
+        problem = check_once(args.url, args.commit, min(args.request_timeout, remaining))
         if problem is None:
             print(f"Attempt {attempt}: healthy, running {args.commit}")
             return 0

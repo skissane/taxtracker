@@ -92,13 +92,9 @@ class GetTests(FakeFlyApiMixin, SimpleTestCase):
 
 class PostTests(FakeFlyApiMixin, SimpleTestCase):
     def test_post_without_body(self):
-        response = fly_api.post(
-            "/v1/apps/x/machines/m/stop", socket_path=self.socket_path
-        )
+        response = fly_api.post("/v1/apps/x/machines/m/stop", socket_path=self.socket_path)
         self.assertEqual(response.status, 200)
-        self.assertEqual(
-            self.requests, [("POST", "/v1/apps/x/machines/m/stop", "flaps")]
-        )
+        self.assertEqual(self.requests, [("POST", "/v1/apps/x/machines/m/stop", "flaps")])
         self.assertEqual(self.posts, [("0", None, b"")])
 
     def test_post_json(self):
@@ -136,9 +132,7 @@ class ExpandPathTests(SimpleTestCase):
 
 class FlyApiCommandTests(FakeFlyApiMixin, SimpleTestCase):
     def invoke(self, *args, env=None):
-        return CliRunner().invoke(
-            cli, ["fly-api", "--socket", self.socket_path, *args], env=env
-        )
+        return CliRunner().invoke(cli, ["fly-api", "--socket", self.socket_path, *args], env=env)
 
     def test_pretty_prints_json(self):
         result = self.invoke("/v1/apps/{app}/machines", env={"FLY_APP_NAME": "a"})
@@ -172,22 +166,16 @@ class FlyApiCommandTests(FakeFlyApiMixin, SimpleTestCase):
 
     def test_post_without_body(self):
         env = {"FLY_APP_NAME": "a", "FLY_MACHINE_ID": "m"}
-        result = self.invoke(
-            "--post", "/v1/apps/{app}/machines/{machine}/stop", env=env
-        )
+        result = self.invoke("--post", "/v1/apps/{app}/machines/{machine}/stop", env=env)
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertEqual(result.stdout, '{\n  "ok": true\n}\n')
-        self.assertEqual(
-            self.requests, [("POST", "/v1/apps/a/machines/m/stop", "flaps")]
-        )
+        self.assertEqual(self.requests, [("POST", "/v1/apps/a/machines/m/stop", "flaps")])
         self.assertEqual(self.posts, [("0", None, b"")])
 
     def test_post_json(self):
         result = self.invoke("/x", "--post", "--json", '{"signal": "SIGHUP"}')
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertEqual(
-            self.posts, [("20", "application/json", b'{"signal": "SIGHUP"}')]
-        )
+        self.assertEqual(self.posts, [("20", "application/json", b'{"signal": "SIGHUP"}')])
 
     def test_json_needs_post(self):
         result = self.invoke("/x", "--json", "{}")

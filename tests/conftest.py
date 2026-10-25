@@ -30,6 +30,4 @@ def _no_relay_ranges_download(monkeypatch):
     does unless given ``download_relay_ranges``, and so the collector and the
     ``update_geoip`` command. Instead the list is always unchanged, so there
     are none unless a test writes them."""
-    monkeypatch.setattr(
-        client_ips, "_download_relay_ranges", lambda url, destination, etag: None
-    )
+    monkeypatch.setattr(client_ips, "_download_relay_ranges", lambda url, destination, etag: None)

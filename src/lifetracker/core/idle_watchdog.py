@@ -80,11 +80,7 @@ class Config:
 
     @property
     def has_work(self) -> bool:
-        return (
-            self.mode != "off"
-            or self.uptime_dir is not None
-            or self.auto_backup_interval_seconds is not None
-        )
+        return self.mode != "off" or self.uptime_dir is not None or self.auto_backup_interval_seconds is not None
 
 
 def _positive_number(environ: Mapping[str, str], name: str, default: float) -> float:
@@ -122,15 +118,9 @@ def config_from_env(environ: Mapping[str, str] = os.environ) -> Config:
     """
     mode = environ.get("LIFETRACKER_IDLE_STOP", "").strip().lower() or "off"
     if mode not in MODES:
-        raise ValueError(
-            f"LIFETRACKER_IDLE_STOP must be one of {', '.join(MODES)}, not {mode!r}"
-        )
-    idle_minutes = _positive_number(
-        environ, "LIFETRACKER_IDLE_STOP_MINUTES", DEFAULT_IDLE_MINUTES
-    )
-    interval_seconds = _positive_number(
-        environ, "LIFETRACKER_IDLE_STOP_INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS
-    )
+        raise ValueError(f"LIFETRACKER_IDLE_STOP must be one of {', '.join(MODES)}, not {mode!r}")
+    idle_minutes = _positive_number(environ, "LIFETRACKER_IDLE_STOP_MINUTES", DEFAULT_IDLE_MINUTES)
+    interval_seconds = _positive_number(environ, "LIFETRACKER_IDLE_STOP_INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS)
     raw_ports = environ.get("LIFETRACKER_IDLE_STOP_PORTS", "").strip()
     if not raw_ports:
         raw_ports = f"{environ.get('PORT', '').strip() or 8000},{SSH_PORT}"
@@ -139,25 +129,13 @@ def config_from_env(environ: Mapping[str, str] = os.environ) -> Config:
     except ValueError:
         ports = ()
     if not ports or not all(0 < port < 65536 for port in ports):
-        raise ValueError(
-            "LIFETRACKER_IDLE_STOP_PORTS must be comma-separated port numbers,"
-            f" not {raw_ports!r}"
-        )
-    status_file = Path(
-        environ.get("LIFETRACKER_IDLE_STOP_STATUS_FILE", "").strip()
-        or DEFAULT_STATUS_FILE
-    )
-    request_file = Path(
-        environ.get("LIFETRACKER_IDLE_STOP_REQUEST_FILE", "").strip()
-        or DEFAULT_REQUEST_FILE
-    )
-    auto_backup_mode = (
-        environ.get("LIFETRACKER_AUTO_BACKUP", "").strip().lower() or "off"
-    )
+        raise ValueError(f"LIFETRACKER_IDLE_STOP_PORTS must be comma-separated port numbers, not {raw_ports!r}")
+    status_file = Path(environ.get("LIFETRACKER_IDLE_STOP_STATUS_FILE", "").strip() or DEFAULT_STATUS_FILE)
+    request_file = Path(environ.get("LIFETRACKER_IDLE_STOP_REQUEST_FILE", "").strip() or DEFAULT_REQUEST_FILE)
+    auto_backup_mode = environ.get("LIFETRACKER_AUTO_BACKUP", "").strip().lower() or "off"
     if auto_backup_mode not in AUTO_BACKUP_MODES:
         raise ValueError(
-            "LIFETRACKER_AUTO_BACKUP must be one of"
-            f" {', '.join(AUTO_BACKUP_MODES)}, not {auto_backup_mode!r}"
+            f"LIFETRACKER_AUTO_BACKUP must be one of {', '.join(AUTO_BACKUP_MODES)}, not {auto_backup_mode!r}"
         )
     auto_backup_hours = _positive_number(
         environ,
@@ -172,9 +150,7 @@ def config_from_env(environ: Mapping[str, str] = os.environ) -> Config:
         status_file=status_file,
         request_file=request_file,
         uptime_dir=uptime_log.uptime_dir_from_env(environ),
-        auto_backup_interval_seconds=(
-            auto_backup_hours * 3600 if auto_backup_mode == "on" else None
-        ),
+        auto_backup_interval_seconds=(auto_backup_hours * 3600 if auto_backup_mode == "on" else None),
     )
 
 
@@ -218,9 +194,7 @@ def established_local_ports(text: str) -> Iterable[int]:
             yield int(fields[1].rsplit(":", 1)[1], 16)
 
 
-def count_connections(
-    ports: Iterable[int], paths: Iterable[Path] = PROC_NET_TCP_FILES
-) -> dict[int, int]:
+def count_connections(ports: Iterable[int], paths: Iterable[Path] = PROC_NET_TCP_FILES) -> dict[int, int]:
     """Count established connections to each of ``ports``, over IPv4 and IPv6.
 
     A missing table (e.g. no IPv6) counts as no connections.
@@ -240,9 +214,7 @@ def count_connections(
 def _iso(timestamp: float | None) -> str | None:
     if timestamp is None:
         return None
-    return datetime.datetime.fromtimestamp(timestamp, datetime.UTC).isoformat(
-        timespec="seconds"
-    )
+    return datetime.datetime.fromtimestamp(timestamp, datetime.UTC).isoformat(timespec="seconds")
 
 
 class Watchdog:
@@ -263,9 +235,7 @@ class Watchdog:
         self.backing_up = False
         self.auto_backup: auto_backup.AutoBackup | None = None
 
-    def check(
-        self, now: float, counts: Mapping[int, int], last_request: float | None
-    ) -> bool:
+    def check(self, now: float, counts: Mapping[int, int], last_request: float | None) -> bool:
         """Record one check's connection counts and the request file's
         modification time; return whether it's time to stop (whatever the
         mode)."""
@@ -318,9 +288,7 @@ class Watchdog:
                 }
                 for port in self.config.ports
             ],
-            "auto_backup": (
-                self.auto_backup.status(_iso) if self.auto_backup else None
-            ),
+            "auto_backup": (self.auto_backup.status(_iso) if self.auto_backup else None),
         }
 
 
@@ -406,9 +374,7 @@ def run(
             since = started_at - booted
     backup = None
     if config.auto_backup_interval_seconds is not None:
-        backup = auto_backup.AutoBackup(
-            config.auto_backup_interval_seconds, started_at, log=log, popen=popen
-        )
+        backup = auto_backup.AutoBackup(config.auto_backup_interval_seconds, started_at, log=log, popen=popen)
         watchdog.auto_backup = backup
         log(
             "automatic backups at startup, every"
@@ -450,9 +416,7 @@ def run(
         if backup is not None:
             backup.tick(now)
         if check_due:
-            due = watchdog.check(
-                now, count(config.ports), request_time(config.request_file)
-            )
+            due = watchdog.check(now, count(config.ports), request_time(config.request_file))
             stop = due and config.mode == "stop"
             backing_up = False
             if not due:
@@ -474,17 +438,11 @@ def run(
                 log(f"couldn't write {config.status_file}: {exc}")
             idle_minutes = config.idle_seconds / 60
             if watchdog.stopping:
-                log(
-                    f"no activity for {idle_minutes:g} minutes, sending SIGTERM"
-                    f" to gunicorn master {master_pid}"
-                )
+                log(f"no activity for {idle_minutes:g} minutes, sending SIGTERM to gunicorn master {master_pid}")
                 kill(master_pid, signal.SIGTERM)
                 return 0
             if due and config.mode == "monitor" and not reported_due:
-                log(
-                    f"no activity for {idle_minutes:g} minutes"
-                    " (monitor mode: not stopping)"
-                )
+                log(f"no activity for {idle_minutes:g} minutes (monitor mode: not stopping)")
             reported_due = due
             # From the schedule rather than now, so checks don't drift; but
             # never into the past, so a long stall doesn't bunch them up.
@@ -517,9 +475,7 @@ def spawn(master_pid: int, environ: Mapping[str, str] = os.environ):
     if not PROC_NET_TCP_FILES[0].exists():
         log(f"not starting: {PROC_NET_TCP_FILES[0]} is missing (Linux only)")
         return None
-    return subprocess.Popen(
-        [sys.executable, "-m", __name__, str(master_pid)], env=dict(environ)
-    )
+    return subprocess.Popen([sys.executable, "-m", __name__, str(master_pid)], env=dict(environ))
 
 
 def _exit_quietly(signum, frame):

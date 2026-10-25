@@ -49,9 +49,7 @@ def page(transactional_db, live_server, settings):
 def _screenshot(page, name):
     for color_scheme in ("light", "dark"):
         page.emulate_media(color_scheme=color_scheme)
-        page.screenshot(
-            path=SCREENSHOT_DIR / f"{name}-{color_scheme}.png", full_page=True
-        )
+        page.screenshot(path=SCREENSHOT_DIR / f"{name}-{color_scheme}.png", full_page=True)
 
 
 def test_login(page, settings):
@@ -106,9 +104,9 @@ def test_cloud_backup_list(admin_user, page, settings):
         "screenshots.example/": [{"Contents": objects}],
     }
     with mock.patch("lifetracker.core.backup.boto3.client") as client:
-        client.return_value.get_paginator.return_value.paginate.side_effect = (
-            lambda **kwargs: pages[kwargs.get("Delimiter") or kwargs["Prefix"]]
-        )
+        client.return_value.get_paginator.return_value.paginate.side_effect = lambda **kwargs: pages[
+            kwargs.get("Delimiter") or kwargs["Prefix"]
+        ]
         _log_in(page, admin_user)
         page.goto("/admin/core/cloudbackupstatus/list/")
         _screenshot(page, "cloud-backup-list")
@@ -215,9 +213,7 @@ def test_client_ips(admin_user, page, monkeypatch, tmp_path):
     browser = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Firefox/140.0"
     requests = [
         *(
-            client_ips.Request(
-                "203.0.113.7", now - 3600 * h, "GET /admin/", 200, browser, False, True
-            )
+            client_ips.Request("203.0.113.7", now - 3600 * h, "GET /admin/", 200, browser, False, True)
             for h in (50, 26, 2)
         ),
         client_ips.Request(
@@ -251,9 +247,7 @@ def test_client_ips(admin_user, page, monkeypatch, tmp_path):
             )
             for m, path in ((90, "GET /.env"), (89, "GET /wp-login.php"))
         ),
-        client_ips.Request(
-            "192.0.2.9", now - 300, "GET /admin/login/", 200, "curl/8.5.0", False, False
-        ),
+        client_ips.Request("192.0.2.9", now - 300, "GET /admin/login/", 200, "curl/8.5.0", False, False),
     ]
     connection = client_ips.connect(tmp_path / "client_ips.sqlite3")
     geoip = client_ips.GeoIP(tmp_path / "geoip")

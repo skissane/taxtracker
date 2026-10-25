@@ -43,9 +43,7 @@ _data_dir = _env_path("LIFETRACKER_DATA_DIR")
 # LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE override each file. A setting rather
 # than private, so management commands can use it too.
 _home_config_dir = Path.home() / ".config" / "lifetracker"
-LIFETRACKER_CONFIG_DIR = (
-    _env_path("LIFETRACKER_CONFIG_DIR") or _data_dir or _home_config_dir
-)
+LIFETRACKER_CONFIG_DIR = _env_path("LIFETRACKER_CONFIG_DIR") or _data_dir or _home_config_dir
 
 # SECRET_KEY is stored in a file to avoid committing it to source control.
 # Set LIFETRACKER_SECRET_KEY_FILE to override the default location.
@@ -63,11 +61,7 @@ if (
 ):
     _old_key_file = Path.home() / ".config" / "taxtracker" / "secret_key"
     try:
-        _old_stored = (
-            _old_key_file.read_text(encoding="utf-8").strip()
-            if _old_key_file.exists()
-            else ""
-        )
+        _old_stored = _old_key_file.read_text(encoding="utf-8").strip() if _old_key_file.exists() else ""
     except OSError:
         _old_stored = ""
     if _old_stored:
@@ -79,9 +73,7 @@ if (
             pass
 
 try:
-    _stored = (
-        _key_file.read_text(encoding="utf-8").strip() if _key_file.exists() else ""
-    )
+    _stored = _key_file.read_text(encoding="utf-8").strip() if _key_file.exists() else ""
 except OSError as _e:
     raise RuntimeError(
         f"Could not read secret key file {_key_file}: {_e}. "
@@ -107,12 +99,9 @@ SECRET_KEY = _stored
 # lifetracker/core/jwt_auth.py): the private key, created on first use, and
 # the public key as a JWKS, for the proxy.
 LIFETRACKER_JWT_PRIVATE_KEY_FILE = (
-    _env_path("LIFETRACKER_JWT_PRIVATE_KEY_FILE")
-    or LIFETRACKER_CONFIG_DIR / "jwt_private_key.pem"
+    _env_path("LIFETRACKER_JWT_PRIVATE_KEY_FILE") or LIFETRACKER_CONFIG_DIR / "jwt_private_key.pem"
 )
-LIFETRACKER_JWT_JWKS_FILE = (
-    _env_path("LIFETRACKER_JWT_JWKS_FILE") or LIFETRACKER_CONFIG_DIR / "jwt_jwks.json"
-)
+LIFETRACKER_JWT_JWKS_FILE = _env_path("LIFETRACKER_JWT_JWKS_FILE") or LIFETRACKER_CONFIG_DIR / "jwt_jwks.json"
 
 
 def _env_bool(name, default):
@@ -147,13 +136,9 @@ _fly_hostname = f"{_fly_app_name}.fly.dev" if _fly_app_name else ""
 # With DEBUG on and this empty, Django allows localhost only. With DEBUG off
 # and this empty, Django would start fine and then reject every request with a
 # 400, so fail at startup instead.
-ALLOWED_HOSTS = _env_list("LIFETRACKER_ALLOWED_HOSTS") or (
-    [_fly_hostname] if _fly_hostname else []
-)
+ALLOWED_HOSTS = _env_list("LIFETRACKER_ALLOWED_HOSTS") or ([_fly_hostname] if _fly_hostname else [])
 if not DEBUG and not ALLOWED_HOSTS:
-    raise ImproperlyConfigured(
-        "LIFETRACKER_ALLOWED_HOSTS must be set when LIFETRACKER_DEBUG is off."
-    )
+    raise ImproperlyConfigured("LIFETRACKER_ALLOWED_HOSTS must be set when LIFETRACKER_DEBUG is off.")
 
 # Behind a TLS-terminating reverse proxy, Django sees plain HTTP, so the admin
 # login's CSRF Origin check fails. Either list the public origins here
@@ -254,21 +239,11 @@ DATABASES = {
 
 # S3-compatible cloud backup destination (supports AWS S3, Cloudflare R2,
 # Backblaze B2 S3 API, etc.). The endpoint is optional (leave blank for AWS).
-LIFETRACKER_BACKUP_S3_ENDPOINT_URL = os.environ.get(
-    "LIFETRACKER_BACKUP_S3_ENDPOINT_URL", ""
-).strip()
-LIFETRACKER_BACKUP_S3_BUCKET_NAME = os.environ.get(
-    "LIFETRACKER_BACKUP_S3_BUCKET_NAME", ""
-).strip()
-LIFETRACKER_BACKUP_S3_REGION_NAME = os.environ.get(
-    "LIFETRACKER_BACKUP_S3_REGION_NAME", ""
-).strip()
-LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID = os.environ.get(
-    "LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID", ""
-).strip()
-LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY = os.environ.get(
-    "LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY", ""
-).strip()
+LIFETRACKER_BACKUP_S3_ENDPOINT_URL = os.environ.get("LIFETRACKER_BACKUP_S3_ENDPOINT_URL", "").strip()
+LIFETRACKER_BACKUP_S3_BUCKET_NAME = os.environ.get("LIFETRACKER_BACKUP_S3_BUCKET_NAME", "").strip()
+LIFETRACKER_BACKUP_S3_REGION_NAME = os.environ.get("LIFETRACKER_BACKUP_S3_REGION_NAME", "").strip()
+LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID = os.environ.get("LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID", "").strip()
+LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY = os.environ.get("LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY", "").strip()
 LIFETRACKER_COMMIT_URL_BASE = os.environ.get(
     "LIFETRACKER_COMMIT_URL_BASE", "https://github.com/skissane/taxtracker/commit/"
 ).strip()
@@ -276,24 +251,20 @@ LIFETRACKER_COMMIT_ID = os.environ.get("LIFETRACKER_COMMIT_ID", "").strip()
 # Shown instead of "Life Tracker" in the admin header and page titles to visitors
 # who aren't logged in, e.g. on the login page.
 LIFETRACKER_UNAUTHENTICATED_SITE_NAME = (
-    os.environ.get("LIFETRACKER_UNAUTHENTICATED_SITE_NAME", "").strip()
-    or "Life Tracker"
+    os.environ.get("LIFETRACKER_UNAUTHENTICATED_SITE_NAME", "").strip() or "Life Tracker"
 )
 # Prefixed to backup object keys so backups from different environments (e.g.
 # local dev vs. Docker, which use separate databases) are distinguishable. On
 # Fly, defaults to <app>.fly.dev, as the Machine's own hostname is a random ID
 # that changes when it's replaced.
 LIFETRACKER_BACKUP_HOSTNAME = (
-    os.environ.get("LIFETRACKER_BACKUP_HOSTNAME", "").strip()
-    or _fly_hostname
-    or socket.gethostname()
+    os.environ.get("LIFETRACKER_BACKUP_HOSTNAME", "").strip() or _fly_hostname or socket.gethostname()
 )
 # Where a cloud backup records the database file's state, so that
 # `cloud_backup --if-changed` (the automatic backups) can skip one when nothing
 # has changed since. Beside the database by default.
 LIFETRACKER_BACKUP_STATE_FILE = Path(
-    os.environ.get("LIFETRACKER_BACKUP_STATE_FILE", "").strip()
-    or f"{DATABASES['default']['NAME']}-backup-state.json"
+    os.environ.get("LIFETRACKER_BACKUP_STATE_FILE", "").strip() or f"{DATABASES['default']['NAME']}-backup-state.json"
 )
 
 
@@ -303,25 +274,18 @@ def fly_machine_url(app_name, machine_id):
     app_name, machine_id = app_name.strip(), machine_id.strip()
     if not (app_name and machine_id):
         return ""
-    return (
-        f"https://fly.io/apps/{quote(app_name, safe='')}"
-        f"/machines/{quote(machine_id, safe='')}"
-    )
+    return f"https://fly.io/apps/{quote(app_name, safe='')}/machines/{quote(machine_id, safe='')}"
 
 
 # Fly sets both on its Machines.
-LIFETRACKER_FLY_MACHINE_URL = fly_machine_url(
-    _fly_app_name, os.environ.get("FLY_MACHINE_ID", "")
-)
+LIFETRACKER_FLY_MACHINE_URL = fly_machine_url(_fly_app_name, os.environ.get("FLY_MACHINE_ID", ""))
 
 # Google SSO: disabled by default unless credentials are configured. When enabled,
 # a Google account may sign in only if its email is verified, is in
 # LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS, and matches an existing active Django
 # user's email (and no other user's). New users are never auto-created.
 GOOGLE_SSO_CLIENT_ID = os.environ.get("LIFETRACKER_GOOGLE_SSO_CLIENT_ID", "").strip()
-GOOGLE_SSO_CLIENT_SECRET = os.environ.get(
-    "LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET", ""
-).strip()
+GOOGLE_SSO_CLIENT_SECRET = os.environ.get("LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET", "").strip()
 GOOGLE_SSO_PROJECT_ID = os.environ.get("LIFETRACKER_GOOGLE_SSO_PROJECT_ID", "").strip()
 GOOGLE_SSO_ENABLED = bool(GOOGLE_SSO_CLIENT_ID and GOOGLE_SSO_CLIENT_SECRET)
 
@@ -339,9 +303,7 @@ GOOGLE_SSO_LOGO_URL = _google_sso_logo_url
 # the verified-email check) to the email allowlist in pre_validate_user.
 GOOGLE_SSO_ALLOWABLE_DOMAINS = ["*"]
 # Read by lifetracker.google_sso.pre_validate_user, not by the library.
-LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS = _env_list(
-    "LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS"
-)
+LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS = _env_list("LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS")
 # Never create users through Google SSO: only look up existing ones. The library
 # defaults this to True, so it must stay explicitly False. With it False, the
 # library's other user-creation settings (staff/superuser lists, first-superuser
@@ -358,16 +320,14 @@ GOOGLE_SSO_SHOW_FAILED_LOGIN_MESSAGE = True
 GOOGLE_SSO_SESSION_COOKIE_AGE = None
 GOOGLE_SSO_ADMIN_ENABLED = True
 GOOGLE_SSO_PAGES_ENABLED = False
-GOOGLE_SSO_CALLBACK_DOMAIN = (
-    os.environ.get("LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN", "").strip() or None
-)
+GOOGLE_SSO_CALLBACK_DOMAIN = os.environ.get("LIFETRACKER_GOOGLE_SSO_CALLBACK_DOMAIN", "").strip() or None
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",  # noqa: E501
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
     {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",

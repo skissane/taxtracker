@@ -17,10 +17,7 @@ class ImportArchiveForm(forms.Form):
 
     archive = forms.FileField(
         label="Archive file",
-        help_text=(
-            "Upload an archive file to extract attachments from. "
-            "Supported formats: .har, .zip"
-        ),
+        help_text=("Upload an archive file to extract attachments from. Supported formats: .har, .zip"),
     )
 
 

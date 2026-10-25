@@ -66,22 +66,14 @@ class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
         super().clean()
         if any(self.errors):
             return
-        non_deleted_forms = [
-            f
-            for f in self.forms
-            if f.cleaned_data and not f.cleaned_data.get("DELETE", False)
-        ]
+        non_deleted_forms = [f for f in self.forms if f.cleaned_data and not f.cleaned_data.get("DELETE", False)]
         if not non_deleted_forms:
             if self._nonempty_error:
                 raise ValidationError(self._nonempty_error)
             return
-        primary_forms = [
-            f for f in non_deleted_forms if f.cleaned_data.get("is_primary")
-        ]
+        primary_forms = [f for f in non_deleted_forms if f.cleaned_data.get("is_primary")]
         if len(primary_forms) > 1:
-            raise ValidationError(
-                f"Only one {self._primary_label} may be marked as primary."
-            )
+            raise ValidationError(f"Only one {self._primary_label} may be marked as primary.")
         if not primary_forms:
             if len(non_deleted_forms) == 1:
                 # Exactly one row — auto-set it as primary.
@@ -92,9 +84,7 @@ class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
                 non_deleted_forms[0].instance.is_primary = True
                 self._auto_primary_form = non_deleted_forms[0]
             else:
-                raise ValidationError(
-                    f"At least one {self._primary_label} must be marked as primary."
-                )
+                raise ValidationError(f"At least one {self._primary_label} must be marked as primary.")
 
     def save(self, commit=True):
         instances = super().save(commit=commit)
@@ -229,9 +219,7 @@ class DBStoredFileAdmin(admin.ModelAdmin):
         path_prefix = f"db/{stored_file_pk}/"
         for model, model_admin in self.admin_site._registry.items():
             for field in database_storage_file_fields(model):
-                obj = model._base_manager.filter(
-                    **{f"{field.attname}__startswith": path_prefix}
-                ).first()
+                obj = model._base_manager.filter(**{f"{field.attname}__startswith": path_prefix}).first()
                 if obj is not None and model_admin.has_view_permission(request, obj):
                     return True
         return False
@@ -263,15 +251,9 @@ class DBStoredFileAdmin(admin.ModelAdmin):
             response["Content-Security-Policy"] = "sandbox; default-src 'none'"
         filename_encoded = quote(obj.filename, safe="")
         filename_ascii = (
-            obj.filename.encode("ascii", errors="ignore")
-            .decode("ascii")
-            .replace("\\", "\\\\")
-            .replace('"', '\\"')
+            obj.filename.encode("ascii", errors="ignore").decode("ascii").replace("\\", "\\\\").replace('"', '\\"')
         )
-        cd = (
-            f'{disposition}; filename="{filename_ascii}";'
-            f" filename*=UTF-8''{filename_encoded}"
-        )
+        cd = f"{disposition}; filename=\"{filename_ascii}\"; filename*=UTF-8''{filename_encoded}"
         response["Content-Disposition"] = cd
         return response
 
@@ -353,8 +335,7 @@ class CloudBackupStatusAdmin(admin.ModelAdmin):
                 logger.exception("Failed to record cloud backup status")
                 messages.warning(
                     request,
-                    "Cloud backup uploaded successfully as "
-                    f"{exc.object_key}, but failed to record backup status.",
+                    f"Cloud backup uploaded successfully as {exc.object_key}, but failed to record backup status.",
                 )
             except CLOUD_BACKUP_ERRORS as exc:
                 messages.error(request, f"Cloud backup failed: {exc}")
@@ -365,11 +346,7 @@ class CloudBackupStatusAdmin(admin.ModelAdmin):
             "config": config,
             "status": status,
             # One unit only ("4 days", not "4 days, 3 hours"), for a quick glance.
-            "last_backup_ago": (
-                timesince(status.last_backup_at, depth=1)
-                if status.last_backup_at
-                else None
-            ),
+            "last_backup_ago": (timesince(status.last_backup_at, depth=1) if status.last_backup_at else None),
             "missing_required": missing_required,
             "opts": self.model._meta,
         }
@@ -406,9 +383,7 @@ class CloudBackupStatusAdmin(admin.ModelAdmin):
             "missing_required": missing_required,
             "opts": self.model._meta,
         }
-        return render(
-            request, "admin/core/cloudbackupstatus/cloud_backup_list.html", context
-        )
+        return render(request, "admin/core/cloudbackupstatus/cloud_backup_list.html", context)
 
     def download_db_backup_view(self, request):
         if not request.user.is_superuser:
@@ -492,9 +467,7 @@ def idle_watchdog_page_context(now=None):
         return context
     context["config"] = config
     if config.auto_backup_interval_seconds is not None:
-        context["auto_backup_interval"] = _format_duration(
-            config.auto_backup_interval_seconds
-        )
+        context["auto_backup_interval"] = _format_duration(config.auto_backup_interval_seconds)
     uptime = idle_watchdog.system_uptime()
     if uptime is not None:
         context["system_uptime"] = _format_duration(uptime)
@@ -525,42 +498,30 @@ def idle_watchdog_page_context(now=None):
                 {
                     "port": port["port"],
                     "connections": port["connections"],
-                    "last_connection_at": _parse_status_time(
-                        port["last_connection_at"]
-                    ),
+                    "last_connection_at": _parse_status_time(port["last_connection_at"]),
                 }
                 for port in raw["ports"]
             ],
             "auto_backup": _auto_backup_status(raw.get("auto_backup")),
         }
     except (KeyError, TypeError, ValueError) as exc:
-        context["status_error"] = (
-            f"Unexpected contents in {config.status_file}: {exc!r}"
-        )
+        context["status_error"] = f"Unexpected contents in {config.status_file}: {exc!r}"
         return context
     # Read the request file directly rather than the status file's copy of its
     # time, which is only as fresh as the last check (issue #172). It's touched
     # after each response, so it never includes this page's own request.
     last_request = idle_watchdog.last_request_time(config.request_file)
     status["last_request_at"] = (
-        datetime.datetime.fromtimestamp(last_request, datetime.UTC)
-        if last_request is not None
-        else None
+        datetime.datetime.fromtimestamp(last_request, datetime.UTC) if last_request is not None else None
     )
-    status["checked_ago"] = (
-        _format_duration((now - checked_at).total_seconds()) if checked_at else None
-    )
+    status["checked_ago"] = _format_duration((now - checked_at).total_seconds()) if checked_at else None
     # Before its first check, judge by when it started instead.
     last_sign_of_life = checked_at or started_at
-    status["stale"] = (
-        now - last_sign_of_life
-    ).total_seconds() > _IDLE_WATCHDOG_STALE_INTERVALS * interval
+    status["stale"] = (now - last_sign_of_life).total_seconds() > _IDLE_WATCHDOG_STALE_INTERVALS * interval
     status["stale_intervals"] = _IDLE_WATCHDOG_STALE_INTERVALS
     for name in ("last_request_at", "idle_since"):
         value = status[name]
-        status[f"{name}_ago"] = (
-            _format_duration((now - value).total_seconds()) if value else None
-        )
+        status[f"{name}_ago"] = _format_duration((now - value).total_seconds()) if value else None
     # Not the status file's stop_due_at, which predates this page's own
     # request: that counts as activity, so the next check restarts the timer
     # from when it finishes, about now. It only stops at a check, so up to one
@@ -572,9 +533,7 @@ def idle_watchdog_page_context(now=None):
         )
     for port in status["ports"]:
         seen = port["last_connection_at"]
-        port["last_connection_ago"] = (
-            _format_duration((now - seen).total_seconds()) if seen else None
-        )
+        port["last_connection_ago"] = _format_duration((now - seen).total_seconds()) if seen else None
     context["status"] = status
     return context
 
@@ -624,8 +583,7 @@ def uptime_report_page_context(days_param, now=None):
     days = _uptime_days(days_param)
     if days is None:
         context["days_error"] = (
-            f"Days must be a whole number from 1 to {_UPTIME_MAX_DAYS}, so"
-            f" showing {_UPTIME_DEFAULT_DAYS}."
+            f"Days must be a whole number from 1 to {_UPTIME_MAX_DAYS}, so showing {_UPTIME_DEFAULT_DAYS}."
         )
     else:
         context["days"] = days
@@ -643,9 +601,7 @@ def uptime_report_page_context(days_param, now=None):
             "up": _format_duration(row.up_seconds or 0),
             "elapsed": _format_duration(row.elapsed_seconds),
         }
-        for row in reversed(
-            uptime_log.daily_report(context["directory"], context["days"], now)
-        )
+        for row in reversed(uptime_log.daily_report(context["directory"], context["days"], now))
     ]
     return context
 
@@ -674,9 +630,7 @@ def _utc_iso(date, second_of_day=0):
     """E.g. "2026-10-20T09:05:03Z" for a second of a UTC day, for a ``<time>``
     element's ``datetime``, which ``core/local_times.js`` shows in the browser's
     time zone."""
-    moment = datetime.datetime.combine(date, datetime.time()) + datetime.timedelta(
-        seconds=second_of_day
-    )
+    moment = datetime.datetime.combine(date, datetime.time()) + datetime.timedelta(seconds=second_of_day)
     return f"{moment.isoformat()}Z"
 
 
@@ -765,9 +719,7 @@ def _client_ip_row(row):
     if "ip" in row:
         # An IPv6 address can be 39 characters: let it wrap after a colon
         # rather than widen the table.
-        row["ip_html"] = format_html_join(
-            mark_safe(":<wbr>"), "{}", ((part,) for part in row["ip"].split(":"))
-        )
+        row["ip_html"] = format_html_join(mark_safe(":<wbr>"), "{}", ((part,) for part in row["ip"].split(":")))
     if row.get("private_relay"):
         # Apple's rough location of the relay's user, e.g. "Sydney, AU-NSW".
         row["relay_location"] = ", ".join(
@@ -833,9 +785,7 @@ def client_ips_page_context(logged_in_only=False):
             for path in client_ips.geoip_files(config.geoip_dir, name)[:1]
         ]
     if config.geoip_dir is not None:
-        context["geoip_status"], context["geoip_status_error"] = _geoip_status_rows(
-            config.geoip_dir
-        )
+        context["geoip_status"], context["geoip_status_error"] = _geoip_status_rows(config.geoip_dir)
     if not config.db_path.exists():
         return context
     try:
@@ -843,16 +793,10 @@ def client_ips_page_context(logged_in_only=False):
         try:
             context["ips"] = [
                 _client_ip_row(row)
-                for row in client_ips.recent_ips(
-                    connection, logged_in_only=logged_in_only, limit=_CLIENT_IPS_LIMIT
-                )
+                for row in client_ips.recent_ips(connection, logged_in_only=logged_in_only, limit=_CLIENT_IPS_LIMIT)
             ]
-            context["total"] = client_ips.ip_count(
-                connection, logged_in_only=logged_in_only
-            )
-            context["networks"] = [
-                _client_ip_row(row) for row in client_ips.logged_in_networks(connection)
-            ]
+            context["total"] = client_ips.ip_count(connection, logged_in_only=logged_in_only)
+            context["networks"] = [_client_ip_row(row) for row in client_ips.logged_in_networks(connection)]
         finally:
             connection.close()
     except sqlite3.Error as exc:

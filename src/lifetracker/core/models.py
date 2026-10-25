@@ -131,14 +131,7 @@ class FileExtension(models.Model):
         if self.extension:
             self.extension = self.extension.lower()
             if _EXTENSION_INVALID_RE.search(self.extension):
-                raise ValidationError(
-                    {
-                        "extension": (
-                            "File extension must not contain whitespace, "
-                            "a dot, or a slash."
-                        )
-                    }
-                )
+                raise ValidationError({"extension": ("File extension must not contain whitespace, a dot, or a slash.")})
 
     def save(self, *args, **kwargs):
         if self.extension:
@@ -198,12 +191,7 @@ class DatabaseStorage(Storage):
     def size(self, name):
         pk = self._name_to_pk(name)
         # LENGTH() of a blob reads only its size, not the content.
-        return (
-            DBStoredFile.objects.filter(pk=pk)
-            .annotate(size=Length("content"))
-            .values_list("size", flat=True)
-            .get()
-        )
+        return DBStoredFile.objects.filter(pk=pk).annotate(size=Length("content")).values_list("size", flat=True).get()
 
     def get_available_name(self, name, max_length=None):
         # Each save creates a new record so there are no name conflicts.

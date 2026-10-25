@@ -50,14 +50,7 @@ def convert_eml_zip_to_txt(input_zip_path: str, output_zip_path: str) -> int | N
             date = msg.get("Date", "Unknown Date")
 
             # Build the clean text structure combining headers and body
-            text_content = (
-                f"Subject: {subject}\n"
-                f"From: {sender}\n"
-                f"To: {recipient}\n"
-                f"Date: {date}\n"
-                f"{'-' * 40}\n\n"
-                f"{body}"
-            )
+            text_content = f"Subject: {subject}\nFrom: {sender}\nTo: {recipient}\nDate: {date}\n{'-' * 40}\n\n{body}"
 
             # Write the generated text directly into the output ZIP.
             # Strip the .eml extension and add .txt
@@ -82,6 +75,4 @@ def zip_eml_to_txt_command(input_zip: str, output_zip: str) -> None:
 
     extracted = convert_eml_zip_to_txt(input_zip, output_zip)
     if extracted is not None:
-        click.echo(
-            f"\nBatch complete! Your extracted files are saved in {output_zip!r}"
-        )
+        click.echo(f"\nBatch complete! Your extracted files are saved in {output_zip!r}")

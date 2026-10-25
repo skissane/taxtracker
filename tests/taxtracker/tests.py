@@ -73,9 +73,7 @@ class FinancialYearModelTests(TestCase):
         with timezone.override("Australia/Sydney"):
             with mock.patch(
                 "django.utils.timezone.now",
-                return_value=datetime.datetime(
-                    2024, 10, 30, 14, 30, tzinfo=datetime.UTC
-                ),
+                return_value=datetime.datetime(2024, 10, 30, 14, 30, tzinfo=datetime.UTC),
             ):
                 self.assertEqual(self.fy.days_until_lodgement, 0)
 
@@ -83,9 +81,7 @@ class FinancialYearModelTests(TestCase):
         self.fy.status = FinancialYear.STATUS_SUBMITTED
         self.fy.save()
         history = self.fy.status_history.order_by("-transitioned_at", "-pk").first()
-        history.transitioned_at = datetime.datetime(
-            2024, 10, 30, 14, 30, tzinfo=datetime.UTC
-        )
+        history.transitioned_at = datetime.datetime(2024, 10, 30, 14, 30, tzinfo=datetime.UTC)
         history.save(update_fields=["transitioned_at"])
 
         with timezone.override("Australia/Sydney"):
@@ -158,9 +154,7 @@ class ItemModelTests(TestCase):
     def setUp(self):
         self.fy = FinancialYear.objects.create(year=2024)
         self.parent = Item.objects.create(year=self.fy, title="Income", order=1)
-        self.child = Item.objects.create(
-            year=self.fy, parent=self.parent, title="Salary", order=1
-        )
+        self.child = Item.objects.create(year=self.fy, parent=self.parent, title="Salary", order=1)
 
     def test_str_root(self):
         self.assertEqual(str(self.parent), "FY2024 > Income")
@@ -215,9 +209,7 @@ class ItemYearInheritanceTests(TestCase):
 
     def test_save_with_correct_year_unchanged(self):
         """save() does not change year when child already has the correct year."""
-        child = Item.objects.create(
-            year=self.fy2024, parent=self.parent, title="Child", order=1
-        )
+        child = Item.objects.create(year=self.fy2024, parent=self.parent, title="Child", order=1)
         child.refresh_from_db()
         self.assertEqual(child.year_id, self.fy2024.pk)
 
@@ -229,9 +221,7 @@ class ItemYearInheritanceTests(TestCase):
 
     def test_direct_orm_save_corrects_year(self):
         """Direct ORM save (bypassing admin) still corrects the year."""
-        child = Item.objects.create(
-            year=self.fy2024, parent=self.parent, title="Child", order=1
-        )
+        child = Item.objects.create(year=self.fy2024, parent=self.parent, title="Child", order=1)
         # Directly change year via ORM (simulating a script/fixture misuse)
         child.year = self.fy2025
         child.save()
@@ -244,12 +234,8 @@ class ItemYearInheritanceTests(TestCase):
             title="Parent 2025",
             order=2,
         )
-        child = Item.objects.create(
-            year=self.fy2024, parent=self.parent, title="Child", order=1
-        )
-        grandchild = Item.objects.create(
-            year=self.fy2024, parent=child, title="Grandchild", order=1
-        )
+        child = Item.objects.create(year=self.fy2024, parent=self.parent, title="Child", order=1)
+        grandchild = Item.objects.create(year=self.fy2024, parent=child, title="Grandchild", order=1)
 
         child.parent = parent_2025
         child.save()
@@ -260,12 +246,8 @@ class ItemYearInheritanceTests(TestCase):
         self.assertEqual(grandchild.year_id, self.fy2025.pk)
 
     def test_root_year_change_cascades_descendants_on_model_save(self):
-        child = Item.objects.create(
-            year=self.fy2024, parent=self.parent, title="Child", order=1
-        )
-        grandchild = Item.objects.create(
-            year=self.fy2024, parent=child, title="Grandchild", order=1
-        )
+        child = Item.objects.create(year=self.fy2024, parent=self.parent, title="Child", order=1)
+        grandchild = Item.objects.create(year=self.fy2024, parent=child, title="Grandchild", order=1)
 
         self.parent.year = self.fy2025
         self.parent.save()
@@ -276,15 +258,9 @@ class ItemYearInheritanceTests(TestCase):
         self.assertEqual(grandchild.year_id, self.fy2025.pk)
 
     def test_reparent_within_same_year_leaves_descendants(self):
-        other_parent = Item.objects.create(
-            year=self.fy2024, title="Other Parent 2024", order=2
-        )
-        child = Item.objects.create(
-            year=self.fy2024, parent=self.parent, title="Child", order=1
-        )
-        grandchild = Item.objects.create(
-            year=self.fy2024, parent=child, title="Grandchild", order=1
-        )
+        other_parent = Item.objects.create(year=self.fy2024, title="Other Parent 2024", order=2)
+        child = Item.objects.create(year=self.fy2024, parent=self.parent, title="Child", order=1)
+        grandchild = Item.objects.create(year=self.fy2024, parent=child, title="Grandchild", order=1)
 
         child.parent = other_parent
         with self.assertNumQueries(3):
@@ -300,9 +276,7 @@ class ReceivedDocumentModelTests(TestCase):
         self.fy = FinancialYear.objects.create(year=2024)
 
     def test_str(self):
-        doc = ReceivedDocument.objects.create(
-            year=self.fy, title="Notice of Assessment"
-        )
+        doc = ReceivedDocument.objects.create(year=self.fy, title="Notice of Assessment")
         self.assertEqual(str(doc), "FY2024: Notice of Assessment")
 
     def test_date_nullable(self):
@@ -311,12 +285,8 @@ class ReceivedDocumentModelTests(TestCase):
         self.assertIsNone(doc.date)
 
     def test_ordering(self):
-        earlier = ReceivedDocument.objects.create(
-            year=self.fy, title="Earlier", date=datetime.date(2024, 1, 1)
-        )
-        later = ReceivedDocument.objects.create(
-            year=self.fy, title="Later", date=datetime.date(2024, 6, 1)
-        )
+        earlier = ReceivedDocument.objects.create(year=self.fy, title="Earlier", date=datetime.date(2024, 1, 1))
+        later = ReceivedDocument.objects.create(year=self.fy, title="Later", date=datetime.date(2024, 6, 1))
         docs = list(ReceivedDocument.objects.all())
         # Default ordering is descending by date.
         self.assertEqual(docs, [later, earlier])
@@ -332,9 +302,7 @@ class CopyItemsTests(TestCase):
             notes="some note",
             status=Item.STATUS_DONE,
         )
-        self.child = Item.objects.create(
-            year=self.fy, parent=self.root, title="Child", order=1
-        )
+        self.child = Item.objects.create(year=self.fy, parent=self.root, title="Child", order=1)
 
     def _create_superuser_client(self):
         User.objects.create_superuser("admin", "admin@example.com", "password")
@@ -344,18 +312,14 @@ class CopyItemsTests(TestCase):
 
     def _create_cycle(self):
         first = Item.objects.create(year=self.fy, title="Cycle A", order=9)
-        second = Item.objects.create(
-            year=self.fy, parent=first, title="Cycle B", order=1
-        )
+        second = Item.objects.create(year=self.fy, parent=first, title="Cycle B", order=1)
         first.parent = second
         first.save(update_fields=["parent"])
         return first, second
 
     def test_copy_to_new_year_creates_items(self):
         client = self._create_superuser_client()
-        url = reverse(
-            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
-        )
+        url = reverse("admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk])
         response = client.post(url)
         self.assertEqual(response.status_code, 302)
 
@@ -374,9 +338,7 @@ class CopyItemsTests(TestCase):
     def test_copy_existing_year_shows_error(self):
         FinancialYear.objects.create(year=2025)
         client = self._create_superuser_client()
-        url = reverse(
-            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
-        )
+        url = reverse("admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk])
         response = client.post(url)
         # Should redirect back with error message
         self.assertEqual(response.status_code, 302)
@@ -387,9 +349,7 @@ class CopyItemsTests(TestCase):
         # the create hits the unique constraint (issue #156).
         FinancialYear.objects.create(year=2025)
         client = self._create_superuser_client()
-        url = reverse(
-            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
-        )
+        url = reverse("admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk])
         with mock.patch.object(FinancialYear.objects, "filter") as mock_filter:
             mock_filter.return_value.exists.return_value = False
             response = client.post(url)
@@ -405,9 +365,7 @@ class CopyItemsTests(TestCase):
     def test_copy_to_new_year_warns_about_items_unreachable_from_root(self):
         cycle_a, cycle_b = self._create_cycle()
         client = self._create_superuser_client()
-        url = reverse(
-            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
-        )
+        url = reverse("admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk])
         response = client.get(url)
         self.assertContains(response, "not reachable from a root item")
         self.assertContains(response, cycle_a.title)
@@ -416,9 +374,7 @@ class CopyItemsTests(TestCase):
     def test_copy_to_new_year_skips_unreachable_items_with_warning(self):
         self._create_cycle()
         client = self._create_superuser_client()
-        url = reverse(
-            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
-        )
+        url = reverse("admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk])
         response = client.post(url, follow=True)
         self.assertEqual(response.status_code, 200)
         self.assertContains(
@@ -427,18 +383,14 @@ class CopyItemsTests(TestCase):
         )
         new_fy = FinancialYear.objects.get(year=2025)
         self.assertEqual(
-            list(
-                new_fy.items.order_by("order", "title").values_list("title", flat=True)
-            ),
+            list(new_fy.items.order_by("order", "title").values_list("title", flat=True)),
             ["Child", "Root"],
         )
 
 
 class ReceivedDocumentAdminViewTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_superuser(
-            "admin", "admin@example.com", "password"
-        )
+        self.user = User.objects.create_superuser("admin", "admin@example.com", "password")
         self.client = Client()
         self.client.login(username="admin", password="password")
         self.fy = FinancialYear.objects.create(year=2024)
@@ -475,9 +427,7 @@ class ReceivedDocumentAdminViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_add_creates_received_document(self):
-        response = self.client.post(
-            self._add_url(), self._base_post_data(title="New Doc")
-        )
+        response = self.client.post(self._add_url(), self._base_post_data(title="New Doc"))
         self.assertEqual(response.status_code, 302)
         self.assertTrue(ReceivedDocument.objects.filter(title="New Doc").exists())
 
@@ -520,9 +470,7 @@ class ReceivedDocumentAdminViewTests(TestCase):
 
 class AdminViewTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_superuser(
-            "admin", "admin@example.com", "password"
-        )
+        self.user = User.objects.create_superuser("admin", "admin@example.com", "password")
         self.client = Client()
         self.client.login(username="admin", password="password")
         self.fy = FinancialYear.objects.create(year=2024)
@@ -552,9 +500,7 @@ class AdminViewTests(TestCase):
 
     def test_summary_view_lists_items_unreachable_from_root(self):
         first = Item.objects.create(year=self.fy, title="Cycle A", order=9)
-        second = Item.objects.create(
-            year=self.fy, parent=first, title="Cycle B", order=1
-        )
+        second = Item.objects.create(year=self.fy, parent=first, title="Cycle B", order=1)
         first.parent = second
         first.save(update_fields=["parent"])
 
@@ -586,9 +532,7 @@ class AdminViewTests(TestCase):
 
     def test_download_zip_view_handles_parent_cycles(self):
         first = Item.objects.create(year=self.fy, title="Cycle A", order=9)
-        second = Item.objects.create(
-            year=self.fy, parent=first, title="Cycle B", order=1
-        )
+        second = Item.objects.create(year=self.fy, parent=first, title="Cycle B", order=1)
         first.parent = second
         first.save(update_fields=["parent"])
         Attachment.objects.create(
@@ -611,17 +555,13 @@ class AdminViewTests(TestCase):
 
     def test_copy_to_new_year_requires_financialyear_add_permission(self):
         client = self._limited_client("limited-copy-add", "view_financialyear")
-        url = reverse(
-            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
-        )
+        url = reverse("admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk])
         response = client.get(url)
         self.assertEqual(response.status_code, 403)
 
     def test_copy_to_new_year_requires_financialyear_view_permission(self):
         client = self._limited_client("limited-copy-view", "add_financialyear")
-        url = reverse(
-            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
-        )
+        url = reverse("admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk])
         response = client.get(url)
         self.assertEqual(response.status_code, 403)
 
@@ -638,9 +578,7 @@ class AdminViewTests(TestCase):
                 self.assertEqual(client.get(url).status_code, 403)
 
     def test_download_zip_view_allowed_with_view_permissions(self):
-        client = self._limited_client(
-            "zip-all", "view_financialyear", "view_item", "view_attachment"
-        )
+        client = self._limited_client("zip-all", "view_financialyear", "view_item", "view_attachment")
         url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
         response = client.get(url)
         self.assertEqual(response.status_code, 200)
@@ -649,37 +587,25 @@ class AdminViewTests(TestCase):
             self.assertIn("index.md", zf.namelist())
 
     def test_download_multi_zip_requires_attachment_view_permission(self):
-        client = self._limited_client(
-            "multi-no-attachment", "view_financialyear", "view_item"
-        )
+        client = self._limited_client("multi-no-attachment", "view_financialyear", "view_item")
         url = reverse("admin:taxtracker_financialyear_download_multi_zip")
         self.assertEqual(client.get(url).status_code, 403)
         response = client.post(url, {"fy_ids": [self.fy.pk], "action": "view_index"})
         self.assertEqual(response.status_code, 403)
 
     def test_copy_to_new_year_requires_item_add_permission(self):
-        client = self._limited_client(
-            "copy-no-item", "view_financialyear", "add_financialyear"
-        )
-        url = reverse(
-            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
-        )
+        client = self._limited_client("copy-no-item", "view_financialyear", "add_financialyear")
+        url = reverse("admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk])
         self.assertEqual(client.post(url).status_code, 403)
         self.assertFalse(FinancialYear.objects.filter(year=2025).exists())
 
     def test_copy_to_new_year_allowed_with_add_permissions(self):
-        client = self._limited_client(
-            "copy-all", "view_financialyear", "add_financialyear", "add_item"
-        )
-        url = reverse(
-            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
-        )
+        client = self._limited_client("copy-all", "view_financialyear", "add_financialyear", "add_item")
+        url = reverse("admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk])
         response = client.post(url)
         self.assertEqual(response.status_code, 302)
         new_fy = FinancialYear.objects.get(year=2025)
-        self.assertEqual(
-            list(new_fy.items.values_list("title", flat=True)), ["Test Item"]
-        )
+        self.assertEqual(list(new_fy.items.values_list("title", flat=True)), ["Test Item"])
 
     def test_download_zip_spooled_to_disk(self):
         """A ZIP bigger than the spool limit is built on disk and still complete."""
@@ -774,12 +700,8 @@ class AdminViewTests(TestCase):
         parent_heading = "## Brokerage_accounts\n"
         child_heading = "## Brokerage_accounts/AAA_Fidelity\n"
         zeta_heading = "## Zeta_top\n"
-        self.assertLess(
-            index_content.index(parent_heading), index_content.index(child_heading)
-        )
-        self.assertLess(
-            index_content.index(child_heading), index_content.index(zeta_heading)
-        )
+        self.assertLess(index_content.index(parent_heading), index_content.index(child_heading))
+        self.assertLess(index_content.index(child_heading), index_content.index(zeta_heading))
 
     def test_download_zip_deduplicates_same_attachment_filename(self):
         item = Item.objects.create(year=self.fy, title="X", order=2)
@@ -862,9 +784,7 @@ class AdminViewTests(TestCase):
             (upper, "doc.pdf"),
             (lower, "other.pdf"),
         ]:
-            Attachment.objects.create(
-                item=item, title=name, file=ContentFile(b"x", name=name)
-            )
+            Attachment.objects.create(item=item, title=name, file=ContentFile(b"x", name=name))
 
         url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
         with zipfile.ZipFile(io.BytesIO(self.client.get(url).getvalue())) as zf:
@@ -884,21 +804,15 @@ class AdminViewTests(TestCase):
         """Two cycles with the same titles would otherwise share paths."""
         for content in (b"one", b"two"):
             first = Item.objects.create(year=self.fy, title="Cycle A", order=9)
-            second = Item.objects.create(
-                year=self.fy, parent=first, title="Cycle B", order=1
-            )
+            second = Item.objects.create(year=self.fy, parent=first, title="Cycle B", order=1)
             first.parent = second
             first.save(update_fields=["parent"])
-            Attachment.objects.create(
-                item=first, title="c", file=ContentFile(content, name="c.pdf")
-            )
+            Attachment.objects.create(item=first, title="c", file=ContentFile(content, name="c.pdf"))
 
         url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
         with zipfile.ZipFile(io.BytesIO(self.client.get(url).getvalue())) as zf:
             pdfs = sorted(name for name in zf.namelist() if name.endswith(".pdf"))
-            self.assertEqual(
-                pdfs, ["…/Cycle_B/Cycle_A (2)/c.pdf", "…/Cycle_B/Cycle_A/c.pdf"]
-            )
+            self.assertEqual(pdfs, ["…/Cycle_B/Cycle_A (2)/c.pdf", "…/Cycle_B/Cycle_A/c.pdf"])
             self.assertEqual({zf.read(name) for name in pdfs}, {b"one", b"two"})
 
     def test_download_multi_zip_get(self):
@@ -995,9 +909,7 @@ class AdminViewTests(TestCase):
         )
 
     def test_copy_to_new_year_get(self):
-        url = reverse(
-            "admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk]
-        )
+        url = reverse("admin:taxtracker_financialyear_copy_to_new_year", args=[self.fy.pk])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "FY2025")
@@ -1098,9 +1010,7 @@ class AdminViewTests(TestCase):
     def test_reassign_attachments_view_moves_selected(self):
         fy2025 = FinancialYear.objects.create(year=2025)
         fy2023 = FinancialYear.objects.create(year=2023)
-        target_2025 = Item.objects.create(
-            year=fy2025, title=self.item.title, order=self.item.order
-        )
+        target_2025 = Item.objects.create(year=fy2025, title=self.item.title, order=self.item.order)
         Item.objects.create(year=fy2023, title=self.item.title, order=self.item.order)
 
         to_move = Attachment.objects.create(
@@ -1191,9 +1101,7 @@ class ItemChildInlineTests(TestCase):
 
     def test_year_field_hidden_for_child_item(self):
         """Year field should not appear in the change form for child items."""
-        child = Item.objects.create(
-            year=self.fy, parent=self.parent_item, title="Child", order=1
-        )
+        child = Item.objects.create(year=self.fy, parent=self.parent_item, title="Child", order=1)
         url = self._item_change_url(child)
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
@@ -1210,12 +1118,8 @@ class ItemChildInlineTests(TestCase):
     def test_cascade_year_on_root_item_save(self):
         """Changing a root item's year must cascade to all descendants."""
         fy2025 = FinancialYear.objects.create(year=2025)
-        child = Item.objects.create(
-            year=self.fy, parent=self.parent_item, title="Child", order=1
-        )
-        grandchild = Item.objects.create(
-            year=self.fy, parent=child, title="Grandchild", order=1
-        )
+        child = Item.objects.create(year=self.fy, parent=self.parent_item, title="Child", order=1)
+        grandchild = Item.objects.create(year=self.fy, parent=child, title="Grandchild", order=1)
 
         url = self._item_change_url(self.parent_item)
         data = {
@@ -1379,9 +1283,7 @@ class ItemParentCycleTests(TestCase):
         try:
             item.clean()
         except ValidationError:
-            self.fail(
-                "clean() raised ValidationError for an unchanged pre-existing cycle"
-            )
+            self.fail("clean() raised ValidationError for an unchanged pre-existing cycle")
 
     def test_admin_can_break_cycle_by_setting_parent_to_none(self):
         """Admin save succeeds when a cyclic item's parent is changed to None."""
@@ -1483,9 +1385,7 @@ class AttachmentDateTests(TestCase):
     # ------------------------------------------------------------------
 
     def test_date_auto_extracted_from_filename(self):
-        att = Attachment(
-            item=self.item, file=self._make_file("statement-2026-03-15.pdf")
-        )
+        att = Attachment(item=self.item, file=self._make_file("statement-2026-03-15.pdf"))
         att.save()
         att.refresh_from_db()
         self.assertEqual(att.date, datetime.date(2026, 3, 15))
@@ -1588,9 +1488,7 @@ class AttachmentParentValidationTests(TestCase):
             att.full_clean()
 
     def test_both_parents_raises_validation_error(self):
-        att = Attachment(
-            item=self.item, received_document=self.doc, file=self._make_file()
-        )
+        att = Attachment(item=self.item, received_document=self.doc, file=self._make_file())
         with self.assertRaises(ValidationError):
             att.full_clean()
 
@@ -1599,9 +1497,7 @@ class AttachmentParentValidationTests(TestCase):
         self.assertIn(str(self.item), str(att))
 
     def test_str_uses_received_document_when_received_document_is_parent(self):
-        att = Attachment(
-            received_document=self.doc, title="Report", file=self._make_file()
-        )
+        att = Attachment(received_document=self.doc, title="Report", file=self._make_file())
         self.assertIn(str(self.doc), str(att))
 
     def test_unsaved_parent_with_no_id_yet_is_valid(self):
@@ -1627,9 +1523,7 @@ class AttachmentParentConstraintTests(TestCase):
 
     def test_neither_parent_raises_integrity_error(self):
         with self.assertRaises(IntegrityError), transaction.atomic():
-            Attachment.objects.create(
-                title="Orphan", file=ContentFile(b"data", name="orphan.pdf")
-            )
+            Attachment.objects.create(title="Orphan", file=ContentFile(b"data", name="orphan.pdf"))
 
     def test_both_parents_raises_integrity_error(self):
         item = Item.objects.create(year=self.fy, title="Income", order=1)
@@ -1689,9 +1583,7 @@ class DatabaseStorageTests(TestCase):
         self.fy = FinancialYear.objects.create(year=2024)
         self.item = Item.objects.create(year=self.fy, title="Income", order=1)
         self.ft = FileType.objects.create(short_name="PDF", full_name="PDF Document")
-        FileExtension.objects.create(
-            file_type=self.ft, extension="pdf", is_primary=True
-        )
+        FileExtension.objects.create(file_type=self.ft, extension="pdf", is_primary=True)
 
     def _simple_file(self, name="document.pdf", content=b"%PDF-1.4 test"):
         return ContentFile(content, name=name)
@@ -1720,9 +1612,7 @@ class DatabaseStorageTests(TestCase):
         """DBStoredFile.filename should be the uploaded filename."""
         att = Attachment(item=self.item, file=self._simple_file("myfile.pdf"))
         att.save()
-        db_file = DBStoredFile.objects.get(
-            pk=att.file.storage._name_to_pk(att.file.name)
-        )
+        db_file = DBStoredFile.objects.get(pk=att.file.storage._name_to_pk(att.file.name))
         self.assertEqual(db_file.filename, "myfile.pdf")
 
     def test_attachment_file_deleted_removes_db_record(self):
@@ -1737,9 +1627,7 @@ class DatabaseStorageTests(TestCase):
         """Attachments deleted by cascade (which doesn't call their delete())
         still remove their DBStoredFile records."""
         doc = ReceivedDocument.objects.create(year=self.fy, title="Notice")
-        child = Item.objects.create(
-            year=self.fy, parent=self.item, title="Child", order=1
-        )
+        child = Item.objects.create(year=self.fy, parent=self.item, title="Child", order=1)
         pks = []
         for kwargs in (
             {"item": self.item},
@@ -1792,9 +1680,7 @@ class DatabaseStorageTests(TestCase):
     def test_explicit_file_type_not_overwritten(self):
         """An explicitly set file_type should not be overwritten by auto-guess."""
         ft2 = FileType.objects.create(short_name="TXT", full_name="Text File")
-        att = Attachment(
-            item=self.item, file=self._simple_file("report.pdf"), file_type=ft2
-        )
+        att = Attachment(item=self.item, file=self._simple_file("report.pdf"), file_type=ft2)
         att.save()
         att.refresh_from_db()
         self.assertEqual(att.file_type, ft2)
@@ -1844,16 +1730,7 @@ class AdjustNotesHeadingsTests(TestCase):
         self.assertIn("- item", result)
 
     def test_headings_in_fenced_code_blocks_ignored(self):
-        notes = (
-            "```bash\n"
-            "# comment inside shell block\n"
-            'echo "hi"\n'
-            "```\n"
-            "## Real heading\n"
-            "~~~\n"
-            "# also ignored\n"
-            "~~~\n"
-        )
+        notes = '```bash\n# comment inside shell block\necho "hi"\n```\n## Real heading\n~~~\n# also ignored\n~~~\n'
         # The fenced "#" lines don't count, so "##" is the shallowest level.
         self.assertEqual(
             _adjust_notes_headings(notes, 2),
@@ -1881,9 +1758,7 @@ class AdjustNotesHeadingsTests(TestCase):
 
     def test_inline_code_span_does_not_open_fence(self):
         notes = "```inline code```\n# Heading\n"
-        self.assertEqual(
-            _adjust_notes_headings(notes, 2), "```inline code```\n### Heading\n"
-        )
+        self.assertEqual(_adjust_notes_headings(notes, 2), "```inline code```\n### Heading\n")
 
     def test_only_newline_splits_lines(self):
         notes = "# One\rtext\f# not a heading\n## Two"
@@ -1894,9 +1769,7 @@ class AdjustNotesHeadingsTests(TestCase):
 
     def test_line_endings_preserved(self):
         notes = "# One\r\n## Two\n# Three"
-        self.assertEqual(
-            _adjust_notes_headings(notes, 2), "### One\r\n#### Two\n### Three"
-        )
+        self.assertEqual(_adjust_notes_headings(notes, 2), "### One\r\n#### Two\n### Three")
 
     def test_hash_in_body_not_treated_as_heading(self):
         # Only lines where # is at the start are headings
@@ -1952,10 +1825,7 @@ class ZipIndexHeadingAdjustmentTests(TestCase):
 # ---------------------------------------------------------------------------
 
 PDF_MAGIC = b"%PDF-1.4 fake pdf content"
-FIDELITY_URL_PREFIX = (
-    "https://netbenefitsww.fidelity.com"
-    "/mybenefitsww/spshistoryservices/activities/record/c:"
-)
+FIDELITY_URL_PREFIX = "https://netbenefitsww.fidelity.com/mybenefitsww/spshistoryservices/activities/record/c:"
 
 
 def _make_fidelity_har(
@@ -2020,9 +1890,7 @@ class ArchiveExtractorTests(TestCase):
 
     def test_har_base64_encoded_body(self):
         """HAR body itself Base64-encoded (body_encoding=base64)."""
-        har_bytes = _make_fidelity_har(
-            "statement-2023-07-20", PDF_MAGIC, body_encoding="base64"
-        )
+        har_bytes = _make_fidelity_har("statement-2023-07-20", PDF_MAGIC, body_encoding="base64")
         results = extract_from_archive(har_bytes, "export.har")
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0][1], PDF_MAGIC)
@@ -2044,9 +1912,7 @@ class ArchiveExtractorTests(TestCase):
         self.assertEqual(results, [])
 
     def test_har_skips_wrong_mime_type(self):
-        har_bytes = _make_fidelity_har(
-            "statement-2023-07-20", PDF_MAGIC, mime_type="text/html"
-        )
+        har_bytes = _make_fidelity_har("statement-2023-07-20", PDF_MAGIC, mime_type="text/html")
         results = extract_from_archive(har_bytes, "export.har")
         self.assertEqual(results, [])
 
@@ -2095,9 +1961,7 @@ class ArchiveExtractorTests(TestCase):
             extract_from_archive(b"not json at all", "export.har")
 
     def test_invalid_zip_raises_unsupported(self):
-        with self.assertRaisesMessage(
-            UnsupportedArchiveError, "Could not parse file as a ZIP archive"
-        ):
+        with self.assertRaisesMessage(UnsupportedArchiveError, "Could not parse file as a ZIP archive"):
             extract_from_archive(b"not a zip at all", "export.zip")
 
     # ------------------------------------------------------------------
@@ -2214,16 +2078,8 @@ class ImportArchiveViewTests(TestCase):
         )
         self.assertContains(response, "Imported 2 attachment(s)")
         self.assertContains(response, "Skipped 1 non-PDF file(s): ignored.txt")
-        self.assertTrue(
-            Attachment.objects.filter(
-                item=self.item, file__endswith="/statement.pdf"
-            ).exists()
-        )
-        self.assertTrue(
-            Attachment.objects.filter(
-                item=self.item, file__endswith="/report.pdf"
-            ).exists()
-        )
+        self.assertTrue(Attachment.objects.filter(item=self.item, file__endswith="/statement.pdf").exists())
+        self.assertTrue(Attachment.objects.filter(item=self.item, file__endswith="/report.pdf").exists())
 
     def test_post_zip_allows_existing_filename_on_other_item(self):
         other_item = Item.objects.create(year=self.fy, title="Other Item", order=2)
@@ -2245,16 +2101,8 @@ class ImportArchiveViewTests(TestCase):
             follow=True,
         )
         self.assertContains(response, "Imported 2 attachment(s)")
-        self.assertTrue(
-            Attachment.objects.filter(
-                item=self.item, file__endswith="/new.pdf"
-            ).exists()
-        )
-        self.assertTrue(
-            Attachment.objects.filter(
-                item=self.item, file__endswith="/existing.pdf"
-            ).exists()
-        )
+        self.assertTrue(Attachment.objects.filter(item=self.item, file__endswith="/new.pdf").exists())
+        self.assertTrue(Attachment.objects.filter(item=self.item, file__endswith="/existing.pdf").exists())
 
     def test_post_zip_skips_existing_filename_on_same_item(self):
         existing = Attachment(item=self.item)
@@ -2269,9 +2117,7 @@ class ImportArchiveViewTests(TestCase):
             {"archive": upload},
             follow=True,
         )
-        self.assertContains(
-            response, "Skipped 1 file(s) already attached to this item: existing.pdf"
-        )
+        self.assertContains(response, "Skipped 1 file(s) already attached to this item: existing.pdf")
 
     def test_post_missing_file_shows_form_error(self):
         """Posting without a file should re-render the form with an error."""
@@ -2358,18 +2204,14 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
         )
         upload = io.BytesIO(zip_bytes)
         upload.name = "archive.zip"
-        response = self.client.post(
-            self._import_url(), {"archive": upload}, follow=True
-        )
+        response = self.client.post(self._import_url(), {"archive": upload}, follow=True)
         self.assertContains(response, "Imported 2 received document(s)")
 
         doc_2024 = ReceivedDocument.objects.get(title="2024-07-20-notice.pdf")
         self.assertEqual(doc_2024.year, self.fy2024)
         self.assertEqual(doc_2024.date, datetime.date(2024, 7, 20))
         self.assertTrue(
-            Attachment.objects.filter(
-                received_document=doc_2024, file__endswith="/2024-07-20-notice.pdf"
-            ).exists()
+            Attachment.objects.filter(received_document=doc_2024, file__endswith="/2024-07-20-notice.pdf").exists()
         )
 
         doc_2025 = ReceivedDocument.objects.get(title="2025_assessment.pdf")
@@ -2384,9 +2226,7 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
         )
         upload = io.BytesIO(zip_bytes)
         upload.name = "archive.zip"
-        response = self.client.post(
-            self._import_url(), {"archive": upload}, follow=True
-        )
+        response = self.client.post(self._import_url(), {"archive": upload}, follow=True)
         self.assertContains(response, "Imported 1 received document(s)")
         self.assertContains(response, "Skipped 1 non-PDF file(s): ignored.txt")
 
@@ -2400,9 +2240,7 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
         )
         upload = io.BytesIO(zip_bytes)
         upload.name = "archive.zip"
-        response = self.client.post(
-            self._import_url(), {"archive": upload}, follow=True
-        )
+        response = self.client.post(self._import_url(), {"archive": upload}, follow=True)
         self.assertContains(response, "Imported 1 received document(s)")
         self.assertContains(
             response,
@@ -2413,18 +2251,13 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
         zip_bytes = _make_zip_archive([("2019-letter.pdf", PDF_MAGIC)])
         upload = io.BytesIO(zip_bytes)
         upload.name = "archive.zip"
-        response = self.client.post(
-            self._import_url(), {"archive": upload}, follow=True
-        )
+        response = self.client.post(self._import_url(), {"archive": upload}, follow=True)
         self.assertContains(
             response,
-            "Skipped 1 file(s) with no matching Financial Year record: "
-            "2019-letter.pdf (FY2019)",
+            "Skipped 1 file(s) with no matching Financial Year record: 2019-letter.pdf (FY2019)",
         )
         self.assertFalse(FinancialYear.objects.filter(year=2019).exists())
-        self.assertFalse(
-            ReceivedDocument.objects.filter(title="2019-letter.pdf").exists()
-        )
+        self.assertFalse(ReceivedDocument.objects.filter(title="2019-letter.pdf").exists())
 
     def test_post_zip_skips_existing_filename_and_warns(self):
         other_doc = ReceivedDocument.objects.create(year=self.fy2024, title="Existing")
@@ -2440,14 +2273,11 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
         )
         upload = io.BytesIO(zip_bytes)
         upload.name = "archive.zip"
-        response = self.client.post(
-            self._import_url(), {"archive": upload}, follow=True
-        )
+        response = self.client.post(self._import_url(), {"archive": upload}, follow=True)
         self.assertContains(response, "Imported 1 received document(s)")
         self.assertContains(
             response,
-            "Skipped 1 file(s) already imported for that Financial Year: "
-            "2024-existing.pdf",
+            "Skipped 1 file(s) already imported for that Financial Year: 2024-existing.pdf",
         )
         self.assertTrue(ReceivedDocument.objects.filter(title="2024-new.pdf").exists())
 
@@ -2462,13 +2292,9 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
         zip_bytes = _make_zip_archive([("2024-existing.pdf", PDF_MAGIC)])
         upload = io.BytesIO(zip_bytes)
         upload.name = "archive.zip"
-        response = self.client.post(
-            self._import_url(), {"archive": upload}, follow=True
-        )
+        response = self.client.post(self._import_url(), {"archive": upload}, follow=True)
         self.assertContains(response, "Imported 1 received document(s)")
-        self.assertTrue(
-            ReceivedDocument.objects.filter(title="2024-existing.pdf").exists()
-        )
+        self.assertTrue(ReceivedDocument.objects.filter(title="2024-existing.pdf").exists())
 
     def test_post_missing_file_shows_form_error(self):
         """Posting without a file should re-render the form with an error."""
@@ -2479,18 +2305,14 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
     def test_post_unsupported_format_shows_error(self):
         upload = io.BytesIO(b"anything")
         upload.name = "archive.7z"
-        response = self.client.post(
-            self._import_url(), {"archive": upload}, follow=True
-        )
+        response = self.client.post(self._import_url(), {"archive": upload}, follow=True)
         self.assertContains(response, "Unrecognised archive format")
 
     def test_post_zip_with_no_entries_shows_warning(self):
         zip_bytes = _make_zip_archive([])
         upload = io.BytesIO(zip_bytes)
         upload.name = "empty.zip"
-        response = self.client.post(
-            self._import_url(), {"archive": upload}, follow=True
-        )
+        response = self.client.post(self._import_url(), {"archive": upload}, follow=True)
         self.assertContains(response, "No attachments could be extracted")
 
     # ------------------------------------------------------------------
@@ -2523,9 +2345,7 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
 
     def test_get_allowed_with_both_permissions(self):
         """Staff with both add_receiveddocument and add_attachment can access."""
-        client = self._limited_client(
-            "limited3", "add_receiveddocument", "add_attachment"
-        )
+        client = self._limited_client("limited3", "add_receiveddocument", "add_attachment")
         response = client.get(self._import_url())
         self.assertEqual(response.status_code, 200)
 
@@ -2569,8 +2389,7 @@ class _LegacyUpgradeSchemaMixin:
         with connection.cursor() as cursor:
             for new_name, old_name in self.TABLE_RENAMES.items():
                 cursor.execute(
-                    f"ALTER TABLE {connection.ops.quote_name(new_name)} "
-                    f"RENAME TO {connection.ops.quote_name(old_name)}"
+                    f"ALTER TABLE {connection.ops.quote_name(new_name)} RENAME TO {connection.ops.quote_name(old_name)}"
                 )
             core_placeholders = ", ".join(["%s"] * len(self.CORE_MODELS))
             cursor.execute(
@@ -2596,13 +2415,8 @@ class _LegacyUpgradeSchemaMixin:
                 "(SELECT id FROM django_content_type "
                 "WHERE app_label IN ('core', 'taxtracker'))"
             )
-            cursor.execute(
-                "DELETE FROM django_content_type "
-                "WHERE app_label IN ('core', 'taxtracker')"
-            )
-            cursor.execute(
-                "DELETE FROM django_migrations WHERE app IN ('core', 'taxtracker')"
-            )
+            cursor.execute("DELETE FROM django_content_type WHERE app_label IN ('core', 'taxtracker')")
+            cursor.execute("DELETE FROM django_migrations WHERE app IN ('core', 'taxtracker')")
         recorder = MigrationRecorder(connection)
         for name in self.LEGACY_MIGRATION_NAMES:
             recorder.record_applied("tracker", name)
@@ -2635,18 +2449,11 @@ class LegacyUpgradeCommandTests(_LegacyUpgradeSchemaMixin, TestCase):
         self.assertEqual(item.title, "Income")
 
         with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT COUNT(*) FROM django_content_type WHERE app_label = 'tracker'"
-            )
+            cursor.execute("SELECT COUNT(*) FROM django_content_type WHERE app_label = 'tracker'")
             self.assertEqual(cursor.fetchone()[0], 0)
-            cursor.execute(
-                "SELECT app, name FROM django_migrations "
-                "WHERE app IN ('core', 'taxtracker')"
-            )
+            cursor.execute("SELECT app, name FROM django_migrations WHERE app IN ('core', 'taxtracker')")
             rows = {(r[0], r[1]) for r in cursor.fetchall()}
-        self.assertEqual(
-            rows, {("core", "0001_initial"), ("taxtracker", "0001_initial")}
-        )
+        self.assertEqual(rows, {("core", "0001_initial"), ("taxtracker", "0001_initial")})
 
     def test_upgrade_preserves_content_type_primary_keys(self):
         # Restrict to the models that actually existed under the legacy
@@ -2722,7 +2529,7 @@ class LegacyUpgradeCommandTests(_LegacyUpgradeSchemaMixin, TestCase):
         with connection.cursor() as cursor:
             cursor.execute(
                 "DELETE FROM django_migrations "
-                "WHERE app = 'tracker' AND name = '0005_financialyear_status_financialyearstatushistory'"  # noqa: E501
+                "WHERE app = 'tracker' AND name = '0005_financialyear_status_financialyearstatushistory'"
             )
         with self.assertRaisesMessage(
             CommandError,
@@ -2735,10 +2542,7 @@ class LegacyUpgradeCommandTests(_LegacyUpgradeSchemaMixin, TestCase):
         refused, even though django_migrations looks clean."""
         self._revert_to_legacy_schema()
         with connection.cursor() as cursor:
-            cursor.execute(
-                "INSERT INTO django_content_type (app_label, model) "
-                "VALUES ('core', 'stray_model')"
-            )
+            cursor.execute("INSERT INTO django_content_type (app_label, model) VALUES ('core', 'stray_model')")
         with self.assertRaisesMessage(
             CommandError,
             "django_content_type already has rows for 'core' or 'taxtracker'",
@@ -2751,10 +2555,7 @@ class LegacyUpgradeCommandTests(_LegacyUpgradeSchemaMixin, TestCase):
         UPDATEs, and must be reported rather than silently ignored."""
         self._revert_to_legacy_schema()
         with connection.cursor() as cursor:
-            cursor.execute(
-                "INSERT INTO django_content_type (app_label, model) "
-                "VALUES ('tracker', 'phantom_model')"
-            )
+            cursor.execute("INSERT INTO django_content_type (app_label, model) VALUES ('tracker', 'phantom_model')")
         with self.assertRaisesMessage(
             CommandError,
             "still have app_label='tracker' after relabeling",
@@ -2762,9 +2563,7 @@ class LegacyUpgradeCommandTests(_LegacyUpgradeSchemaMixin, TestCase):
             self._call()
 
 
-class LegacyUpgradeCommandForeignKeyCheckTests(
-    _LegacyUpgradeSchemaMixin, TransactionTestCase
-):
+class LegacyUpgradeCommandForeignKeyCheckTests(_LegacyUpgradeSchemaMixin, TransactionTestCase):
     """Covers the post-rename PRAGMA foreign_key_check branch. Toggling the
     foreign_keys pragma is a no-op inside a transaction, so this needs a real
     (non-savepoint-wrapped) connection via TransactionTestCase."""
@@ -2783,7 +2582,5 @@ class LegacyUpgradeCommandForeignKeyCheckTests(
             )
             cursor.execute("PRAGMA foreign_keys = ON")
 
-        with self.assertRaisesMessage(
-            CommandError, "Foreign key check failed after upgrade"
-        ):
+        with self.assertRaisesMessage(CommandError, "Foreign key check failed after upgrade"):
             self._call()

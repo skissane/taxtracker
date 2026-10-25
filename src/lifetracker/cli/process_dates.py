@@ -45,9 +45,7 @@ def read_dates(lines: Iterable[str], add_days: int) -> set[date]:
         try:
             parsed_date = parse_date_line(clean_line)
         except ValueError:
-            raise ValueError(
-                f"Unexpected date format on line {line_num}: {clean_line!r}"
-            ) from None
+            raise ValueError(f"Unexpected date format on line {line_num}: {clean_line!r}") from None
 
         processed_dates.add(parsed_date + timedelta(days=add_days))
 
@@ -62,9 +60,7 @@ def group_by_financial_year(dates: set[date]) -> dict[int, list[date]]:
     return fy_groups
 
 
-def render_markdown(
-    fy_groups: dict[int, list[date]], summary: bool, year: int | None
-) -> str:
+def render_markdown(fy_groups: dict[int, list[date]], summary: bool, year: int | None) -> str:
     """Render financial-year groups as GitHub-Flavored Markdown."""
     lines: list[str] = []
     first_group = True

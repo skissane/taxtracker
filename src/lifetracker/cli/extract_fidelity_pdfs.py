@@ -13,10 +13,7 @@ from pathlib import Path
 
 import click
 
-FIDELITY_URL_PREFIX = (
-    "https://netbenefitsww.fidelity.com"
-    "/mybenefitsww/spshistoryservices/activities/record/c:"
-)
+FIDELITY_URL_PREFIX = "https://netbenefitsww.fidelity.com/mybenefitsww/spshistoryservices/activities/record/c:"
 PDF_MAGIC = b"%PDF-"
 
 
@@ -82,8 +79,7 @@ def extract_pdfs(har_path: Path, output_dir: Path) -> int:
                 body_str = raw_body.decode("utf-8")
             except (binascii.Error, UnicodeDecodeError) as exc:
                 print(
-                    f"WARNING: could not decode Base64-encoded body for {url}: "
-                    f"{exc}; skipping",
+                    f"WARNING: could not decode Base64-encoded body for {url}: {exc}; skipping",
                     file=sys.stderr,
                 )
                 continue
@@ -98,8 +94,7 @@ def extract_pdfs(har_path: Path, output_dir: Path) -> int:
             payload = json.loads(body_str)
         except json.JSONDecodeError as exc:
             print(
-                f"WARNING: could not parse JSON response body for {url}: "
-                f"{exc}; skipping",
+                f"WARNING: could not parse JSON response body for {url}: {exc}; skipping",
                 file=sys.stderr,
             )
             continue
@@ -116,16 +111,14 @@ def extract_pdfs(har_path: Path, output_dir: Path) -> int:
             pdf_bytes = base64.b64decode(file_content_b64)
         except binascii.Error as exc:
             print(
-                f"WARNING: could not Base64-decode fileContent for {url}: "
-                f"{exc}; skipping",
+                f"WARNING: could not Base64-decode fileContent for {url}: {exc}; skipping",
                 file=sys.stderr,
             )
             continue
 
         if not pdf_bytes.startswith(PDF_MAGIC):
             print(
-                f"WARNING: decoded data for {url} does not look like a PDF "
-                f"(starts with {pdf_bytes[:8]!r}); skipping",
+                f"WARNING: decoded data for {url} does not look like a PDF (starts with {pdf_bytes[:8]!r}); skipping",
                 file=sys.stderr,
             )
             continue

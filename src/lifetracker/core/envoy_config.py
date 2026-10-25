@@ -43,9 +43,7 @@ def jwt_rules():
         match = {"prefix" if entry.prefix else "path": entry.path}
         for method in entry.methods:
             rules.append({"match": {**match, "headers": [_method_header(method)]}})
-    rules.append(
-        {"match": {"prefix": "/"}, "requires": {"provider_name": JWT_PROVIDER}}
-    )
+    rules.append({"match": {"prefix": "/"}, "requires": {"provider_name": JWT_PROVIDER}})
     return rules
 
 

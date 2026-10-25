@@ -15,18 +15,12 @@ from lifetracker.core import client_ips
 
 
 class Command(BaseCommand):
-    help = (
-        "Download the DB-IP Lite databases and iCloud Private Relay ranges, and"
-        " look up client IPs in them."
-    )
+    help = "Download the DB-IP Lite databases and iCloud Private Relay ranges, and look up client IPs in them."
 
     def handle(self, *args, **options):
         config = client_ips.config_from_env()
         if config.db_path is None or config.geoip_dir is None:
-            raise CommandError(
-                "Client IPs aren't recorded: set LIFETRACKER_CLIENT_IP_DB or"
-                " LIFETRACKER_DATA_DIR."
-            )
+            raise CommandError("Client IPs aren't recorded: set LIFETRACKER_CLIENT_IP_DB or LIFETRACKER_DATA_DIR.")
         try:
             statuses = client_ips.update_geoip(config.geoip_dir)
         except OSError as exc:
@@ -49,8 +43,6 @@ class Command(BaseCommand):
             geoip.close()
             connection.close()
         self.stdout.write(f"Looked up {found} IPs without a location")
-        self.stdout.write(
-            f"Checked {checked} IPs not checked yet against the Private Relay ranges"
-        )
+        self.stdout.write(f"Checked {checked} IPs not checked yet against the Private Relay ranges")
         if failed:
             raise CommandError(f"Couldn't download {', '.join(failed)}")
