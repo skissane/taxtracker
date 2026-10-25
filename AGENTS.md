@@ -18,6 +18,12 @@ After `just coverage` runs, CI uploads `coverage.xml` to Codecov (`codecov/codec
 `ci.yml` has seven jobs, `test`, `screenshots` and `post-screenshots` (see Screenshots), `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment); `run_workflow_local.py` runs the first job in the file unless given `--job`, so keep `test` first.
 Don't run `--job dependabot-fix`, `--job publish` or `--job deploy` locally: it doesn't evaluate `if:`, so it would push commits to the current branch, push to GHCR or deploy to production.
 
+**PR Fixes:** `.github/workflows/fix.yml` (issue #254) is run by hand (`workflow_dispatch`) on an open PR's branch.
+It fails unless the branch has an open PR from this repo (`gh pr list --head`), merges the PR's base branch in (failing on conflicts), runs `just sync` and `just fix`, commits any changes to tracked files (`git add -u`) as `chore: apply automated fixes`, and pushes if that or the merge moved `HEAD`.
+`fmt-templates` reruns djlint with `--check` if `--reformat` fails, as `--reformat` exits 1 whenever it changes a file.
+Like `dependabot-fix`, it checks out with `persist-credentials: false`, as `just fix` runs the branch's own `justfile` and dependencies, and only the push step sees its token, the `AUTOFIX_TOKEN` Actions secret (a fine-grained PAT with Contents: read and write; the job fails if it's unset), not `GITHUB_TOKEN`, whose pushes wouldn't trigger CI.
+If the branch moves after checkout, the push isn't a fast-forward and fails.
+
 **Whitespace:** `just whitespace-check` (part of `just check`, `just ci` and the `test` job; `scripts/check_whitespace.py`, stdlib-only) checks every file `git ls-files` lists, except ones Git's own detection calls binary (`git ls-files --eol` shows `w/-text`) and symlinks: no trailing whitespace on any line, no leading blank line, and exactly one newline at the end of a non-empty file (none in an empty one).
 It checks the working tree copy, so it also catches unstaged edits.
 For a Markdown hard line break, end the line with a backslash rather than two trailing spaces.

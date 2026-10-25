@@ -70,9 +70,12 @@ lint-templates:
 fmt-check-templates:
     uv run --group dev djlint --check .
 
+# djlint --reformat exits 1 when it changes a file, so then check the result
+# instead, which fails only if something is still wrong.
+
 # Format Django templates with djlint
 fmt-templates:
-    uv run --group dev djlint --reformat .
+    uv run --group dev djlint --reformat . || uv run --group dev djlint --check .
 
 # Run the test suite in parallel with pytest-xdist
 test:

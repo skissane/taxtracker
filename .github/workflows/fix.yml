@@ -1,0 +1,107 @@
+name: PR Fixes
+
+# Run by hand (Actions → PR Fixes → Run workflow) on an open PR's branch:
+# merges the PR's base branch in, runs `just fix`, and pushes the result.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: fix-${{ github.ref }}
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    # The push uses AUTOFIX_TOKEN, so GITHUB_TOKEN only needs to read.
+    permissions:
+      contents: read
+      pull-requests: read
+    timeout-minutes: 10
+
+    steps:
+      - name: Check token configuration
+        env:
+          AUTOFIX_TOKEN: ${{ secrets.AUTOFIX_TOKEN }}
+        run: |
+          if [ -z "$AUTOFIX_TOKEN" ]; then
+            echo "::error::AUTOFIX_TOKEN secret is not set"
+            exit 1
+          fi
+
+      - name: Find the branch's pull request
+        id: check-pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" != branch ]; then
+            echo "::error::This workflow must be run on a pull request branch, not a $GITHUB_REF_TYPE."
+            exit 1
+          fi
+          base_branch=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open \
+            --json baseRefName,isCrossRepository \
+            --jq '[.[] | select(.isCrossRepository | not)][0].baseRefName // empty')
+          if [ -z "$base_branch" ]; then
+            echo "::error::Branch $BRANCH has no open pull request in this repository."
+            exit 1
+          fi
+          echo "base_branch=$base_branch" >> "$GITHUB_OUTPUT"
+
+      # No credentials are kept, as the steps after this run the branch's own
+      # justfile and dependencies; only the final push sees AUTOFIX_TOKEN.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge base branch
+        env:
+          BASE_BRANCH: ${{ steps.check-pr.outputs.base_branch }}
+        run: |
+          if ! git merge "origin/$BASE_BRANCH" --no-edit; then
+            echo "::error::Merge conflict with base branch $BASE_BRANCH. Please resolve conflicts manually."
+            exit 1
+          fi
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+
+      - name: Set up Python
+        run: uv python install 3.14.9
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+        with:
+          just-version: "1.58.0"
+
+      - name: Install dependencies
+        run: just sync
+
+      - name: Run fixes
+        run: just fix
+
+      # Pushes with AUTOFIX_TOKEN, not GITHUB_TOKEN, so the push triggers CI.
+      # Pushes the merge commit even if `just fix` changed nothing. If the branch
+      # moved since checkout, the push isn't a fast-forward and fails.
+      - name: Commit and push changes
+        env:
+          AUTOFIX_TOKEN: ${{ secrets.AUTOFIX_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git add -u
+          if git diff --staged --quiet; then
+            echo "No fixes to commit"
+          else
+            git commit -m "chore: apply automated fixes"
+          fi
+          if [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]; then
+            echo "Branch is up to date and needs no fixes"
+          else
+            git push "https://x-access-token:${AUTOFIX_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${BRANCH}"
+          fi
