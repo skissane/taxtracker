@@ -42,9 +42,9 @@ whitespace-check:
 screenshots-dir-check:
     uv run --no-project python scripts/check_screenshots_dir.py
 
-# Check .git-blame-ignore-revs lists real ancestor commits
-blame-ignore-revs-check:
-    uv run --no-project python scripts/check_blame_ignore_revs.py
+# Check .git-blame-ignore-revs lists real commits that are ancestors of target
+blame-ignore-revs-check target="HEAD":
+    uv run --no-project python scripts/check_blame_ignore_revs.py {{quote(target)}}
 
 # Lint Python code with ruff
 lint:

@@ -1,13 +1,18 @@
-"""Check that .git-blame-ignore-revs lists only real commits from this branch's history.
+"""Check that .git-blame-ignore-revs lists only real commits from the target branch's history.
 
 Git silently ignores an entry naming no commit, so a typo or a pre-squash hash
 would leave the reformatting commit it was meant to hide in `git blame`. This
 fails unless every non-comment line is a full lowercase hash of a commit that's
-an ancestor of HEAD (so CI needs the full history).
+an ancestor of the target (so CI needs the full history).
+
+The target is HEAD unless given as the only argument. On a PR, CI passes the
+base branch's commit: as PRs are squash-merged, a commit from the PR itself
+is an ancestor of the PR's head but won't be on the base branch once merged.
 """
 
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 IGNORE_REVS = Path(".git-blame-ignore-revs")
@@ -18,7 +23,7 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], check=False, capture_output=True, text=True)
 
 
-def _problems() -> list[str]:
+def _problems(target: str) -> list[str]:
     if not IGNORE_REVS.is_file():
         return [f"{IGNORE_REVS} is missing"]
     problems = []
@@ -36,27 +41,30 @@ def _problems() -> list[str]:
         if object_type.stdout.strip() != "commit":
             problems.append(f"{IGNORE_REVS}:{line_number}: {rev} is a {object_type.stdout.strip()}, not a commit")
             continue
-        ancestor = _git("merge-base", "--is-ancestor", rev, "HEAD")
+        ancestor = _git("merge-base", "--is-ancestor", rev, target)
         if ancestor.returncode == 1:
-            problems.append(f"{IGNORE_REVS}:{line_number}: {rev} is not an ancestor of HEAD")
+            problems.append(f"{IGNORE_REVS}:{line_number}: {rev} is not an ancestor of {target}")
         elif ancestor.returncode != 0:
             problems.append(
-                f"{IGNORE_REVS}:{line_number}: couldn't check whether {rev} is an ancestor of HEAD "
+                f"{IGNORE_REVS}:{line_number}: couldn't check whether {rev} is an ancestor of {target} "
                 f"(exit {ancestor.returncode})"
             )
     return problems
 
 
-def main() -> int:
-    problems = _problems()
+def main(target: str = "HEAD") -> int:
+    problems = _problems(target)
     if problems:
         print("Problems in .git-blame-ignore-revs:")
         for problem in problems:
             print(f"- {problem}")
         return 1
-    print(".git-blame-ignore-revs only lists real ancestor commit hashes.")
+    print(f".git-blame-ignore-revs only lists real commit hashes that are ancestors of {target}.")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    if len(sys.argv) > 2:
+        print(f"usage: {sys.argv[0]} [<target>]", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(main(*sys.argv[1:]))

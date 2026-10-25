@@ -717,7 +717,7 @@ class CheckBlameIgnoreRevsTests(SimpleTestCase):
         self._git(cwd, "commit", "-qm", message)
         return self._git(cwd, "rev-parse", "HEAD")
 
-    def _run(self, lines: list[str]) -> tuple[int, str]:
+    def _run(self, lines: list[str], *, checkout: str | None = None, target: str | None = None) -> tuple[int, str]:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)
             self._git(path, "init", "-q")
@@ -729,6 +729,9 @@ class CheckBlameIgnoreRevsTests(SimpleTestCase):
             side = self._commit(path, "tracked.txt", "side\n", "side")
             self._git(path, "checkout", "-q", branch)
             self._commit(path, "tracked.txt", "head\n", "head")
+            if checkout == "side":
+                self._git(path, "checkout", "-q", "side-branch")
+            target = {"main": branch}.get(target, target)
             (path / ".git-blame-ignore-revs").write_text(
                 "\n".join(
                     line.format(
@@ -743,13 +746,13 @@ class CheckBlameIgnoreRevsTests(SimpleTestCase):
             )
             stdout = io.StringIO()
             with contextlib.chdir(path), contextlib.redirect_stdout(stdout):
-                code = blame_ignore_revs_main()
+                code = blame_ignore_revs_main() if target is None else blame_ignore_revs_main(target)
         return code, stdout.getvalue()
 
     def test_valid_hashes_pass(self):
         code, stdout = self._run(["# A merged change", "", "{ancestor}"])
         self.assertEqual(code, 0)
-        self.assertIn("real ancestor commit hashes", stdout)
+        self.assertIn("real commit hashes that are ancestors of HEAD", stdout)
 
     def test_invalid_hash_format_fails(self):
         code, stdout = self._run(["not-a-hash"])
@@ -770,6 +773,16 @@ class CheckBlameIgnoreRevsTests(SimpleTestCase):
         code, stdout = self._run(["{side}"])
         self.assertEqual(code, 1)
         self.assertIn("is not an ancestor of HEAD", stdout)
+
+    def test_target_given(self):
+        # As on a PR: the side branch's own commit is an ancestor of HEAD but not of the base branch.
+        code, stdout = self._run(["{side}"], checkout="side")
+        self.assertEqual(code, 0)
+        code, stdout = self._run(["{side}"], checkout="side", target="main")
+        self.assertEqual(code, 1)
+        self.assertRegex(stdout, r"is not an ancestor of \S+")
+        code, stdout = self._run(["{ancestor}"], checkout="side", target="main")
+        self.assertEqual(code, 0)
 
     def test_ancestor_check_error_fails(self):
         real_git = check_blame_ignore_revs._git
