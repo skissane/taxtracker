@@ -899,6 +899,16 @@ class AdminViewTests(TestCase):
         self.assertIn("FY2024", content)
         self.assertIn("FY2025", content)
 
+    def test_download_multi_zip_post_non_numeric_fy_ids_shows_error(self):
+        url = reverse("admin:taxtracker_financialyear_download_multi_zip")
+        response = self.client.post(url, {"fy_ids": ["abc"], "action": "zip"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Please select at least one financial year.")
+
+    def test_financialyear_change_view_non_numeric_id_uses_admin_redirect(self):
+        response = self.client.get("/admin/taxtracker/financialyear/abc/change/")
+        self.assertEqual(response.status_code, 302)
+
     def test_item_changelist_shows_year_link(self):
         url = reverse("admin:taxtracker_item_changelist")
         response = self.client.get(url)
@@ -1959,6 +1969,34 @@ class ArchiveExtractorTests(TestCase):
     def test_invalid_json_raises_unsupported(self):
         with self.assertRaises(UnsupportedArchiveError):
             extract_from_archive(b"not json at all", "export.har")
+
+    def test_har_top_level_json_array_raises_unsupported(self):
+        with self.assertRaisesMessage(UnsupportedArchiveError, "top-level JSON value must be an object"):
+            extract_from_archive(json.dumps([]).encode(), "export.har")
+
+    def test_har_entry_body_json_array_is_skipped(self):
+        har_bytes = json.dumps(
+            {
+                "log": {
+                    "entries": [
+                        {
+                            "request": {
+                                "method": "GET",
+                                "url": f"{FIDELITY_URL_PREFIX}statement-2023-07-20",
+                            },
+                            "response": {
+                                "content": {
+                                    "mimeType": "application/json",
+                                    "text": "[]",
+                                }
+                            },
+                        }
+                    ]
+                }
+            }
+        ).encode()
+        results = extract_from_archive(har_bytes, "export.har")
+        self.assertEqual(results, [])
 
     def test_invalid_zip_raises_unsupported(self):
         with self.assertRaisesMessage(UnsupportedArchiveError, "Could not parse file as a ZIP archive"):
