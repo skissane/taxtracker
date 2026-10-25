@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# Sets this repo's local Git config settings that the project relies on, so
+# nobody has to set them up by hand. The justfile runs it whenever `just` runs a
+# recipe, via a top-level `shell()` assignment; it's idempotent and only prints
+# (to stderr) when it changes a setting. Currently it sets only
+# `blame.ignoreRevsFile`, so `git blame` skips the commits listed in
+# .git-blame-ignore-revs.
 set -euo pipefail
 cd "$(dirname "$0")"
 # Outside a Git checkout (e.g. a `git archive` copy) there's nothing to set up,

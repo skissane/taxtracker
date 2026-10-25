@@ -1,0 +1,10 @@
+# Commits for `git blame` to skip, such as bulk reformatting, so blame shows
+# the commit that last really changed each line instead. `just` sets
+# `blame.ignoreRevsFile` to this file (scripts/git-config-setup.sh); without
+# `just`, run `git config blame.ignoreRevsFile .git-blame-ignore-revs`. GitHub's
+# blame view reads it too.
+#
+# Format: one full 40-character commit hash per line. Blank lines and lines
+# starting with `#` are ignored, so put a comment above each hash saying what
+# the commit was. Use the commit's hash on `master`: squash merges give it a
+# new one, so add it once the PR has merged.
