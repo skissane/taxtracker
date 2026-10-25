@@ -10,6 +10,7 @@ from pathlib import Path
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
+from django.db.models import Prefetch
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.response import TemplateResponse
@@ -876,7 +877,13 @@ def _build_fy_index_md(fy, prefix="", zf=None):
     """
     items = list(
         fy.items.select_related("parent")
-        .prefetch_related("attachments")
+        # pk breaks ties, so duplicate names get the same suffixes every time.
+        .prefetch_related(
+            Prefetch(
+                "attachments",
+                queryset=Attachment.objects.order_by("-date", "title", "pk"),
+            )
+        )
         .order_by("order", "title", "pk")
     )
     folder_paths, used_names = _unique_folder_paths(items)

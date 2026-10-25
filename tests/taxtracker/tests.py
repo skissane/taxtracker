@@ -789,6 +789,22 @@ class AdminViewTests(TestCase):
         self.assertIn("`X/s.pdf`", index_content)
         self.assertIn("`X/s (2).pdf`", index_content)
 
+    def test_download_zip_suffixes_identical_attachments_by_pk(self):
+        """Same date and title: the older attachment keeps the plain name."""
+        item = Item.objects.create(year=self.fy, title="X", order=2)
+        for content in (b"one", b"two"):
+            Attachment.objects.create(
+                item=item,
+                title="same",
+                date=datetime.date(2024, 1, 1),
+                file=ContentFile(content, name="s.pdf"),
+            )
+
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        with zipfile.ZipFile(io.BytesIO(self.client.get(url).getvalue())) as zf:
+            self.assertEqual(zf.read("X/s.pdf"), b"one")
+            self.assertEqual(zf.read("X/s (2).pdf"), b"two")
+
     def test_download_zip_deduplicates_sanitized_sibling_titles(self):
         item1 = Item.objects.create(year=self.fy, title="A/B", order=2)
         item2 = Item.objects.create(year=self.fy, title="A_B", order=3)
