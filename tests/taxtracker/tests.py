@@ -126,6 +126,23 @@ class FinancialYearModelTests(TestCase):
         self.assertEqual(latest.from_status, FinancialYear.STATUS_MORE_INFO_REQUESTED)
         self.assertEqual(latest.to_status, FinancialYear.STATUS_SUBMITTED)
 
+    def test_status_change_without_loaded_status_reads_previous_from_db(self):
+        # from_db() and save() always set _loaded_status, so this is save()'s
+        # fallback for an instance that somehow lacks it.
+        del self.fy._loaded_status
+        self.fy.status = FinancialYear.STATUS_SUBMITTED
+        self.fy.save()
+
+        latest = self.fy.status_history.order_by("-transitioned_at", "-pk").first()
+        self.assertEqual(latest.from_status, FinancialYear.STATUS_PENDING_SUBMISSION)
+        self.assertEqual(latest.to_status, FinancialYear.STATUS_SUBMITTED)
+
+    def test_unchanged_status_without_loaded_status_adds_no_history(self):
+        del self.fy._loaded_status
+        self.fy.save()
+
+        self.assertEqual(self.fy.status_history.count(), 1)
+
     def test_ordering(self):
         fy2025 = FinancialYear.objects.create(year=2025)
         fy2023 = FinancialYear.objects.create(year=2023)
@@ -2076,6 +2093,12 @@ class ArchiveExtractorTests(TestCase):
     def test_invalid_json_raises_unsupported(self):
         with self.assertRaises(UnsupportedArchiveError):
             extract_from_archive(b"not json at all", "export.har")
+
+    def test_invalid_zip_raises_unsupported(self):
+        with self.assertRaisesMessage(
+            UnsupportedArchiveError, "Could not parse file as a ZIP archive"
+        ):
+            extract_from_archive(b"not a zip at all", "export.zip")
 
     # ------------------------------------------------------------------
     # Unsupported format
