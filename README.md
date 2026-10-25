@@ -527,12 +527,13 @@ and run `uv run lifetracker-cli <command> --help` for each one's options.
 
 The project's tasks are [just](https://just.systems/) recipes (the `Makefile` only forwards to `just`).
 Run `just --list` to see them all.
+Running any `just` recipe also sets the repo's `blame.ignoreRevsFile` Git setting, so `git blame` skips the commits listed in `.git-blame-ignore-revs`; without `just`, run `git config blame.ignoreRevsFile .git-blame-ignore-revs` yourself.
 The main ones:
 
 | Command | What it does |
 |---|---|
 | `just test` | Runs the test suite (pytest, in parallel across CPU cores). |
-| `just check` | Runs the whitespace, `screenshots/`, ruff and djlint checks, without fixing anything. |
+| `just check` | Runs the whitespace, `screenshots/`, ruff, djlint and `justfile` checks, without fixing anything. |
 | `just fix` | Fixes lint issues and reformats code and templates. |
 | `just coverage` | Runs the tests and prints a coverage report. |
 | `just screenshots` | Saves light and dark mode screenshots of admin pages to `screenshots/`, using a headless Chromium it installs with Playwright. |

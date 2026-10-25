@@ -12,7 +12,7 @@ Keep to this when editing them: put each new sentence on its own line, don't rew
 
 ## Commands
 
-CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `screenshots-dir-check`, `lint`, `fmt-check`, `lint-templates`, `fmt-check-templates`, `coverage`, `screenshots`, `screenshots-post`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
+CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `screenshots-dir-check`, `lint`, `fmt-check`, `lint-templates`, `fmt-check-templates`, `justfile-check`, `coverage`, `screenshots`, `screenshots-post`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
 `just ci` drifts from `ci.yml` if the workflow changes without a matching justfile edit; `run_workflow_local.py` avoids that by parsing the workflow YAML directly and running its `run:` steps as written (see its docstring for what it does and doesn't support).
 After `just coverage` runs, CI uploads `coverage.xml` to Codecov (`codecov/codecov-action`), and also uploads the `junit.xml` test results it writes for Codecov Test Analytics (`report_type: test_results`, even if the tests failed; not `codecov/test-results-action`, which is deprecated); these steps need a `CODECOV_TOKEN` repo secret from codecov.io and are skipped by `run_workflow_local.py` since they're `uses:` steps.
 `ci.yml` has seven jobs, `test`, `screenshots` and `post-screenshots` (see Screenshots), `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment); `run_workflow_local.py` runs the first job in the file unless given `--job`, so keep `test` first.
@@ -21,6 +21,14 @@ Don't run `--job dependabot-fix`, `--job publish` or `--job deploy` locally: it 
 **Whitespace:** `just whitespace-check` (part of `just check`, `just ci` and the `test` job; `scripts/check_whitespace.py`, stdlib-only) checks every file `git ls-files` lists, except ones Git's own detection calls binary (`git ls-files --eol` shows `w/-text`) and symlinks: no trailing whitespace on any line, no leading blank line, and exactly one newline at the end of a non-empty file (none in an empty one).
 It checks the working tree copy, so it also catches unstaged edits.
 For a Markdown hard line break, end the line with a backslash rather than two trailing spaces.
+
+**Git config and `git blame`:** the `justfile`'s top-level `_ := shell('./scripts/git-config-setup.sh')` runs that script whenever `just` runs a recipe (plain `just` included, as it runs `default`; not `just --list`, which evaluates no assignments), so it sets the repo's local `blame.ignoreRevsFile` to `.git-blame-ignore-revs` if it isn't already, printing an `INFO:` line to stderr when it changes it.
+Outside a Git checkout (e.g. a `git archive` copy) the script does nothing, rather than failing every recipe.
+With Git 2.53 or later it sets `:(optional).git-blame-ignore-revs`, so `git blame` on a checkout from before the file existed doesn't fail with `could not open object name list`; older Git keeps the plain path, as before 2.52 the prefix would be taken as part of the file name, and 2.52.0's blame reads an uninitialised pointer when an optional file is missing.
+`.git-blame-ignore-revs` lists commits `git blame` should skip, such as bulk reformatting; add a commit's hash from `master` once it has merged, as a squash merge gives it a new one.
+`set minimum-version` makes older `just` versions refuse the `justfile`.
+The assignment works only because `just` evaluates every top-level assignment eagerly; under `set lazy` the unused `_` would never be evaluated and the script would never run.
+So `just justfile-check` (part of `just check`, `just ci` and the `test` job) fails if `just --json` reports `set lazy` on; it needs `jq`.
 
 **Screenshots directory:** `just screenshots-dir-check` (part of `just check`, `just ci` and the `test` job; `scripts/check_screenshots_dir.py`, stdlib-only) fails unless `screenshots/.gitignore` is the only file `git ls-files` lists under `screenshots/`, and its staged and working tree copies both have the contents the script expects.
 Without it, `rm -rf screenshots` before a screenshot run, then `git add -A`, commits the PNGs and the `.gitignore`'s deletion (as happened on PR #137).
