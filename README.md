@@ -527,7 +527,7 @@ and run `uv run lifetracker-cli <command> --help` for each one's options.
 
 The project's tasks are [just](https://just.systems/) recipes (the `Makefile` only forwards to `just`).
 Run `just --list` to see them all.
-Any `just` command also sets the repo's `blame.ignoreRevsFile` Git setting, so `git blame` skips the commits listed in `.git-blame-ignore-revs`; without `just`, run `git config blame.ignoreRevsFile .git-blame-ignore-revs` yourself.
+Running any `just` recipe also sets the repo's `blame.ignoreRevsFile` Git setting, so `git blame` skips the commits listed in `.git-blame-ignore-revs`; without `just`, run `git config blame.ignoreRevsFile .git-blame-ignore-revs` yourself.
 The main ones:
 
 | Command | What it does |

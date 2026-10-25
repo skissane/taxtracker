@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
-cd "$(git rev-parse --show-toplevel)"
+# Outside a Git checkout (e.g. a `git archive` copy) there's nothing to set up,
+# and failing would make every `just` recipe fail.
+if ! toplevel="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+    exit 0
+fi
+cd "$toplevel"
 
 ensure_setting() {
     local name="$1" value="$2"

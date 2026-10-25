@@ -22,7 +22,8 @@ Don't run `--job dependabot-fix`, `--job publish` or `--job deploy` locally: it 
 It checks the working tree copy, so it also catches unstaged edits.
 For a Markdown hard line break, end the line with a backslash rather than two trailing spaces.
 
-**Git config and `git blame`:** the `justfile`'s top-level `_ := shell('./scripts/git-config-setup.sh')` runs that script on every `just` invocation (`just --list` included), so any `just` command sets the repo's local `blame.ignoreRevsFile` to `.git-blame-ignore-revs` if it isn't already, printing an `INFO:` line to stderr when it changes it.
+**Git config and `git blame`:** the `justfile`'s top-level `_ := shell('./scripts/git-config-setup.sh')` runs that script whenever `just` runs a recipe (plain `just` included, as it runs `default`; not `just --list`, which evaluates no assignments), so it sets the repo's local `blame.ignoreRevsFile` to `.git-blame-ignore-revs` if it isn't already, printing an `INFO:` line to stderr when it changes it.
+Outside a Git checkout (e.g. a `git archive` copy) the script does nothing, rather than failing every recipe.
 `.git-blame-ignore-revs` lists commits `git blame` should skip, such as bulk reformatting; add a commit's hash from `master` once it has merged, as a squash merge gives it a new one.
 `set minimum-version` makes older `just` versions refuse the `justfile`.
 The assignment works only because `just` evaluates every top-level assignment eagerly; under `set lazy` the unused `_` would never be evaluated and the script would never run.
