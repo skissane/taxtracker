@@ -213,7 +213,7 @@ justfile-check:
 
 # Lint the GitHub Actions workflows with jactionlint
 lint-workflows:
-    uv run --group dev jactionlint --profile correctness
+    uv run --group workflow-lint jactionlint --profile correctness
 
 # Run every whitespace, screenshots/, blame-ignore-revs, ruff, djlint, jactionlint and justfile check (no fixes, no tests)
 check: whitespace-check screenshots-dir-check blame-ignore-revs-check lint fmt-check lint-templates fmt-check-templates lint-workflows justfile-check

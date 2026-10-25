@@ -23,6 +23,9 @@ It checks the working tree copy, so it also catches unstaged edits.
 For a Markdown hard line break, end the line with a backslash rather than two trailing spaces.
 
 **Workflow lint:** `just lint-workflows` (part of `just check`, `just ci` and the `test` job) runs `jactionlint --profile correctness` over the workflows, composite actions and Dependabot config.
+jactionlint is in its own `workflow-lint` dependency group, not `dev`, because it ships only manylinux and macOS wheels (no musllinux wheel or sdist).
+`dev` is installed by `uv sync`, `run.sh` and `just sync`, so having it there would make installing the project fail on musl Linux.
+`just lint-workflows` installs the group on demand (as `just screenshots` does for Playwright), so it, and therefore `just check` and `just ci`, can't run on musl.
 It uses the `correctness` profile (what actionlint checks); jactionlint's default profile also enables security rules (`unpinned-uses`, `artipacked`, `missing-timeout`, etc.) that the existing workflows don't yet satisfy.
 
 **Git config and `git blame`:** the `justfile`'s top-level `_ := shell('./scripts/git-config-setup.sh')` runs that script whenever `just` runs a recipe (plain `just` included, as it runs `default`; not `just --list`, which evaluates no assignments), so it sets the repo's local `blame.ignoreRevsFile` to `.git-blame-ignore-revs` if it isn't already, printing an `INFO:` line to stderr when it changes it.
@@ -482,6 +485,9 @@ Propose a new dimension or value to the owner rather than inventing one.
 `pyproject.toml`'s `[tool.uv] environments` restricts resolution to `darwin`, and to `linux` on `x86_64`/`aarch64` only, which keeps wheels for other Linux architectures (ppc64le, s390x, armv7l, riscv64) out of `uv.lock`.
 `just lock-os-arch-check` (part of `just ci` and the `test` job; `scripts/validate_uv_lock_os_arch.py`, stdlib-only) fails if `uv.lock` has a wheel whose platform tag splits into an (OS, arch) pair that its `_classify_platform` doesn't classify as `SUPPORTED` (the platforms `environments` is meant to allow) or `TOLERATED` (iOS and Emscripten, which aren't supported but whose wheels uv keeps despite `environments`).
 Don't flag or "fix" Windows portability issues (e.g. relying on `HOME`, POSIX shell syntax in the `justfile` or scripts, `/` path separators, file permission bits), and don't add Windows-specific workarounds.
+
+musl Linux (e.g. Alpine) is allowed too, as `uv.lock` has musllinux wheels (or sdists) for the app's dependencies and the `dev` group.
+Tools that only have glibc wheels (jactionlint, Playwright) therefore live in their own dependency groups, so a new dev dependency with neither a musllinux wheel nor an sdist belongs in such a group, not `dev`.
 
 **`except A, B, C:` is valid Python 3 syntax.**
 Do not flag comma-separated exception types (without parentheses) as "Python 2-style syntax" or a SyntaxError.
