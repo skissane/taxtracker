@@ -12,15 +12,24 @@ Keep to this when editing them: put each new sentence on its own line, don't rew
 
 ## Commands
 
-CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `lint-templates`, `fmt-check-templates`, `justfile-check`, `coverage`, `screenshots`, `screenshots-post`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
+CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `justfile-check`, `coverage`, `screenshots`, `screenshots-post`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
 `just ci` drifts from `ci.yml` if the workflow changes without a matching justfile edit; `run_workflow_local.py` avoids that by parsing the workflow YAML directly and running its `run:` steps as written (see its docstring for what it does and doesn't support).
 After `just coverage` runs, CI uploads `coverage.xml` to Codecov (`codecov/codecov-action`), and also uploads the `junit.xml` test results it writes for Codecov Test Analytics (`report_type: test_results`, even if the tests failed; not `codecov/test-results-action`, which is deprecated); these steps need a `CODECOV_TOKEN` repo secret from codecov.io and are skipped by `run_workflow_local.py` since they're `uses:` steps.
 `ci.yml` has seven jobs, `test`, `screenshots` and `post-screenshots` (see Screenshots), `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment); `run_workflow_local.py` runs the first job in the file unless given `--job`, so keep `test` first.
 Don't run `--job dependabot-fix`, `--job publish` or `--job deploy` locally: it doesn't evaluate `if:`, so it would push commits to the current branch, push to GHCR or deploy to production.
 
+**PR Fixes:** `.github/workflows/fix.yml` (issue #254) is run by hand (`workflow_dispatch`) on an open PR's branch.
+It fails unless the branch has an open PR from this repo (`gh pr list --head`), merges the PR's base branch in (failing on conflicts), runs `just sync` and `just fix`, commits any changes to tracked files (`git add -u`) as `chore: apply automated fixes`, and pushes if that or the merge moved `HEAD`.
+`fmt-templates` reruns djlint with `--check` if `--reformat` fails, as `--reformat` exits 1 whenever it changes a file.
+Like `dependabot-fix`, it checks out with `persist-credentials: false`, as `just fix` runs the branch's own `justfile` and dependencies, and only the push step sees its token, the `AUTOFIX_TOKEN` Actions secret (a fine-grained PAT with Contents: read and write; the job fails if it's unset), not `GITHUB_TOKEN`, whose pushes wouldn't trigger CI.
+If the branch moves after checkout, the push isn't a fast-forward and fails.
+
 **Whitespace:** `just whitespace-check` (part of `just check`, `just ci` and the `test` job; `scripts/check_whitespace.py`, stdlib-only) checks every file `git ls-files` lists, except ones Git's own detection calls binary (`git ls-files --eol` shows `w/-text`) and symlinks: no trailing whitespace on any line, no leading blank line, and exactly one newline at the end of a non-empty file (none in an empty one).
 It checks the working tree copy, so it also catches unstaged edits.
 For a Markdown hard line break, end the line with a backslash rather than two trailing spaces.
+
+**Workflow lint:** `just lint-workflows` (part of `just check`, `just ci` and the `test` job) runs `jactionlint --profile correctness` over the workflows, composite actions and Dependabot config.
+It uses the `correctness` profile (what actionlint checks); jactionlint's default profile also enables security rules (`unpinned-uses`, `artipacked`, `missing-timeout`, etc.) that the existing workflows don't yet satisfy.
 
 **Git config and `git blame`:** the `justfile`'s top-level `_ := shell('./scripts/git-config-setup.sh')` runs that script whenever `just` runs a recipe (plain `just` included, as it runs `default`; not `just --list`, which evaluates no assignments), so it sets the repo's local `blame.ignoreRevsFile` to `.git-blame-ignore-revs` if it isn't already, printing an `INFO:` line to stderr when it changes it.
 Outside a Git checkout (e.g. a `git archive` copy) the script does nothing, rather than failing every recipe.
@@ -479,6 +488,8 @@ Propose a new dimension or value to the owner rather than inventing one.
 `pyproject.toml`'s `[tool.uv] environments` restricts resolution to `darwin`, and to `linux` on `x86_64`/`aarch64` only, which keeps wheels for other Linux architectures (ppc64le, s390x, armv7l, riscv64) out of `uv.lock`.
 `just lock-os-arch-check` (part of `just ci` and the `test` job; `scripts/validate_uv_lock_os_arch.py`, stdlib-only) fails if `uv.lock` has a wheel whose platform tag splits into an (OS, arch) pair that its `_classify_platform` doesn't classify as `SUPPORTED` (the platforms `environments` is meant to allow) or `TOLERATED` (iOS and Emscripten, which aren't supported but whose wheels uv keeps despite `environments`).
 Don't flag or "fix" Windows portability issues (e.g. relying on `HOME`, POSIX shell syntax in the `justfile` or scripts, `/` path separators, file permission bits), and don't add Windows-specific workarounds.
+musl Linux (e.g. Alpine) isn't supported either, though `uv.lock` can't exclude it (environment markers can't tell glibc from musl): some dev tools, such as jactionlint, ship only glibc (manylinux) and macOS wheels, so `uv sync` fails there.
+Don't move such a tool to its own dependency group, or otherwise work around it, for musl's sake.
 
 **`except A, B, C:` is valid Python 3 syntax.**
 Do not flag comma-separated exception types (without parentheses) as "Python 2-style syntax" or a SyntaxError.

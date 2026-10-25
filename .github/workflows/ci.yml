@@ -69,6 +69,9 @@ jobs:
       - name: Check formatting with djlint
         run: just fmt-check-templates
 
+      - name: Lint GitHub Actions workflows with jactionlint
+        run: just lint-workflows
+
       - name: Check the justfile doesn't use set lazy
         run: just justfile-check
 

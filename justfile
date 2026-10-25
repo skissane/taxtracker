@@ -52,7 +52,7 @@ lint:
 
 # Autofix Python lint issues with ruff
 lint-fix:
-    uv run --group dev ruff check --fix .
+    uv run --group dev ruff check --fix --exit-zero .
 
 # Check Python formatting with ruff
 fmt-check:
@@ -70,9 +70,12 @@ lint-templates:
 fmt-check-templates:
     uv run --group dev djlint --check .
 
+# djlint --reformat exits 1 when it changes a file, so then check the result
+# instead, which fails only if something is still wrong.
+
 # Format Django templates with djlint
 fmt-templates:
-    uv run --group dev djlint --reformat .
+    uv run --group dev djlint --reformat . || uv run --group dev djlint --check .
 
 # Run the test suite in parallel with pytest-xdist
 test:
@@ -211,8 +214,12 @@ justfile-check:
     test "$({{quote(just_executable())}} --json --justfile {{quote(justfile())}} | jq .settings.lazy)" = "false" || \
         (echo "ERROR: 'set lazy' is incompatible with this justfile" >&2; exit 1)
 
-# Run every whitespace, screenshots/, blame-ignore-revs, ruff, djlint and justfile check (no fixes, no tests)
-check: whitespace-check screenshots-dir-check blame-ignore-revs-check lint fmt-check lint-templates fmt-check-templates justfile-check
+# Lint the GitHub Actions workflows with jactionlint
+lint-workflows:
+    uv run --group dev jactionlint --profile correctness
+
+# Run every whitespace, screenshots/, blame-ignore-revs, ruff, djlint, jactionlint and justfile check (no fixes, no tests)
+check: whitespace-check screenshots-dir-check blame-ignore-revs-check lint fmt-check lint-templates fmt-check-templates lint-workflows justfile-check
 
 # Autofix lint issues and reformat code/templates
 fix: lint-fix fmt fmt-templates
