@@ -34,6 +34,16 @@
           </td>
         </tr>
         <tr>
+          <th class="lt-label">Automatic Backups</th>
+          <td>
+            {% if auto_backup_interval %}
+              At startup, every {{ auto_backup_interval }} while up{% if config.mode == "stop" %} and before stopping{% endif %}, each skipped if the database hasn't changed since the last cloud backup
+            {% else %}
+              Off (set <code>LIFETRACKER_AUTO_BACKUP</code> to <code>on</code> to turn them on)
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
           <th class="lt-label">Status File</th>
           <td>
             <code>{{ config.status_file }}</code>
@@ -72,6 +82,8 @@
                 Active (connections open)
               {% elif status.state == "stopping" %}
                 Stopping gunicorn
+              {% elif status.state == "backing up" %}
+                Backing up before stopping
               {% else %}
                 Idle (no connections open)
               {% endif %}
@@ -108,6 +120,8 @@
                 Unknown: the watchdog doesn't seem to be running
               {% elif status.state == "stopping" %}
                 Now: the idle timeout was reached
+              {% elif status.state == "backing up" %}
+                Once the backup finishes: the idle timeout was reached
               {% elif status.state == "active" %}
                 Not while connections are open; {{ status.idle_timeout }} after the last one closes
               {% else %}
@@ -116,6 +130,39 @@
               {% if status.mode != "stop" %}(monitor mode: never stops){% endif %}
             </td>
           </tr>
+          {% if status.auto_backup %}
+            <tr>
+              <th class="lt-label">Last Automatic Backup</th>
+              <td>
+                {% with backup=status.auto_backup %}
+                  {% if backup.last_started_at %}
+                    {{ backup.reason|capfirst }}, started {{ backup.last_started_ago }} ago ({{ backup.last_started_at|date:"Y-m-d H:i:s T" }}):
+                    {% if backup.running %}
+                      running
+                    {% elif backup.last_exit_status == 0 %}
+                      succeeded (or skipped, if nothing had changed)
+                    {% elif backup.last_exit_status is None %}
+                      couldn't start
+                    {% else %}
+                      failed with exit status {{ backup.last_exit_status }}
+                    {% endif %}
+                  {% else %}
+                    None yet
+                  {% endif %}
+                {% endwith %}
+              </td>
+            </tr>
+            <tr>
+              <th class="lt-label">Next Automatic Backup</th>
+              <td>
+                {% if status.auto_backup.running %}
+                  Once this one finishes, then {{ status.auto_backup.next_run_at|date:"Y-m-d H:i:s T" }}
+                {% else %}
+                  {{ status.auto_backup.next_run_at|date:"Y-m-d H:i:s T" }}{% if status.mode == "stop" %}, or before stopping if sooner{% endif %}
+                {% endif %}
+              </td>
+            </tr>
+          {% endif %}
           <tr>
             <th class="lt-label">Watchdog</th>
             <td>

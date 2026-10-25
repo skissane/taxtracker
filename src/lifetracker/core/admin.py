@@ -19,6 +19,7 @@ from django.utils.safestring import mark_safe
 from django.utils.timesince import timesince
 
 from lifetracker.core import app_icon, client_ips, idle_watchdog, uptime_log
+from lifetracker.core.attachments import database_storage_file_fields
 from lifetracker.core.backup import (
     CLOUD_BACKUP_ERRORS,
     CloudBackupStatusUpdateError,
@@ -221,8 +222,24 @@ class DBStoredFileAdmin(admin.ModelAdmin):
         ]
         return custom + super().get_urls()
 
+    def _can_view_stored_file(self, request, stored_file_pk):
+        """Whether *request.user* can view at least one model row owning this file."""
+        if request.user.is_superuser:
+            return True
+        path_prefix = f"db/{stored_file_pk}/"
+        for model, model_admin in self.admin_site._registry.items():
+            for field in database_storage_file_fields(model):
+                obj = model._base_manager.filter(
+                    **{f"{field.attname}__startswith": path_prefix}
+                ).first()
+                if obj is not None and model_admin.has_view_permission(request, obj):
+                    return True
+        return False
+
     def serve_file_view(self, request, pk):
         obj = get_object_or_404(DBStoredFile, pk=pk)
+        if not self._can_view_stored_file(request, pk):
+            raise PermissionDenied
         content = bytes(obj.content)
         content_type, encoding = mimetypes.guess_type(obj.filename)
         # A compressed file (e.g. "x.txt.gz" guesses as text/plain, gzip) isn't
@@ -441,6 +458,21 @@ def _parse_status_time(value):
     return datetime.datetime.fromisoformat(value) if value else None
 
 
+def _auto_backup_status(raw):
+    """The status file's automatic backup section, for the page, or None if
+    automatic backups are off."""
+    if raw is None:
+        return None
+    return {
+        "running": bool(raw["running"]),
+        "reason": raw["reason"],
+        "last_started_at": _parse_status_time(raw["last_started_at"]),
+        "last_finished_at": _parse_status_time(raw["last_finished_at"]),
+        "last_exit_status": raw["last_exit_status"],
+        "next_run_at": _parse_status_time(raw["next_run_at"]),
+    }
+
+
 def idle_watchdog_page_context(now=None):
     """The idle watchdog page's context, from the environment (the same as the
     watchdog's) and its status file."""
@@ -451,6 +483,7 @@ def idle_watchdog_page_context(now=None):
         "status": None,
         "status_error": None,
         "system_uptime": None,
+        "auto_backup_interval": None,
     }
     try:
         config = idle_watchdog.config_from_env()
@@ -458,6 +491,10 @@ def idle_watchdog_page_context(now=None):
         context["config_error"] = str(exc)
         return context
     context["config"] = config
+    if config.auto_backup_interval_seconds is not None:
+        context["auto_backup_interval"] = _format_duration(
+            config.auto_backup_interval_seconds
+        )
     uptime = idle_watchdog.system_uptime()
     if uptime is not None:
         context["system_uptime"] = _format_duration(uptime)
@@ -494,6 +531,7 @@ def idle_watchdog_page_context(now=None):
                 }
                 for port in raw["ports"]
             ],
+            "auto_backup": _auto_backup_status(raw.get("auto_backup")),
         }
     except (KeyError, TypeError, ValueError) as exc:
         context["status_error"] = (
@@ -528,6 +566,10 @@ def idle_watchdog_page_context(now=None):
     # from when it finishes, about now. It only stops at a check, so up to one
     # check interval later.
     status["stop_at"] = now + datetime.timedelta(seconds=idle_timeout)
+    if status["auto_backup"] and status["auto_backup"]["last_started_at"]:
+        status["auto_backup"]["last_started_ago"] = _format_duration(
+            (now - status["auto_backup"]["last_started_at"]).total_seconds()
+        )
     for port in status["ports"]:
         seen = port["last_connection_at"]
         port["last_connection_ago"] = (

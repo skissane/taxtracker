@@ -117,6 +117,7 @@ Rows deleted before that receiver existed left their `DBStoredFile`s behind: cor
 `DatabaseStorage` (in `core/models.py`) is a custom Django storage backend that writes file content to `DBStoredFile` rows.
 Storage paths have the form `db/<pk>/<filename>`.
 Files are served through `DBStoredFileAdmin.serve_file_view` at `/admin/core/dbstoredfile/file/<pk>/`.
+A superuser can open any file; anyone else needs view permission (the model admin's `has_view_permission`) on a row of a registered model whose `DatabaseStorage` field holds `db/<pk>/...`, so orphaned files and those of unregistered models such as `AppIcon` are superuser-only (issue #148).
 It guesses the type from the filename (`application/octet-stream` if it can't, or if the name gives an encoding such as `.gz`) and shows only `INLINE_CONTENT_TYPES` (PDF, common raster images, plain text) inline; anything else, HTML and SVG included, is sent as an `attachment` download, so an attached file can't run script on the admin origin with the viewer's session (issue #140).
 Every response has `X-Content-Type-Options: nosniff`, and all but PDFs `Content-Security-Policy: sandbox; default-src 'none'`; PDFs are left out because browsers' built-in PDF viewers won't run in a sandboxed document.
 
@@ -203,7 +204,7 @@ Nothing prunes `client_ip`: each new IP adds a row of a few hundred bytes, which
   Default lodgement date is 31 Oct; overridable.
 - **`Item`** (taxtracker) — tax checklist item, self-referential `parent` (tree).
   Child items always inherit their parent's `year_id`, enforced in both `clean()` and `save()`.
-  Cascade update propagates when a root item's year changes.
+  Whenever an item's year changes, whether a root's year is edited or the item is re-parented under another year's item, `save()` moves all its descendants to the new year too.
   Its tree behaviour (path, status, cycle check) comes from `core.trees.TreeNodeMixin`, shared with `Task`.
 - **`FileType` / `MimeType` / `FileExtension`** (core) — file type registry.
   Each `FileType` must have exactly one primary MIME type and one primary extension; enforced by `_AtLeastOnePrimaryFormSet`.
@@ -234,6 +235,9 @@ It replaces the model's usual admin URLs with these, all superuser-only (`has_mo
 The logic lives in `core/backup.py` as plain functions (`run_cloud_backup`, `list_cloud_backups`, `backup_database`, etc.), not admin methods, so e.g. scheduled backups can reuse it:
 - **Backups** (`/admin/core/cloudbackupstatus/`, the changelist URL) — cloud backup status page with a "Run Backup Now" button that uploads a copy of the SQLite DB to an S3-compatible bucket (via `boto3`'s `upload_fileobj`, which streams it, in parts once it's big enough) as `<hostname>/db-backup.<YYYY-MM-DD.HH.MM.SS>.sqlite3`, where `<hostname>` is `LIFETRACKER_BACKUP_HOSTNAME` if set, else `socket.gethostname()` (`just docker-run` sets it to `docker.$(hostname)`, as the container's DB is separate from local dev's and its own hostname is a random ID); the page shows it.
   The `cloud_backup` management command (core) does the same from the command line via the same `run_cloud_backup`, printing the object key, and raises `CommandError` on the same failures (`CLOUD_BACKUP_ERRORS`, shared with the admin views), including when the upload succeeded but recording `CloudBackupStatus` didn't.
+  With `--if-changed` (as the automatic backups run it; see Deployment) it uploads nothing, and succeeds, unless `backup.database_changed()`: after each backup, `run_cloud_backup` runs `PRAGMA wal_checkpoint(TRUNCATE)` and records the database file's device, inode, size and `st_mtime_ns` (`database_signature()`, None unless the `-wal` file is missing or empty), with the bucket, endpoint and hostname, in `LIFETRACKER_BACKUP_STATE_FILE` (default `<database>-backup-state.json`, so `/data/db.sqlite3-backup-state.json` on Fly).
+  A later commit is then either in the log or, once checkpointed, has changed the file's modification time, and reads change neither (checked: the boot's `migrate`, `ensure_superuser` and `ensure_jwt_key` don't count either); the backup's own `CloudBackupStatus` write comes before the checkpoint, so it doesn't count.
+  A commit by another connection during the backup (seen as `PRAGMA data_version` on Django's connection changing between the start and after the signature is taken) might not be in the backup, so then the state file is removed rather than written, and the next `--if-changed` backs up; so does an in-memory database (the tests'), which has no signature.
   The `restore_cloud_backup <key>` command (core) restores one: `download_cloud_backup` to a temporary file, `check_backup_file` (`PRAGMA quick_check` and a `django_migrations` table), a typed `yes` unless `--no-input`, `run_cloud_backup` of the current database (failing before any change if any of these fail), then `restore_database`, then `migrate`; it puts back the `CloudBackupStatus` row as it was just before the restore, so it names that backup rather than the restored database's last one.
   `restore_database` copies the file into the live database with SQLite's online backup API through Django's connection, all in one step (`pages=-1`), so it's one write transaction: concurrent requests' writes wait for it (up to `DATABASES`' 30-second `timeout`) and readers see the old database or the new, never a mix; SQLite keeps the `-wal`/`-shm` files consistent and the database in WAL mode, so the web app needn't be stopped or locked out.
   It refuses a backup whose page size differs (SQLite can't change a WAL database's page size, and would fail with "attempt to write a readonly database"), and, like `backup_database()`, to run inside a transaction; it closes Django's connection afterwards.
@@ -311,6 +315,7 @@ Both ZIPs are built in a `SpooledTemporaryFile` (in memory up to `_ZIP_SPOOL_MAX
 - Spaces in item titles → underscores in ZIP paths (`_safe_component`).
 - Items appear in the index only if they have attachments or notes.
 - ATX headings in `item.notes` are re-levelled so the shallowest heading becomes `item_heading_level + 1` (implemented in `_adjust_notes_headings`).
+  Lines inside fenced code blocks (```` ``` ```` or `~~~`) are left alone and don't count towards the shallowest level.
   In `_write_fy_to_zip`, notes appear *after* attachments; in `_build_fy_index_md` (used for the View Index action), notes appear *before* attachments.
 
 ## Archive import formats
@@ -401,6 +406,11 @@ Gaps of up to 5 seconds between wakes are filled in (longer ones stay as gaps, s
 Core's `uptime_report` management command prints each recent day's share up and start count, and the admin's Uptime page shows the same.
 `LIFETRACKER_IDLE_STOP` is `off` by default, and a bad setting or a missing `/proc/net/tcp` logs and leaves it off rather than failing gunicorn's startup.
 `fly.toml` sets `stop` (SSH sessions were confirmed to show on port 22 in `monitor` mode first).
+The same process also runs automatic cloud backups (issue #83; `core/auto_backup.py`) if `LIFETRACKER_AUTO_BACKUP` is `on` (default `off`; `fly.toml` sets `on`): at startup, every `LIFETRACKER_AUTO_BACKUP_INTERVAL_HOURS` (default 6) while up, and in `stop` mode before stopping, each as a `python -m django cloud_backup --if-changed` subprocess (with `DJANGO_SETTINGS_MODULE` set, as the master hasn't loaded `wsgi.py`), so an unchanged database uploads nothing.
+Not on a clock, as the Machine is usually stopped, when nothing can change; the startup backup covers stops that skipped the one before stopping (a crash, an OOM kill, or Fly stopping a running Machine on a deploy, with only its kill timeout).
+They run one at a time and never block the loop, which polls a running one every 5 seconds (`POLL_SECONDS`) and kills one still running after 30 minutes (`TIMEOUT_SECONDS`), so a hung upload can't keep the Machine up indefinitely.
+When the idle timeout is reached in `stop` mode, the watchdog starts the backup before stopping (after waiting for any already running) and stays in the `backing up` state until it ends; it then stops at the next check whether or not it succeeded (a failure is logged, and the next startup backs up), unless there's been activity meanwhile, which calls the stop off.
+The status file's `auto_backup` section (None when off) has the latest backup's reason, start, finish and exit status and when the next is due, which the Idle Watchdog page shows.
 Other non-secret settings are in `fly.toml`'s `[env]`; the `LIFETRACKER_BACKUP_S3_*` credentials are Fly secrets (`fly secrets set`), never in `fly.toml`.
 A volume attaches to one Machine, so the app must never be scaled past one; CI's deploy passes `--ha=false` so that if the app has no Machine yet (e.g. first deploy) it creates one, not two, and manual `fly deploy`s should too.
 `.env` is in `.dockerignore` so it's never baked into an image.
