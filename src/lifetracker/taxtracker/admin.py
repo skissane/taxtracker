@@ -289,26 +289,29 @@ class ItemAdmin(admin.ModelAdmin):
 
             had_error = False
             try:
-                extracted, skipped_names = extract_from_archive_with_skips(
+                extracted, archive_skipped_names = extract_from_archive_with_skips(
                     file_bytes, filename
                 )
             except UnsupportedArchiveError as exc:
                 messages.error(request, str(exc))
                 extracted = []
-                skipped_names = []
+                archive_skipped_names = []
                 had_error = True
 
+            duplicate_names: list[str] = []
             if extracted:
                 existing_names = {
                     Path(file_name).name
-                    for file_name in Attachment.objects.values_list("file", flat=True)
+                    for file_name in Attachment.objects.filter(item=item).values_list(
+                        "file", flat=True
+                    )
                     if file_name
                 }
                 importable: list[tuple[str, bytes]] = []
                 for pdf_filename, pdf_bytes in extracted:
                     base_name = Path(pdf_filename).name
                     if base_name in existing_names:
-                        skipped_names.append(base_name)
+                        duplicate_names.append(base_name)
                         continue
                     importable.append((base_name, pdf_bytes))
                     existing_names.add(base_name)
@@ -332,15 +335,21 @@ class ItemAdmin(admin.ModelAdmin):
                         f"Imported {len(importable)} attachment(s) from '{filename}'.",
                     )
 
-            if skipped_names:
-                unique_skipped = list(dict.fromkeys(skipped_names))
-                skipped_count = len(unique_skipped)
-                skipped_list = ", ".join(unique_skipped)
+            if archive_skipped_names:
+                unique_skipped = list(dict.fromkeys(archive_skipped_names))
                 messages.warning(
                     request,
-                    f"Skipped {skipped_count} file(s): {skipped_list}.",
+                    f"Skipped {len(unique_skipped)} non-PDF file(s): "
+                    f"{', '.join(unique_skipped)}.",
                 )
-            elif not had_error and not extracted:
+            if duplicate_names:
+                unique_duplicates = list(dict.fromkeys(duplicate_names))
+                messages.warning(
+                    request,
+                    f"Skipped {len(unique_duplicates)} file(s) already attached to "
+                    f"this item: {', '.join(unique_duplicates)}.",
+                )
+            elif not had_error and not extracted and not archive_skipped_names:
                 messages.warning(
                     request,
                     f"No attachments could be extracted from '{filename}'.",
@@ -591,30 +600,23 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
             missing_fy_names: list[str] = []
             created_count = 0
             try:
-                extracted, skipped_names = extract_from_archive_with_skips(
+                extracted, archive_skipped_names = extract_from_archive_with_skips(
                     file_bytes, filename
                 )
             except UnsupportedArchiveError as exc:
                 messages.error(request, str(exc))
                 extracted = []
-                skipped_names = []
+                archive_skipped_names = []
                 had_error = True
 
+            duplicate_names: list[str] = []
             if extracted:
-                existing_names = {
-                    Path(file_name).name
-                    for file_name in Attachment.objects.values_list("file", flat=True)
-                    if file_name
-                }
                 fy_cache: dict[int, FinancialYear | None] = {}
+                existing_names_by_year: dict[int, set[str]] = {}
 
                 with transaction.atomic():
                     for pdf_filename, pdf_bytes in extracted:
                         base_name = Path(pdf_filename).name
-                        if base_name in existing_names:
-                            skipped_names.append(base_name)
-                            continue
-
                         match = _RECEIVED_DOC_YEAR_RE.match(base_name)
                         if not match:
                             no_year_names.append(base_name)
@@ -628,6 +630,18 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
                         fy = fy_cache[year_num]
                         if fy is None:
                             missing_fy_names.append(f"{base_name} (FY{year_num})")
+                            continue
+                        if year_num not in existing_names_by_year:
+                            existing_names_by_year[year_num] = {
+                                Path(file_name).name
+                                for file_name in Attachment.objects.filter(
+                                    received_document__year=fy
+                                ).values_list("file", flat=True)
+                                if file_name
+                            }
+                        existing_names = existing_names_by_year[year_num]
+                        if base_name in existing_names:
+                            duplicate_names.append(base_name)
                             continue
 
                         doc = ReceivedDocument.objects.create(
@@ -652,12 +666,19 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
                         f"from '{filename}'.",
                     )
 
-            if skipped_names:
-                unique_skipped = list(dict.fromkeys(skipped_names))
+            if archive_skipped_names:
+                unique_skipped = list(dict.fromkeys(archive_skipped_names))
                 messages.warning(
                     request,
-                    f"Skipped {len(unique_skipped)} file(s): "
+                    f"Skipped {len(unique_skipped)} non-PDF file(s): "
                     f"{', '.join(unique_skipped)}.",
+                )
+            if duplicate_names:
+                unique_duplicates = list(dict.fromkeys(duplicate_names))
+                messages.warning(
+                    request,
+                    f"Skipped {len(unique_duplicates)} file(s) already imported "
+                    f"for that Financial Year: {', '.join(unique_duplicates)}.",
                 )
             if no_year_names:
                 unique_no_year = list(dict.fromkeys(no_year_names))
@@ -673,7 +694,12 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
                     f"Skipped {len(unique_missing_fy)} file(s) with no matching "
                     f"Financial Year record: {', '.join(unique_missing_fy)}.",
                 )
-            if not had_error and not extracted and not skipped_names:
+            if (
+                not had_error
+                and not extracted
+                and not archive_skipped_names
+                and not duplicate_names
+            ):
                 messages.warning(
                     request,
                     f"No attachments could be extracted from '{filename}'.",
