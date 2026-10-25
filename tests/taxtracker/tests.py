@@ -2174,7 +2174,7 @@ class ImportArchiveViewTests(TestCase):
             follow=True,
         )
         self.assertContains(response, "Imported 2 attachment(s)")
-        self.assertContains(response, "Skipped 1 file(s): ignored.txt")
+        self.assertContains(response, "Skipped 1 non-PDF file(s): ignored.txt")
         self.assertTrue(
             Attachment.objects.filter(
                 item=self.item, file__endswith="/statement.pdf"
@@ -2186,7 +2186,7 @@ class ImportArchiveViewTests(TestCase):
             ).exists()
         )
 
-    def test_post_zip_skips_existing_filename_any_item_and_warns(self):
+    def test_post_zip_allows_existing_filename_on_other_item(self):
         other_item = Item.objects.create(year=self.fy, title="Other Item", order=2)
         existing = Attachment(item=other_item)
         existing.file.save("existing.pdf", ContentFile(PDF_MAGIC), save=False)
@@ -2205,17 +2205,33 @@ class ImportArchiveViewTests(TestCase):
             {"archive": upload},
             follow=True,
         )
-        self.assertContains(response, "Imported 1 attachment(s)")
-        self.assertContains(response, "Skipped 1 file(s): existing.pdf")
+        self.assertContains(response, "Imported 2 attachment(s)")
         self.assertTrue(
             Attachment.objects.filter(
                 item=self.item, file__endswith="/new.pdf"
             ).exists()
         )
-        self.assertFalse(
+        self.assertTrue(
             Attachment.objects.filter(
                 item=self.item, file__endswith="/existing.pdf"
             ).exists()
+        )
+
+    def test_post_zip_skips_existing_filename_on_same_item(self):
+        existing = Attachment(item=self.item)
+        existing.file.save("existing.pdf", ContentFile(PDF_MAGIC), save=False)
+        existing.save()
+
+        zip_bytes = _make_zip_archive([("existing.pdf", PDF_MAGIC)])
+        upload = io.BytesIO(zip_bytes)
+        upload.name = "archive.zip"
+        response = self.client.post(
+            self._import_url(),
+            {"archive": upload},
+            follow=True,
+        )
+        self.assertContains(
+            response, "Skipped 1 file(s) already attached to this item: existing.pdf"
         )
 
     def test_post_missing_file_shows_form_error(self):
@@ -2333,7 +2349,7 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
             self._import_url(), {"archive": upload}, follow=True
         )
         self.assertContains(response, "Imported 1 received document(s)")
-        self.assertContains(response, "Skipped 1 file(s): ignored.txt")
+        self.assertContains(response, "Skipped 1 non-PDF file(s): ignored.txt")
 
     def test_post_zip_skips_pdf_without_year_prefix(self):
         zip_bytes = _make_zip_archive(
@@ -2389,8 +2405,31 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
             self._import_url(), {"archive": upload}, follow=True
         )
         self.assertContains(response, "Imported 1 received document(s)")
-        self.assertContains(response, "Skipped 1 file(s): 2024-existing.pdf")
+        self.assertContains(
+            response,
+            "Skipped 1 file(s) already imported for that Financial Year: "
+            "2024-existing.pdf",
+        )
         self.assertTrue(ReceivedDocument.objects.filter(title="2024-new.pdf").exists())
+
+    def test_post_zip_allows_existing_filename_on_item(self):
+        # The file's year prefix picks its FY, so only another received
+        # document in that FY can hold the same name; an item's can't block it.
+        item = Item.objects.create(year=self.fy2024, title="Item", order=1)
+        existing = Attachment(item=item)
+        existing.file.save("2024-existing.pdf", ContentFile(PDF_MAGIC), save=False)
+        existing.save()
+
+        zip_bytes = _make_zip_archive([("2024-existing.pdf", PDF_MAGIC)])
+        upload = io.BytesIO(zip_bytes)
+        upload.name = "archive.zip"
+        response = self.client.post(
+            self._import_url(), {"archive": upload}, follow=True
+        )
+        self.assertContains(response, "Imported 1 received document(s)")
+        self.assertTrue(
+            ReceivedDocument.objects.filter(title="2024-existing.pdf").exists()
+        )
 
     def test_post_missing_file_shows_form_error(self):
         """Posting without a file should re-render the form with an error."""

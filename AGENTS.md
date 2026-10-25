@@ -306,7 +306,8 @@ Both ZIPs are built in a `SpooledTemporaryFile` (in memory up to `_ZIP_SPOOL_MAX
 
 `ItemAdmin` adds:
 - **Import archive** (`<pk>/import-archive/`) — uploads a `.har` (Fidelity) or `.zip` file and creates `Attachment` records for each extracted PDF.
-  Skips duplicates by filename.
+  Skips a PDF whose filename is already attached to that item (not to any other item).
+  `ReceivedDocumentAdmin`'s import, which picks each PDF's FY from its filename's year prefix, likewise skips only names already attached to a received document of that FY.
 - **Reassign attachments** (`<pk>/reassign-attachments/`) — detects attachments whose `date` is outside the item's FY and offers to move them to the equivalent item in the correct FY (matched by title/order path signature).
 - Prev/Next Year navigation links on the change form (matched by path signature).
 
