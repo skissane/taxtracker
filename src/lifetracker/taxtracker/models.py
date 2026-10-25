@@ -78,7 +78,7 @@ class FinancialYear(models.Model):
 
     @property
     def days_until_lodgement(self):
-        today = timezone.now().date()
+        today = timezone.localdate()
         return (self.effective_lodgement_date - today).days
 
     @property
@@ -209,6 +209,17 @@ class Item(TreeNodeMixin, models.Model):
         self.check_parent_cycle()
 
     def save(self, *args, **kwargs):
+        old_year_id = None
+        if self.pk is not None:
+            old_year_id = (
+                Item.objects.filter(pk=self.pk)
+                .values_list(
+                    "year_id",
+                    flat=True,
+                )
+                .first()
+            )
+
         # Enforce year inheritance at the ORM level too, so direct saves (shell,
         # fixtures, scripts) also respect the invariant without requiring full_clean().
         if self.parent_id is not None:
@@ -219,6 +230,22 @@ class Item(TreeNodeMixin, models.Model):
             except Item.DoesNotExist:
                 pass
         super().save(*args, **kwargs)
+
+        if old_year_id is not None and self.year_id != old_year_id:
+            # Keep descendants in the same year as this item whenever this item's
+            # effective year changes (e.g. explicit root edit or re-parenting).
+            ids_to_update = []
+            current_level = [self.pk]
+            while current_level:
+                children = list(
+                    Item.objects.filter(parent_id__in=current_level).values_list(
+                        "pk", flat=True
+                    )
+                )
+                ids_to_update.extend(children)
+                current_level = children
+            if ids_to_update:
+                Item.objects.filter(pk__in=ids_to_update).update(year_id=self.year_id)
 
 
 class ReceivedDocument(models.Model):
