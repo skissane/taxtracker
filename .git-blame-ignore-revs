@@ -8,3 +8,6 @@
 # starting with `#` are ignored, so put a comment above each hash saying what
 # the commit was. Use the commit's hash on `master`: squash merges give it a
 # new one, so add it once the PR has merged.
+
+# #240: ruff line length 88 -> 120, with the whole repo reformatted.
+c4c8d883c06ceaa9ff8953c179ad670509d66cb7
