@@ -211,8 +211,12 @@ justfile-check:
     test "$({{quote(just_executable())}} --json --justfile {{quote(justfile())}} | jq .settings.lazy)" = "false" || \
         (echo "ERROR: 'set lazy' is incompatible with this justfile" >&2; exit 1)
 
-# Run every whitespace, screenshots/, blame-ignore-revs, ruff, djlint and justfile check (no fixes, no tests)
-check: whitespace-check screenshots-dir-check blame-ignore-revs-check lint fmt-check lint-templates fmt-check-templates justfile-check
+# Lint the GitHub Actions workflows with jactionlint
+lint-workflows:
+    uv run --group dev jactionlint --profile correctness
+
+# Run every whitespace, screenshots/, blame-ignore-revs, ruff, djlint, jactionlint and justfile check (no fixes, no tests)
+check: whitespace-check screenshots-dir-check blame-ignore-revs-check lint fmt-check lint-templates fmt-check-templates lint-workflows justfile-check
 
 # Autofix lint issues and reformat code/templates
 fix: lint-fix fmt fmt-templates
