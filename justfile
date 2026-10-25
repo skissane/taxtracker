@@ -1,4 +1,9 @@
 set minimum-version := '1.58.0'
+# Dummy assignment, so every recipe run sets up the repo's local Git config
+# (see scripts/git-config-setup.sh). It relies on just evaluating every
+# top-level assignment eagerly: under `set lazy := true` the unused `_` would
+# never be evaluated, and the script would never run. `justfile-check` fails if
+# `set lazy` is turned on.
 _ := shell('./scripts/git-config-setup.sh')
 
 # List available recipes
