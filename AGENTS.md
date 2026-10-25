@@ -315,6 +315,7 @@ Both ZIPs are built in a `SpooledTemporaryFile` (in memory up to `_ZIP_SPOOL_MAX
 - Spaces in item titles → underscores in ZIP paths (`_safe_component`).
 - Items appear in the index only if they have attachments or notes.
 - ATX headings in `item.notes` are re-levelled so the shallowest heading becomes `item_heading_level + 1` (implemented in `_adjust_notes_headings`).
+  Lines inside fenced code blocks (```` ``` ```` or `~~~`) are left alone and don't count towards the shallowest level.
   In `_write_fy_to_zip`, notes appear *after* attachments; in `_build_fy_index_md` (used for the View Index action), notes appear *before* attachments.
 
 ## Archive import formats

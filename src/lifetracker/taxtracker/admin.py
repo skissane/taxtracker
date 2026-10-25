@@ -699,20 +699,48 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
 # ---------------------------------------------------------------------------
 
 
+_ATX_HEADING_RE = re.compile(r"(#{1,6}) (.+)")
+# A fence opens with 3+ backticks or tildes, indented at most 3 spaces (a backtick
+# fence's info string can't hold a backtick, or it's an inline code span); a
+# closing fence uses the same character, at least as many of it, and nothing after.
+_CODE_FENCE_RE = re.compile(r" {0,3}(`{3,}(?=[^`]*$)|~{3,})(.*)")
+
+
 def _adjust_notes_headings(notes: str, item_heading_level: int) -> str:
-    """Re-level ATX headings in *notes* so shallowest becomes item_heading_level+1."""
-    atx_re = re.compile(r"^(#{1,6}) (.+)", re.MULTILINE)
-    matches = list(atx_re.finditer(notes))
-    if not matches:
+    """Re-level ATX headings in *notes* so shallowest becomes item_heading_level+1.
+
+    Lines inside fenced code blocks (``` or ~~~) aren't headings, so are left as
+    they are and don't count towards the shallowest level.
+    """
+    # Split only after "\n", as splitlines() would also split on "\r", "\f" etc.
+    lines = re.split(r"(?<=\n)", notes)
+    headings = {}
+    fence = None
+    for index, line in enumerate(lines):
+        content = line.rstrip("\r\n")
+        fence_match = _CODE_FENCE_RE.fullmatch(content)
+        if fence is None:
+            if fence_match:
+                fence = fence_match.group(1)
+            elif heading_match := _ATX_HEADING_RE.fullmatch(content):
+                headings[index] = heading_match
+        elif (
+            fence_match
+            and fence_match.group(1)[0] == fence[0]
+            and len(fence_match.group(1)) >= len(fence)
+            and not fence_match.group(2).strip()
+        ):
+            fence = None
+    if not headings:
         return notes
-    min_level = min(len(m.group(1)) for m in matches)
+    min_level = min(len(m.group(1)) for m in headings.values())
     target_base = item_heading_level + 1
 
-    def _reheader(m):
+    for index, m in headings.items():
         new_level = len(m.group(1)) - min_level + target_base
-        return "#" * min(new_level, 6) + " " + m.group(2)
-
-    return atx_re.sub(_reheader, notes)
+        line_ending = lines[index][m.end() :]
+        lines[index] = "#" * min(new_level, 6) + " " + m.group(2) + line_ending
+    return "".join(lines)
 
 
 def _safe_component(title):

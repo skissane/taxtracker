@@ -1706,6 +1706,61 @@ class AdjustNotesHeadingsTests(TestCase):
         self.assertIn("Some **bold** text.", result)
         self.assertIn("- item", result)
 
+    def test_headings_in_fenced_code_blocks_ignored(self):
+        notes = (
+            "```bash\n"
+            "# comment inside shell block\n"
+            'echo "hi"\n'
+            "```\n"
+            "## Real heading\n"
+            "~~~\n"
+            "# also ignored\n"
+            "~~~\n"
+        )
+        # The fenced "#" lines don't count, so "##" is the shallowest level.
+        self.assertEqual(
+            _adjust_notes_headings(notes, 2),
+            notes.replace("## Real heading", "### Real heading"),
+        )
+
+    def test_fence_closed_only_by_matching_fence(self):
+        notes = (
+            "````\n"
+            "```\n"  # too short to close
+            "~~~~\n"  # other character
+            "```` not a close\n"  # text after it
+            "# still code\n"
+            "  ````\n"
+            "# Heading\n"
+        )
+        self.assertEqual(
+            _adjust_notes_headings(notes, 2),
+            notes.replace("# Heading", "### Heading"),
+        )
+
+    def test_unclosed_fence_runs_to_end(self):
+        notes = "# Heading\n```\n# code\n"
+        self.assertEqual(_adjust_notes_headings(notes, 2), "### Heading\n```\n# code\n")
+
+    def test_inline_code_span_does_not_open_fence(self):
+        notes = "```inline code```\n# Heading\n"
+        self.assertEqual(
+            _adjust_notes_headings(notes, 2), "```inline code```\n### Heading\n"
+        )
+
+    def test_only_newline_splits_lines(self):
+        notes = "# One\rtext\f# not a heading\n## Two"
+        self.assertEqual(
+            _adjust_notes_headings(notes, 2),
+            "### One\rtext\f# not a heading\n#### Two",
+        )
+
+    def test_line_endings_preserved(self):
+        notes = "# One\r\n## Two\n# Three"
+        self.assertEqual(
+            _adjust_notes_headings(notes, 2), "### One\r\n#### Two\n### Three"
+        )
+
     def test_hash_in_body_not_treated_as_heading(self):
         # Only lines where # is at the start are headings
         notes = "# Real heading\nThis has a # in the middle"
