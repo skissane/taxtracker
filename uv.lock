@@ -373,6 +373,17 @@ wheels = [
 ]
 
 [[package]]
+name = "jactionlint"
+version = "2.3.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a9/d1/bd954f279ad7ad096582026d35fef7f46ba2c06856c70505a77d8633fa17/jactionlint-2.3.0-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:e855f3d01a55f1a7aecafa93e86908acccb4adb4aa2d5b550823494fd4ff09ce", size = 17636775, upload-time = "2026-10-21T11:00:28.412Z" },
+    { url = "https://files.pythonhosted.org/packages/09/d0/def4cdd73c8d80c17e36393d38d8d25aaa3559702deb59eaff4efce18c27/jactionlint-2.3.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:8fc69af70b22858031130737e1f86c7e04870ae6b6146dc4fe53bb0753236378", size = 16428427, upload-time = "2026-10-21T11:00:30.755Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/00/ec741f589bd03cfa7700b5d276c213cadf2eeb64f261732ed5f680485fcd/jactionlint-2.3.0-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:bfda081c2313c1ba9b17244f784a1e11e09e274021e26fdff3e3c76f094b48d0", size = 15997724, upload-time = "2026-10-21T11:00:33.446Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/8f/3748cb6b8d0a3aa2020e073172f94e434860e95896583db60665e679cd6d/jactionlint-2.3.0-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:4293053b50800cf5899fca39c2e10a84c4b2926aa68fc2a7610114e37825836f", size = 17316638, upload-time = "2026-10-21T11:00:35.917Z" },
+]
+
+[[package]]
 name = "jmespath"
 version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -424,6 +435,7 @@ dependencies = [
 dev = [
     { name = "coverage" },
     { name = "djlint" },
+    { name = "jactionlint" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-django" },
@@ -453,6 +465,7 @@ requires-dist = [
 dev = [
     { name = "coverage", specifier = ">=7.16.2" },
     { name = "djlint", specifier = ">=1.46.4" },
+    { name = "jactionlint", specifier = ">=2.3.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "pytest-django", specifier = ">=4.14.0" },
