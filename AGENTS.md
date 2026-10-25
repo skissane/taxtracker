@@ -29,7 +29,7 @@ With Git 2.53 or later it sets `:(optional).git-blame-ignore-revs`, so `git blam
 `set minimum-version` makes older `just` versions refuse the `justfile`.
 The assignment works only because `just` evaluates every top-level assignment eagerly; under `set lazy` the unused `_` would never be evaluated and the script would never run.
 So `just justfile-check` (part of `just check`, `just ci` and the `test` job) fails if `just --json` reports `set lazy` on; it needs `jq`.
-`just blame-ignore-revs-check` (part of `just check`, `just ci` and the `test` job; `scripts/check_blame_ignore_revs.py`, stdlib-only) fails unless every non-comment line in `.git-blame-ignore-revs` is a full 40-character lowercase hex hash naming a commit that exists and is an ancestor of `HEAD`.
+`just blame-ignore-revs-check` (part of `just check`, `just ci` and the `test` job; `scripts/check_blame_ignore_revs.py`, stdlib-only) fails if `.git-blame-ignore-revs` is missing, or unless every non-empty, non-comment line in it is a full 40-character lowercase hex hash naming a commit that exists and is an ancestor of `HEAD` (so the `test` job checks out the full history).
 
 **Screenshots directory:** `just screenshots-dir-check` (part of `just check`, `just ci` and the `test` job; `scripts/check_screenshots_dir.py`, stdlib-only) fails unless `screenshots/.gitignore` is the only file `git ls-files` lists under `screenshots/`, and its staged and working tree copies both have the contents the script expects.
 Without it, `rm -rf screenshots` before a screenshot run, then `git add -A`, commits the PNGs and the `.gitignore`'s deletion (as happened on PR #137).
