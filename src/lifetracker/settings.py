@@ -50,6 +50,14 @@ LIFETRACKER_CONFIG_DIR = _env_path("LIFETRACKER_CONFIG_DIR") or _data_dir or _ho
 _default_key_file = LIFETRACKER_CONFIG_DIR / "secret_key"
 _key_file = Path(os.environ.get("LIFETRACKER_SECRET_KEY_FILE", _default_key_file))
 
+
+def _write_new_file_private(path, text):
+    """Create and write a text file with mode 0600."""
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
 # One-time migration from the old taxtracker config location: if nothing lives
 # at the new default path yet but a key from the pre-rename app does, copy it
 # forward so existing sessions/logins survive the rename instead of getting a
@@ -67,8 +75,7 @@ if (
     if _old_stored:
         try:
             _key_file.parent.mkdir(parents=True, exist_ok=True)
-            _key_file.write_text(_old_stored + "\n", encoding="utf-8")
-            _key_file.chmod(0o600)
+            _write_new_file_private(_key_file, _old_stored + "\n")
         except OSError:
             pass
 
@@ -84,8 +91,7 @@ if not _stored:
     _stored = secrets.token_hex(50)
     try:
         _key_file.parent.mkdir(parents=True, exist_ok=True)
-        _key_file.write_text(_stored + "\n", encoding="utf-8")
-        _key_file.chmod(0o600)
+        _write_new_file_private(_key_file, _stored + "\n")
     except OSError as _e:
         raise RuntimeError(
             f"Could not write secret key file {_key_file}: {_e}. "

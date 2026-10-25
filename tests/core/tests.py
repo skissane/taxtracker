@@ -1262,6 +1262,21 @@ class SettingsSecretKeyTests(_SettingsSubprocessMixin, TestCase):
             new_key_file = Path(home) / ".config" / "lifetracker" / "secret_key"
             self.assertEqual(new_key_file.read_text().strip(), "legacy-secret-key-content")
 
+    def test_fresh_install_does_not_require_chmod(self):
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as patch_dir:
+            (Path(patch_dir) / "sitecustomize.py").write_text(
+                "from pathlib import Path\n"
+                "def _deny_chmod(self, mode):\n"
+                "    raise PermissionError('blocked chmod')\n"
+                "Path.chmod = _deny_chmod\n"
+            )
+            proc = self._run(
+                home,
+                extra_env={"PYTHONPATH": os.pathsep.join((patch_dir, str(self.SRC_DIR)))},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(proc.stdout.strip())
+
     def test_unreadable_old_key_falls_back_to_fresh_key(self):
         """An OSError while reading the legacy key must not be fatal — it
         should just skip the migration and generate a fresh key instead."""
