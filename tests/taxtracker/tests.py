@@ -764,6 +764,126 @@ class AdminViewTests(TestCase):
             index_content.index(child_heading), index_content.index(zeta_heading)
         )
 
+    def test_download_zip_deduplicates_same_attachment_filename(self):
+        item = Item.objects.create(year=self.fy, title="X", order=2)
+        Attachment.objects.create(
+            item=item,
+            title="first",
+            file=ContentFile(b"one", name="s.pdf"),
+        )
+        Attachment.objects.create(
+            item=item,
+            title="second",
+            file=ContentFile(b"two", name="s.pdf"),
+        )
+
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        response = self.client.get(url)
+        buf = io.BytesIO(response.getvalue())
+        with zipfile.ZipFile(buf) as zf:
+            names = zf.namelist()
+            self.assertEqual(len(names), len(set(names)))
+            self.assertEqual(zf.read("X/s.pdf"), b"one")
+            self.assertEqual(zf.read("X/s (2).pdf"), b"two")
+            index_content = zf.read("index.md").decode()
+        self.assertIn("`X/s.pdf`", index_content)
+        self.assertIn("`X/s (2).pdf`", index_content)
+
+    def test_download_zip_suffixes_identical_attachments_by_pk(self):
+        """Same date and title: the older attachment keeps the plain name."""
+        item = Item.objects.create(year=self.fy, title="X", order=2)
+        for content in (b"one", b"two"):
+            Attachment.objects.create(
+                item=item,
+                title="same",
+                date=datetime.date(2024, 1, 1),
+                file=ContentFile(content, name="s.pdf"),
+            )
+
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        with zipfile.ZipFile(io.BytesIO(self.client.get(url).getvalue())) as zf:
+            self.assertEqual(zf.read("X/s.pdf"), b"one")
+            self.assertEqual(zf.read("X/s (2).pdf"), b"two")
+
+    def test_download_zip_deduplicates_sanitized_sibling_titles(self):
+        item1 = Item.objects.create(year=self.fy, title="A/B", order=2)
+        item2 = Item.objects.create(year=self.fy, title="A_B", order=3)
+        Attachment.objects.create(
+            item=item1,
+            title="first",
+            file=ContentFile(b"one", name="doc.pdf"),
+        )
+        Attachment.objects.create(
+            item=item2,
+            title="second",
+            file=ContentFile(b"two", name="doc.pdf"),
+        )
+
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        response = self.client.get(url)
+        buf = io.BytesIO(response.getvalue())
+        with zipfile.ZipFile(buf) as zf:
+            names = zf.namelist()
+            self.assertEqual(len(names), len(set(names)))
+            self.assertEqual(zf.read("A_B/doc.pdf"), b"one")
+            self.assertEqual(zf.read("A_B (2)/doc.pdf"), b"two")
+            index_content = zf.read("index.md").decode()
+        self.assertIn("## A_B\n", index_content)
+        self.assertIn("## A_B (2)\n", index_content)
+        self.assertIn("`A_B/doc.pdf`", index_content)
+        self.assertIn("`A_B (2)/doc.pdf`", index_content)
+
+    def test_download_zip_deduplicates_names_case_insensitively(self):
+        """Names differing only in case would clash on macOS's filesystem."""
+        upper = Item.objects.create(year=self.fy, title="Bank", order=2)
+        lower = Item.objects.create(year=self.fy, title="bank", order=3)
+        # A child folder and an attachment can't share a name either.
+        Item.objects.create(year=self.fy, parent=upper, title="doc.pdf", order=1)
+        for item, name in [
+            (upper, "Statement.pdf"),
+            (upper, "statement.pdf"),
+            (upper, "doc.pdf"),
+            (lower, "other.pdf"),
+        ]:
+            Attachment.objects.create(
+                item=item, title=name, file=ContentFile(b"x", name=name)
+            )
+
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        with zipfile.ZipFile(io.BytesIO(self.client.get(url).getvalue())) as zf:
+            names = sorted(zf.namelist())
+        self.assertEqual(
+            names,
+            [
+                "Bank/Statement.pdf",
+                "Bank/doc (2).pdf",
+                "Bank/statement (2).pdf",
+                "bank (2)/other.pdf",
+                "index.md",
+            ],
+        )
+
+    def test_download_zip_deduplicates_names_in_parent_cycles(self):
+        """Two cycles with the same titles would otherwise share paths."""
+        for content in (b"one", b"two"):
+            first = Item.objects.create(year=self.fy, title="Cycle A", order=9)
+            second = Item.objects.create(
+                year=self.fy, parent=first, title="Cycle B", order=1
+            )
+            first.parent = second
+            first.save(update_fields=["parent"])
+            Attachment.objects.create(
+                item=first, title="c", file=ContentFile(content, name="c.pdf")
+            )
+
+        url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
+        with zipfile.ZipFile(io.BytesIO(self.client.get(url).getvalue())) as zf:
+            pdfs = sorted(name for name in zf.namelist() if name.endswith(".pdf"))
+            self.assertEqual(
+                pdfs, ["…/Cycle_B/Cycle_A (2)/c.pdf", "…/Cycle_B/Cycle_A/c.pdf"]
+            )
+            self.assertEqual({zf.read(name) for name in pdfs}, {b"one", b"two"})
+
     def test_download_multi_zip_get(self):
         """GET renders the multi-year ZIP selection form."""
         url = reverse("admin:taxtracker_financialyear_download_multi_zip")

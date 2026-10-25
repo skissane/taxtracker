@@ -1,13 +1,16 @@
 import io
+import os
 import re
 import shutil
 import tempfile
 import zipfile
+from collections import defaultdict
 from pathlib import Path
 
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
+from django.db.models import Prefetch
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.response import TemplateResponse
@@ -823,6 +826,50 @@ def _tree_rows_and_unreachable_items(items):
     return tree_rows, unreachable_items
 
 
+def _dedupe_name(name, used, keep_extension=False):
+    """Return *name*, suffixed `` (2)``, `` (3)``... if *used* already has it.
+
+    *used* holds casefolded names, as archives are often extracted onto
+    case-insensitive filesystems; the result is added to it.
+    With *keep_extension*, the suffix goes before the extension.
+    """
+    stem, ext = os.path.splitext(name) if keep_extension else (name, "")
+    candidate = name
+    counter = 2
+    while candidate.casefold() in used:
+        candidate = f"{stem} ({counter}){ext}"
+        counter += 1
+    used.add(candidate.casefold())
+    return candidate
+
+
+def _unique_folder_paths(items):
+    """Return ({item pk: folder path}, {folder path: casefolded names in it}).
+
+    Siblings whose titles are the same after _safe_component() get suffixed
+    folder names, which their descendants' paths then use, so no two items
+    share a folder.
+    The second dict lets attachments avoid names already taken in a folder.
+    """
+    tree_rows, unreachable_items = _tree_rows_and_unreachable_items(items)
+    folder_paths = {}
+    used_names = defaultdict(set)
+    used_names[""].add("index.md")
+    for row in tree_rows:
+        item = row["item"]
+        parent_path = folder_paths.get(item.parent_id, "")
+        name = _dedupe_name(_safe_component(item.title), used_names[parent_path])
+        folder_paths[item.pk] = f"{parent_path}/{name}" if parent_path else name
+    # Items in a parent cycle get _folder_path()'s cycle-marked path; their
+    # children don't follow a parent's suffix, but every path is still unique.
+    item_map = {item.pk: item for item in items}
+    for item in unreachable_items:
+        parent_path, _, name = _folder_path(item, item_map).rpartition("/")
+        name = _dedupe_name(name, used_names[parent_path])
+        folder_paths[item.pk] = f"{parent_path}/{name}"
+    return folder_paths, used_names
+
+
 def _build_fy_index_md(fy, prefix="", zf=None):
     """Return the index.md content string for one FinancialYear.
 
@@ -830,11 +877,16 @@ def _build_fy_index_md(fy, prefix="", zf=None):
     """
     items = list(
         fy.items.select_related("parent")
-        .prefetch_related("attachments")
-        .order_by("order", "title")
+        # pk breaks ties, so duplicate names get the same suffixes every time.
+        .prefetch_related(
+            Prefetch(
+                "attachments",
+                queryset=Attachment.objects.order_by("-date", "title", "pk"),
+            )
+        )
+        .order_by("order", "title", "pk")
     )
-    item_map = {item.pk: item for item in items}
-    folder_paths = {item.pk: _folder_path(item, item_map) for item in items}
+    folder_paths, used_names = _unique_folder_paths(items)
     items.sort(key=lambda item: folder_paths[item.pk].lower())
 
     index_lines = [
@@ -853,6 +905,7 @@ def _build_fy_index_md(fy, prefix="", zf=None):
         index_lines.append(f"## {fp}\n")
         for attachment in attachments:
             safe_name = _safe_component(attachment.file.name.split("/")[-1])
+            safe_name = _dedupe_name(safe_name, used_names[fp], keep_extension=True)
             zip_path = f"{prefix}{fp}/{safe_name}"
             missing = False
             try:

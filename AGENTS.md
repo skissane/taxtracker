@@ -314,6 +314,8 @@ Both ZIPs are built in a `SpooledTemporaryFile` (in memory up to `_ZIP_SPOOL_MAX
 ## ZIP export rules
 
 - Spaces in item titles → underscores in ZIP paths (`_safe_component`).
+- Names that would clash in a folder, compared case-insensitively, get ` (2)`, ` (3)`... (before the extension for attachments; `_unique_folder_paths`, `_dedupe_name`): sibling items' folders, an item's attachments and its child folders, and `index.md` at the top.
+  Items in a parent cycle keep `_folder_path`'s `…`-prefixed path, with only the last component suffixed.
 - Items appear in the index only if they have attachments or notes.
 - ATX headings in `item.notes` are re-levelled so the shallowest heading becomes `item_heading_level + 1` (implemented in `_adjust_notes_headings`).
   Lines inside fenced code blocks (```` ``` ```` or `~~~`) are left alone and don't count towards the shallowest level.
