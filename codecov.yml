@@ -5,6 +5,11 @@ coverage:
         # Tolerate small fluctuations (e.g. refactors that change what's in
         # scope) instead of hard-failing on any decrease.
         threshold: 2%
+        # Fail, rather than pass, when the PR's base (or its head) has no report
+        # to compare against. On a PR, CI waits for the base's report first
+        # (scripts/wait_for_base_coverage.py), so this means it gave up: re-run
+        # the PR's test job once the base's CI has uploaded.
+        if_not_found: failure
     patch:
       default:
         threshold: 1%

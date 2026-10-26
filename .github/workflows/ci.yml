@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Reading the PR base's check runs, before uploading coverage.
+      checks: read
 
     steps:
       - uses: actions/checkout@v4
@@ -114,6 +116,17 @@ jobs:
           name: docker-image
           path: lifetracker-image.tar
           retention-days: 1
+
+      # Codecov compares a PR with its base's report only when the PR's upload is
+      # processed, so wait for the base's (e.g. a stacked PR rebased onto master
+      # just as its parent merged, while master's run is still going). It never
+      # fails the job, only warns, and is quick when the base's CI has finished.
+      - name: Wait for the PR base's coverage on Codecov
+        if: github.event_name == 'pull_request'
+        run: uv run --no-project scripts/wait_for_base_coverage.py "$GITHUB_REPOSITORY" "$BASE_SHA"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
