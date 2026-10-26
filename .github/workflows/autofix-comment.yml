@@ -40,9 +40,11 @@ jobs:
           NUMBER: ${{ github.event.issue.number }}
           COMMENT_ID: ${{ github.event.comment.id }}
         run: |
-          read -r state cross_repo branch < <(gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" \
+          # Not read from a process substitution, whose failure wouldn't stop the step.
+          pr=$(gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" \
             --json state,isCrossRepository,headRefName \
             --jq '"\(.state) \(.isCrossRepository) \(.headRefName)"')
+          read -r state cross_repo branch <<< "$pr"
           if [ "$state" != OPEN ]; then
             echo "::error::Pull request #$NUMBER is not open."
             exit 1
@@ -52,6 +54,10 @@ jobs:
             exit 1
           fi
           gh workflow run fix.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
-          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
-            -f content=rocket > /dev/null
+          # PR Fixes has started, so a failed reaction only warns: a red run would
+          # suggest commenting again.
+          if ! gh api --method POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
+            -f content=rocket > /dev/null; then
+            echo "::warning::Couldn't react to the comment."
+          fi
           echo "Started PR Fixes on $branch."
