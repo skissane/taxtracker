@@ -16,7 +16,6 @@ Public interface
 """
 
 import base64
-import binascii
 import io
 import json
 import zipfile
@@ -41,15 +40,24 @@ class UnsupportedArchiveError(Exception):
 # ---------------------------------------------------------------------------
 
 
+def _field[T](mapping: dict, key: str, kind: type[T]) -> T:
+    """Return ``mapping[key]`` if it's a *kind*, else an empty *kind* (``kind()``)."""
+    value = mapping.get(key)
+    return value if isinstance(value, kind) else kind()
+
+
 def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
     """Extract PDFs from a Fidelity HAR file.
 
     Returns a list of ``(filename, pdf_bytes)`` tuples, one per PDF found.
-    Entries are silently skipped when any of the following conditions apply:
+    Raises ``UnsupportedArchiveError`` if the file isn't JSON, or its top level,
+    ``log`` or ``log.entries`` has the wrong type.
+    Entries are silently skipped when any of the following conditions apply
+    (a field of the wrong JSON type counts as missing):
     - The request method is not GET.
     - The request URL does not match the Fidelity spshistoryservices prefix.
     - The response MIME type is not ``application/json``.
-    - The response body is empty or cannot be decoded.
+    - The response body is empty or cannot be decoded, or isn't a JSON object.
     - The ``fileContent`` key is absent from the JSON payload.
     - The ``fileContent`` value is not valid base64.
     - The decoded bytes do not start with the PDF magic bytes (``%PDF-``).
@@ -60,27 +68,25 @@ def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
         raise UnsupportedArchiveError(f"Could not parse file as a HAR archive: {exc}") from exc
     if not isinstance(har, dict):
         raise UnsupportedArchiveError("Could not parse file as a HAR archive: top-level JSON value must be an object")
-
     log = har.get("log", {})
     if not isinstance(log, dict):
         raise UnsupportedArchiveError("Could not parse file as a HAR archive: 'log' must be an object")
     entries = log.get("entries", [])
     if not isinstance(entries, list):
         raise UnsupportedArchiveError("Could not parse file as a HAR archive: 'entries' must be a list")
+
     results: list[tuple[str, bytes]] = []
 
     for entry in entries:
         if not isinstance(entry, dict):
             continue
-        request = entry.get("request", {})
-        response = entry.get("response", {})
-        if not isinstance(request, dict) or not isinstance(response, dict):
+        request = _field(entry, "request", dict)
+        response = _field(entry, "response", dict)
+
+        if _field(request, "method", str).upper() != "GET":
             continue
 
-        if request.get("method", "").upper() != "GET":
-            continue
-
-        url: str = request.get("url", "")
+        url = _field(request, "url", str)
         if not url.startswith(FIDELITY_URL_PREFIX):
             continue
 
@@ -93,26 +99,18 @@ def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
         pdf_filename = pdf_name + ".pdf"
 
         # Require JSON content type.
-        content = response.get("content", {})
-        if not isinstance(content, dict):
-            continue
-        mime_type = content.get("mimeType", "")
-        if "application/json" not in mime_type:
+        content = _field(response, "content", dict)
+        if "application/json" not in _field(content, "mimeType", str):
             continue
 
         # Decode the response body (may itself be Base64-encoded in the HAR).
-        body_text = content.get("text", "")
-        body_encoding = content.get("encoding", "")
-        if not isinstance(body_encoding, str):
-            continue
-        if body_encoding.lower() == "base64":
+        body_text = _field(content, "text", str)
+        if _field(content, "encoding", str).lower() == "base64":
             try:
                 body_str = base64.b64decode(body_text).decode("utf-8")
             except Exception:
                 continue
         else:
-            if not isinstance(body_text, str):
-                continue
             body_str = body_text
 
         if not body_str:
@@ -125,13 +123,13 @@ def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
         if not isinstance(payload, dict):
             continue
 
-        file_content_b64 = payload.get("fileContent")
-        if file_content_b64 is None:
+        file_content_b64 = _field(payload, "fileContent", str)
+        if not file_content_b64:
             continue
 
         try:
             pdf_bytes = base64.b64decode(file_content_b64)
-        except binascii.Error, TypeError, ValueError:
+        except ValueError:  # binascii.Error, or a non-ASCII string
             continue
 
         if not pdf_bytes.startswith(PDF_MAGIC):

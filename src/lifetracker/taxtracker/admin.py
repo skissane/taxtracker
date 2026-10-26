@@ -1127,7 +1127,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
             for value in request.POST.getlist("fy_ids"):
                 try:
                     selected_pks.append(int(value))
-                except TypeError, ValueError:
+                except ValueError:
                     continue
             selected_fys = list(FinancialYear.objects.filter(pk__in=selected_pks).order_by("year"))
             if not selected_fys:
@@ -1225,14 +1225,13 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # ------------------------------------------------------------------
 
     def change_view(self, request, object_id, form_url="", extra_context=None):
+        # Let the admin look the object up first, so a malformed or unknown ID
+        # gets its usual redirect rather than reaching the queries below.
         response = super().change_view(request, object_id, form_url, extra_context)
         if not isinstance(response, TemplateResponse):
             return response
 
         context_data = response.context_data
-        if context_data is None:
-            return response
-
         context_data["summary_url"] = reverse("admin:taxtracker_financialyear_summary", args=[object_id])
         context_data["download_zip_url"] = reverse("admin:taxtracker_financialyear_download_zip", args=[object_id])
         context_data["copy_to_new_year_url"] = reverse(

@@ -907,7 +907,15 @@ class AdminViewTests(TestCase):
 
     def test_financialyear_change_view_non_numeric_id_uses_admin_redirect(self):
         response = self.client.get("/admin/taxtracker/financialyear/abc/change/")
-        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse("admin:index"))
+
+    def test_financialyear_change_view_links_summary_and_adjacent_years(self):
+        prev_fy = FinancialYear.objects.create(year=2023)
+        next_fy = FinancialYear.objects.create(year=2025)
+        response = self.client.get(reverse("admin:taxtracker_financialyear_change", args=[self.fy.pk]))
+        self.assertContains(response, reverse("admin:taxtracker_financialyear_summary", args=[self.fy.pk]))
+        self.assertContains(response, reverse("admin:taxtracker_financialyear_change", args=[prev_fy.pk]))
+        self.assertContains(response, reverse("admin:taxtracker_financialyear_change", args=[next_fy.pk]))
 
     def test_item_changelist_shows_year_link(self):
         url = reverse("admin:taxtracker_item_changelist")
@@ -1997,6 +2005,42 @@ class ArchiveExtractorTests(TestCase):
         ).encode()
         results = extract_from_archive(har_bytes, "export.har")
         self.assertEqual(results, [])
+
+    def test_har_wrong_shape_log_or_entries_raises_unsupported(self):
+        for har, message in [
+            ({"log": []}, "'log' must be an object"),
+            ({"log": {"entries": {}}}, "'entries' must be a list"),
+        ]:
+            with self.subTest(har=har), self.assertRaisesMessage(UnsupportedArchiveError, message):
+                extract_from_archive(json.dumps(har).encode(), "export.har")
+
+    def test_har_skips_entries_with_wrong_field_types(self):
+        """Entries whose fields have unexpected JSON types are skipped, not a 500."""
+        good = json.loads(_make_fidelity_har("good"))["log"]["entries"][0]
+
+        def variant(path, value):
+            entry = json.loads(json.dumps(good))
+            target = entry
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            return entry
+
+        entries = [
+            "not an object",
+            variant(["request"], []),
+            variant(["response"], "x"),
+            variant(["request", "method"], 1),
+            variant(["request", "url"], None),
+            variant(["response", "content"], []),
+            variant(["response", "content", "mimeType"], 1),
+            variant(["response", "content", "text"], {"fileContent": "x"}),
+            variant(["response", "content", "text"], json.dumps({"fileContent": 1})),
+            variant(["response", "content", "text"], json.dumps({"fileContent": "\u00e9"})),
+            good,
+        ]
+        har_bytes = json.dumps({"log": {"entries": entries}}).encode()
+        self.assertEqual(extract_from_archive(har_bytes, "export.har"), [("good.pdf", PDF_MAGIC)])
 
     def test_invalid_zip_raises_unsupported(self):
         with self.assertRaisesMessage(UnsupportedArchiveError, "Could not parse file as a ZIP archive"):
