@@ -899,9 +899,9 @@ class AdminViewTests(TestCase):
         self.assertIn("FY2024", content)
         self.assertIn("FY2025", content)
 
-    def test_download_multi_zip_post_non_numeric_fy_ids_shows_error(self):
+    def test_download_multi_zip_post_invalid_fy_ids_shows_error(self):
         url = reverse("admin:taxtracker_financialyear_download_multi_zip")
-        response = self.client.post(url, {"fy_ids": ["abc"], "action": "zip"})
+        response = self.client.post(url, {"fy_ids": ["abc", "99999999999999999999"], "action": "zip"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Please select at least one financial year.")
 
@@ -2006,6 +2006,10 @@ class ArchiveExtractorTests(TestCase):
         results = extract_from_archive(har_bytes, "export.har")
         self.assertEqual(results, [])
 
+    def test_har_integer_over_digit_limit_raises_unsupported(self):
+        with self.assertRaisesMessage(UnsupportedArchiveError, "Could not parse file as a HAR archive"):
+            extract_from_archive(b'{"log": ' + b"1" * 5000 + b"}", "export.har")
+
     def test_har_wrong_shape_log_or_entries_raises_unsupported(self):
         for har, message in [
             ({"log": []}, "'log' must be an object"),
@@ -2035,6 +2039,7 @@ class ArchiveExtractorTests(TestCase):
             variant(["response", "content"], []),
             variant(["response", "content", "mimeType"], 1),
             variant(["response", "content", "text"], {"fileContent": "x"}),
+            variant(["response", "content", "text"], '{"fileContent": ' + "1" * 5000 + "}"),
             variant(["response", "content", "text"], json.dumps({"fileContent": 1})),
             variant(["response", "content", "text"], json.dumps({"fileContent": "\u00e9"})),
             good,

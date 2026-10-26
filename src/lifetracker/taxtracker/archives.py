@@ -64,7 +64,7 @@ def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
     """
     try:
         har = json.loads(file_bytes.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except ValueError as exc:  # UnicodeDecodeError, JSONDecodeError, or an int over Python's digit limit
         raise UnsupportedArchiveError(f"Could not parse file as a HAR archive: {exc}") from exc
     if not isinstance(har, dict):
         raise UnsupportedArchiveError("Could not parse file as a HAR archive: top-level JSON value must be an object")
@@ -118,7 +118,7 @@ def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
 
         try:
             payload = json.loads(body_str)
-        except json.JSONDecodeError:
+        except ValueError:
             continue
         if not isinstance(payload, dict):
             continue

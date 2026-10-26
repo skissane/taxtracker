@@ -1126,9 +1126,11 @@ class FinancialYearAdmin(admin.ModelAdmin):
             selected_pks: list[int] = []
             for value in request.POST.getlist("fy_ids"):
                 try:
-                    selected_pks.append(int(value))
+                    pk = int(value)
                 except ValueError:
                     continue
+                if 0 < pk < 2**63:  # SQLite raises OverflowError for anything over 64 bits
+                    selected_pks.append(pk)
             selected_fys = list(FinancialYear.objects.filter(pk__in=selected_pks).order_by("year"))
             if not selected_fys:
                 error = "Please select at least one financial year."
