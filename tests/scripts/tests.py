@@ -29,7 +29,7 @@ from scripts.validate_uv_lock_os_arch import (
     _split_platform,
 )
 from scripts.validate_uv_lock_os_arch import main as os_arch_main
-from scripts.wait_for_base_coverage import base_ci_finished, codecov_coverage
+from scripts.wait_for_base_coverage import base_ci_state, codecov_coverage
 from scripts.wait_for_base_coverage import main as wait_for_base_coverage_main
 
 
@@ -1061,12 +1061,12 @@ class WaitForBaseCoverageTests(SimpleTestCase):
     def _check_runs(self, *runs, token=None):
         body = json.dumps({"total_count": len(runs), "check_runs": list(runs)}).encode()
         with mock.patch("urllib.request.urlopen", return_value=self._response(200, body)) as urlopen:
-            outcome = base_ci_finished(self.REPO, self.SHA, "test", token, 7)
+            outcome = base_ci_state(self.REPO, self.SHA, "test", token, 7)
         return outcome, urlopen.call_args.args[0]
 
     def test_base_ci_running(self):
         outcome, request = self._check_runs({"id": 1, "status": "in_progress", "conclusion": None})
-        self.assertEqual(outcome, (False, "test in_progress"))
+        self.assertEqual(outcome, ("running", "test in_progress"))
         self.assertEqual(
             request.full_url,
             "https://api.github.com/repos/owner/repo/commits/abc123/check-runs?check_name=test&filter=latest",
@@ -1079,18 +1079,26 @@ class WaitForBaseCoverageTests(SimpleTestCase):
             {"id": 1, "status": "in_progress", "conclusion": None},
             token="t0k",
         )
-        self.assertEqual(outcome, (True, "test failure"))
+        self.assertEqual(outcome, ("failed", "test failure"))
         self.assertEqual(request.get_header("Authorization"), "Bearer t0k")
-        self.assertEqual(self._check_runs()[0], (True, "no test check run"))
+        self.assertEqual(
+            self._check_runs({"id": 1, "status": "completed", "conclusion": "success"})[0],
+            ("succeeded", "test success"),
+        )
+        self.assertEqual(
+            self._check_runs({"id": 1, "status": "completed", "conclusion": "cancelled"})[0],
+            ("failed", "test cancelled"),
+        )
+        self.assertEqual(self._check_runs()[0], ("none", "no test check run"))
 
     def test_base_ci_errors(self):
         self.assertEqual(
-            self._call(base_ci_finished, self._http_error(403, b'{"message": "no"}'), "test", None)[0],
-            (False, "HTTP 403"),
+            self._call(base_ci_state, self._http_error(403, b'{"message": "no"}'), "test", None)[0],
+            ("running", "HTTP 403"),
         )
         self.assertEqual(
-            self._call(base_ci_finished, http.client.IncompleteRead(b""), "test", None)[0],
-            (False, "request failed: IncompleteRead(0 bytes read)"),
+            self._call(base_ci_state, http.client.IncompleteRead(b""), "test", None)[0],
+            ("running", "request failed: IncompleteRead(0 bytes read)"),
         )
 
     def _main(self, coverage, ci, *args):
@@ -1104,7 +1112,7 @@ class WaitForBaseCoverageTests(SimpleTestCase):
         out = io.StringIO()
         with (
             mock.patch("scripts.wait_for_base_coverage.codecov_coverage", side_effect=coverage),
-            mock.patch("scripts.wait_for_base_coverage.base_ci_finished", side_effect=ci) as ci_mock,
+            mock.patch("scripts.wait_for_base_coverage.base_ci_state", side_effect=ci) as ci_mock,
             mock.patch.dict("os.environ", {"GITHUB_TOKEN": "t0k"}),
             contextlib.redirect_stdout(out),
         ):
@@ -1121,7 +1129,7 @@ class WaitForBaseCoverageTests(SimpleTestCase):
     def test_waits_for_base_ci(self):
         code, sleeps, out, ci = self._main(
             [(False, "no report yet"), (False, "no report yet"), (True, "coverage 98%")],
-            [(False, "test in_progress"), (True, "test success")],
+            [("running", "test in_progress"), ("succeeded", "test success")],
         )
         self.assertEqual(code, 0)
         self.assertEqual(sleeps, [10, 10])
@@ -1132,7 +1140,7 @@ class WaitForBaseCoverageTests(SimpleTestCase):
     def test_gives_up_after_grace(self):
         code, sleeps, out, _ = self._main(
             [(False, "no report yet")] * 10,
-            [(True, "test failure")] * 10,
+            [("succeeded", "test success")] * 10,
             "--grace",
             "25",
         )
@@ -1140,14 +1148,27 @@ class WaitForBaseCoverageTests(SimpleTestCase):
         self.assertEqual(sleeps, [10, 10, 10])
         self.assertTrue(
             out.endswith(
-                "::warning::Codecov has no coverage for base commit abc123, whose CI has finished (test failure)\n"
+                "::warning::Codecov has no coverage for base commit abc123, whose CI has finished (test success)\n"
+            )
+        )
+
+    def test_gives_up_at_once_if_base_ci_failed(self):
+        code, sleeps, out, _ = self._main(
+            [(False, "no report yet")] * 10,
+            [("running", "test in_progress"), ("failed", "test failure")],
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(sleeps, [10])
+        self.assertTrue(
+            out.endswith(
+                "::warning::Codecov has no coverage for base commit abc123, whose CI didn't succeed (test failure)\n"
             )
         )
 
     def test_grace_restarts_if_base_ci_reruns(self):
         code, sleeps, _, _ = self._main(
             [(False, "no report yet")] * 10,
-            [(True, "test failure"), (False, "test queued"), (True, "test success"), (True, "test success")],
+            [("none", "no test check run"), ("running", "test queued"), ("succeeded", "test success")] * 2,
             "--grace",
             "10",
         )
@@ -1157,7 +1178,7 @@ class WaitForBaseCoverageTests(SimpleTestCase):
     def test_gives_up_after_timeout(self):
         code, sleeps, out, _ = self._main(
             [(False, "no report yet")] * 10,
-            [(False, "test in_progress")] * 10,
+            [("running", "test in_progress")] * 10,
             "--timeout",
             "25",
         )
@@ -1179,7 +1200,7 @@ class WaitForBaseCoverageTests(SimpleTestCase):
 
         with (
             mock.patch("scripts.wait_for_base_coverage.codecov_coverage", side_effect=request),
-            mock.patch("scripts.wait_for_base_coverage.base_ci_finished", side_effect=request),
+            mock.patch("scripts.wait_for_base_coverage.base_ci_state", side_effect=request),
             contextlib.redirect_stdout(io.StringIO()),
         ):
             code = wait_for_base_coverage_main(

@@ -12,11 +12,12 @@ CI's ``test`` job runs this on PRs just before uploading coverage. It polls
 Codecov's API for the base commit's totals and returns as soon as they're
 there, which is the first request unless the base's CI is still running. Until
 then it checks the base's latest ``test`` check run on GitHub: once that has
-finished (or there is none), Codecov gets ``--grace`` seconds to process the
-upload before this gives up.
+succeeded (or if there is none), Codecov gets ``--grace`` seconds to process
+the upload before this gives up, and if it failed, was cancelled or was skipped,
+no report is coming, so it gives up straight away.
 
-It never fails the job: giving up (after ``--grace``, or ``--timeout`` in all)
-prints a GitHub Actions warning and exits 0, as the base's CI failing (e.g.
+It never fails the job: giving up (then, after ``--grace``, or after
+``--timeout`` in all) prints a GitHub Actions warning and exits 0, as the base's CI failing (e.g.
 master is broken and this PR fixes it) mustn't fail the PR's own ``test``
 check, which branch protection requires. Codecov's ``if_not_found: failure``
 then fails ``codecov/project``.
@@ -72,8 +73,13 @@ def codecov_coverage(repo: str, sha: str, timeout: float) -> tuple[bool, str]:
     return True, f"coverage {totals['coverage']}%"
 
 
-def base_ci_finished(repo: str, sha: str, check_name: str, token: str | None, timeout: float) -> tuple[bool, str]:
-    """Whether ``sha``'s latest ``check_name`` check run is over (or there's none)."""
+def base_ci_state(repo: str, sha: str, check_name: str, token: str | None, timeout: float) -> tuple[str, str]:
+    """The state of ``sha``'s latest ``check_name`` check run, and a description.
+
+    The state is ``running`` (also when it can't be fetched), ``succeeded``,
+    ``failed`` (any other conclusion, e.g. ``cancelled`` or ``skipped``: either
+    way, it uploaded no coverage) or ``none`` (there's no such check run).
+    """
     query = urllib.parse.urlencode({"check_name": check_name, "filter": "latest"})
     url = f"{GITHUB_API}/repos/{repo}/commits/{sha}/check-runs?{query}"
     headers = {"X-GitHub-Api-Version": "2022-11-28"}
@@ -82,17 +88,18 @@ def base_ci_finished(repo: str, sha: str, check_name: str, token: str | None, ti
     try:
         status, body = _get_json(url, headers, timeout)
     except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
-        return False, f"request failed: {getattr(e, 'reason', e)}"
+        return "running", f"request failed: {getattr(e, 'reason', e)}"
     runs = body.get("check_runs") if status == 200 and isinstance(body, dict) else None
     if not isinstance(runs, list):
-        return False, f"HTTP {status}"
+        return "running", f"HTTP {status}"
     if not runs:
-        return True, f"no {check_name} check run"
+        return "none", f"no {check_name} check run"
     # filter=latest keeps one run per name; take the newest in case of more.
     run = max(runs, key=lambda r: r.get("id", 0))
     if run.get("status") != "completed":
-        return False, f"{check_name} {run.get('status')}"
-    return True, f"{check_name} {run.get('conclusion')}"
+        return "running", f"{check_name} {run.get('status')}"
+    conclusion = run.get("conclusion")
+    return ("succeeded" if conclusion == "success" else "failed"), f"{check_name} {conclusion}"
 
 
 def main(argv=None, *, clock=time.monotonic, sleep=time.sleep) -> int:
@@ -143,11 +150,14 @@ def main(argv=None, *, clock=time.monotonic, sleep=time.sleep) -> int:
         if has_coverage:
             print(f"Attempt {attempt}: Codecov has the base report for {args.sha} ({coverage})")
             return 0
-        finished, ci = base_ci_finished(
+        state, ci = base_ci_state(
             args.repo, args.sha, args.check_name, token, min(args.request_timeout, max(deadline - clock(), 1))
         )
         print(f"Attempt {attempt}: Codecov: {coverage}; base CI: {ci}", flush=True)
-        if finished:
+        if state == "failed":
+            print(f"::warning::Codecov has no coverage for base commit {args.sha}, whose CI didn't succeed ({ci})")
+            return 0
+        if state in ("succeeded", "none"):
             if finished_at is None:
                 finished_at = clock()
         else:
