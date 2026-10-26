@@ -153,7 +153,8 @@ docker run -d --name=lifetracker -p 127.0.0.1:8000:8000 -v lifetracker-data:/dat
 For an image you built with `just docker-build`, use `lifetracker` as the image name instead.
 
 With `DEBUG` off, session and CSRF cookies are marked `Secure`, so the app must be served over HTTPS (typically via the reverse proxy); over plain HTTP you can't log in.
-The app doesn't redirect HTTP to HTTPS or send an HSTS header itself; configure both on the reverse proxy.
+The app doesn't redirect HTTP to HTTPS itself; configure that on the reverse proxy.
+With `DEBUG` off it sends an HSTS header (`max-age` one day), but only on requests it knows came over HTTPS: behind a proxy, that needs `LIFETRACKER_TRUST_X_FORWARDED_PROTO=1` (as on Fly.io), so with only `LIFETRACKER_CSRF_TRUSTED_ORIGINS`, as above, configure HSTS on the proxy too.
 
 ### Fly.io
 
