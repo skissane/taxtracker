@@ -58,13 +58,24 @@ def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
         har = json.loads(file_bytes.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise UnsupportedArchiveError(f"Could not parse file as a HAR archive: {exc}") from exc
+    if not isinstance(har, dict):
+        raise UnsupportedArchiveError("Could not parse file as a HAR archive: top-level JSON value must be an object")
 
-    entries = har.get("log", {}).get("entries", [])
+    log = har.get("log", {})
+    if not isinstance(log, dict):
+        raise UnsupportedArchiveError("Could not parse file as a HAR archive: 'log' must be an object")
+    entries = log.get("entries", [])
+    if not isinstance(entries, list):
+        raise UnsupportedArchiveError("Could not parse file as a HAR archive: 'entries' must be a list")
     results: list[tuple[str, bytes]] = []
 
     for entry in entries:
+        if not isinstance(entry, dict):
+            continue
         request = entry.get("request", {})
         response = entry.get("response", {})
+        if not isinstance(request, dict) or not isinstance(response, dict):
+            continue
 
         if request.get("method", "").upper() != "GET":
             continue
@@ -83,19 +94,27 @@ def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
 
         # Require JSON content type.
         content = response.get("content", {})
+        if not isinstance(content, dict):
+            continue
         mime_type = content.get("mimeType", "")
+        if not isinstance(mime_type, str):
+            continue
         if "application/json" not in mime_type:
             continue
 
         # Decode the response body (may itself be Base64-encoded in the HAR).
         body_text = content.get("text", "")
         body_encoding = content.get("encoding", "")
+        if not isinstance(body_encoding, str):
+            continue
         if body_encoding.lower() == "base64":
             try:
                 body_str = base64.b64decode(body_text).decode("utf-8")
             except Exception:
                 continue
         else:
+            if not isinstance(body_text, str):
+                continue
             body_str = body_text
 
         if not body_str:
@@ -105,6 +124,8 @@ def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
             payload = json.loads(body_str)
         except json.JSONDecodeError:
             continue
+        if not isinstance(payload, dict):
+            continue
 
         file_content_b64 = payload.get("fileContent")
         if file_content_b64 is None:
@@ -112,7 +133,7 @@ def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
 
         try:
             pdf_bytes = base64.b64decode(file_content_b64)
-        except binascii.Error:
+        except (binascii.Error, TypeError, ValueError):
             continue
 
         if not pdf_bytes.startswith(PDF_MAGIC):

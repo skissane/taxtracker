@@ -1123,7 +1123,12 @@ class FinancialYearAdmin(admin.ModelAdmin):
         error = None
 
         if request.method == "POST":
-            selected_pks = request.POST.getlist("fy_ids")
+            selected_pks: list[int] = []
+            for value in request.POST.getlist("fy_ids"):
+                try:
+                    selected_pks.append(int(value))
+                except (TypeError, ValueError):
+                    continue
             selected_fys = list(FinancialYear.objects.filter(pk__in=selected_pks).order_by("year"))
             if not selected_fys:
                 error = "Please select at least one financial year."
@@ -1220,17 +1225,24 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # ------------------------------------------------------------------
 
     def change_view(self, request, object_id, form_url="", extra_context=None):
-        extra_context = extra_context or {}
-        extra_context["summary_url"] = reverse("admin:taxtracker_financialyear_summary", args=[object_id])
-        extra_context["download_zip_url"] = reverse("admin:taxtracker_financialyear_download_zip", args=[object_id])
-        extra_context["copy_to_new_year_url"] = reverse(
+        response = super().change_view(request, object_id, form_url, extra_context)
+        if not isinstance(response, TemplateResponse):
+            return response
+
+        context_data = response.context_data
+        if context_data is None:
+            return response
+
+        context_data["summary_url"] = reverse("admin:taxtracker_financialyear_summary", args=[object_id])
+        context_data["download_zip_url"] = reverse("admin:taxtracker_financialyear_download_zip", args=[object_id])
+        context_data["copy_to_new_year_url"] = reverse(
             "admin:taxtracker_financialyear_copy_to_new_year", args=[object_id]
         )
-        fy = FinancialYear.objects.filter(pk=object_id).first()
+        fy = context_data.get("original")
         if fy:
-            extra_context["prev_fy"] = FinancialYear.objects.filter(year=fy.year - 1).first()
-            extra_context["next_fy"] = FinancialYear.objects.filter(year=fy.year + 1).first()
-        return super().change_view(request, object_id, form_url, extra_context)
+            context_data["prev_fy"] = FinancialYear.objects.filter(year=fy.year - 1).first()
+            context_data["next_fy"] = FinancialYear.objects.filter(year=fy.year + 1).first()
+        return response
 
 
 # ---------------------------------------------------------------------------
