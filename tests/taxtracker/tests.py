@@ -899,6 +899,39 @@ class AdminViewTests(TestCase):
         self.assertIn("FY2024", content)
         self.assertIn("FY2025", content)
 
+    def test_download_multi_zip_post_invalid_fy_ids_shows_error(self):
+        url = reverse("admin:taxtracker_financialyear_download_multi_zip")
+        response = self.client.post(url, {"fy_ids": ["abc", "99999999999999999999"], "action": "zip"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Please select at least one financial year.")
+
+    def test_financialyear_change_view_non_numeric_id_uses_admin_redirect(self):
+        response = self.client.get("/admin/taxtracker/financialyear/abc/change/")
+        self.assertRedirects(response, reverse("admin:index"))
+
+    def test_change_views_accept_ids_the_admin_normalises(self):
+        """The admin's lookup accepts "+1"; the change forms' links must still reverse."""
+        for url, link in [
+            (
+                f"/admin/taxtracker/financialyear/+{self.fy.pk}/change/",
+                reverse("admin:taxtracker_financialyear_summary", args=[self.fy.pk]),
+            ),
+            (
+                f"/admin/taxtracker/item/+{self.item.pk}/change/",
+                reverse("admin:taxtracker_item_import_archive", args=[self.item.pk]),
+            ),
+        ]:
+            with self.subTest(url=url):
+                self.assertContains(self.client.get(url), link)
+
+    def test_financialyear_change_view_links_summary_and_adjacent_years(self):
+        prev_fy = FinancialYear.objects.create(year=2023)
+        next_fy = FinancialYear.objects.create(year=2025)
+        response = self.client.get(reverse("admin:taxtracker_financialyear_change", args=[self.fy.pk]))
+        self.assertContains(response, reverse("admin:taxtracker_financialyear_summary", args=[self.fy.pk]))
+        self.assertContains(response, reverse("admin:taxtracker_financialyear_change", args=[prev_fy.pk]))
+        self.assertContains(response, reverse("admin:taxtracker_financialyear_change", args=[next_fy.pk]))
+
     def test_item_changelist_shows_year_link(self):
         url = reverse("admin:taxtracker_item_changelist")
         response = self.client.get(url)
@@ -1959,6 +1992,75 @@ class ArchiveExtractorTests(TestCase):
     def test_invalid_json_raises_unsupported(self):
         with self.assertRaises(UnsupportedArchiveError):
             extract_from_archive(b"not json at all", "export.har")
+
+    def test_har_top_level_json_array_raises_unsupported(self):
+        with self.assertRaisesMessage(UnsupportedArchiveError, "top-level JSON value must be an object"):
+            extract_from_archive(json.dumps([]).encode(), "export.har")
+
+    def test_har_entry_body_json_array_is_skipped(self):
+        har_bytes = json.dumps(
+            {
+                "log": {
+                    "entries": [
+                        {
+                            "request": {
+                                "method": "GET",
+                                "url": f"{FIDELITY_URL_PREFIX}statement-2023-07-20",
+                            },
+                            "response": {
+                                "content": {
+                                    "mimeType": "application/json",
+                                    "text": "[]",
+                                }
+                            },
+                        }
+                    ]
+                }
+            }
+        ).encode()
+        results = extract_from_archive(har_bytes, "export.har")
+        self.assertEqual(results, [])
+
+    def test_har_integer_over_digit_limit_raises_unsupported(self):
+        with self.assertRaisesMessage(UnsupportedArchiveError, "Could not parse file as a HAR archive"):
+            extract_from_archive(b'{"log": ' + b"1" * 5000 + b"}", "export.har")
+
+    def test_har_wrong_shape_log_or_entries_raises_unsupported(self):
+        for har, message in [
+            ({"log": []}, "'log' must be an object"),
+            ({"log": {"entries": {}}}, "'entries' must be a list"),
+        ]:
+            with self.subTest(har=har), self.assertRaisesMessage(UnsupportedArchiveError, message):
+                extract_from_archive(json.dumps(har).encode(), "export.har")
+
+    def test_har_skips_entries_with_wrong_field_types(self):
+        """Entries whose fields have unexpected JSON types are skipped, not a 500."""
+        good = json.loads(_make_fidelity_har("good"))["log"]["entries"][0]
+
+        def variant(path, value):
+            entry = json.loads(json.dumps(good))
+            target = entry
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            return entry
+
+        entries = [
+            "not an object",
+            variant(["request"], []),
+            variant(["response"], "x"),
+            variant(["request", "method"], 1),
+            variant(["request", "url"], None),
+            variant(["response", "content"], []),
+            variant(["response", "content", "mimeType"], 1),
+            variant(["response", "content", "text"], {"fileContent": "x"}),
+            variant(["response", "content", "text"], '{"fileContent": ' + "1" * 5000 + "}"),
+            variant(["response", "content", "text"], json.dumps({"fileContent": 1})),
+            variant(["response", "content", "text"], json.dumps({"fileContent": "\u00e9"})),
+            good,
+        ]
+        har_bytes = json.dumps({"log": {"entries": entries}}).encode()
+        self.assertEqual(extract_from_archive(har_bytes, "export.har"), [("good.pdf", PDF_MAGIC)])
 
     def test_invalid_zip_raises_unsupported(self):
         with self.assertRaisesMessage(UnsupportedArchiveError, "Could not parse file as a ZIP archive"):
