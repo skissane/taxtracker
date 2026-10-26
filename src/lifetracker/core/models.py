@@ -158,6 +158,7 @@ class DatabaseStorage(Storage):
     """Django storage backend that saves file content in the database."""
 
     _PREFIX = "db/"
+    _MAX_PK_CHARS = len(str((1 << 63) - 1))
 
     def _open(self, name, mode="rb"):
         pk = self._name_to_pk(name)
@@ -195,12 +196,25 @@ class DatabaseStorage(Storage):
 
     def get_available_name(self, name, max_length=None):
         # Each save creates a new record so there are no name conflicts.
-        if max_length and len(name) > max_length:
-            stem = Path(name).stem
-            suffix = Path(name).suffix
-            allowed = max_length - len(suffix)
-            name = stem[:allowed] + suffix if allowed > 0 else name[:max_length]
-        return name
+        if not max_length:
+            return name
+        if len(name) <= max_length:
+            return name
+
+        # The actual stored path is "db/<pk>/<filename>", so leave room for the
+        # fixed prefix as well as the field's own max_length when the backend
+        # enforces it on the bare filename.
+        reserved = len(self._PREFIX) + self._MAX_PK_CHARS + 1
+        effective_max_length = max_length - reserved
+        if effective_max_length <= 0:
+            return name[:max_length]
+
+        stem = Path(name).stem
+        suffix = Path(name).suffix
+        allowed = effective_max_length - len(suffix)
+        if allowed <= 0:
+            return name[:effective_max_length] + suffix[: max(0, max_length - effective_max_length)]
+        return stem[:allowed] + suffix
 
     def _name_to_pk(self, name):
         # Expected format: "db/<pk>/<filename>"
