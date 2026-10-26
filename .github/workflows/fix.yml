@@ -2,6 +2,7 @@ name: PR Fixes
 
 # Run by hand (Actions → PR Fixes → Run workflow) on an open PR's branch:
 # merges the PR's base branch in, runs `just fix`, and pushes the result.
+# autofix-comment.yml also runs it when the owner comments `/autofix` on a PR.
 on:
   workflow_dispatch:
 

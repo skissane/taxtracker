@@ -24,6 +24,9 @@ That only applies when Codecov knows the base commit but has no report for it; f
 Don't run `--job dependabot-fix`, `--job publish` or `--job deploy` locally: it doesn't evaluate `if:`, so it would push commits to the current branch, push to GHCR or deploy to production.
 
 **PR Fixes:** `.github/workflows/fix.yml` (issue #254) is run by hand (`workflow_dispatch`) on an open PR's branch.
+A PR comment from the repo owner (`author_association` `OWNER`) that is only `/autofix`, give or take whitespace, also runs it: `.github/workflows/autofix-comment.yml` (issue #261) checks the whole body against `^[[:space:]]*/autofix[[:space:]]*$`, so a comment that merely mentions `/autofix` doesn't, then runs `gh workflow run fix.yml --ref <head branch>` and reacts 🚀 to the comment.
+It dispatches rather than giving `fix.yml` an `issue_comment` trigger, as an `issue_comment` run's `github.ref` is always the default branch; the dispatched run is the same as one run by hand, and the comment workflow never checks out the branch (`GITHUB_TOKEN` may trigger `workflow_dispatch`, unlike other events).
+It runs only on newly created comments, not edits, and fails for a closed or fork PR.
 It fails unless the branch has an open PR from this repo (`gh pr list --head`), merges the PR's base branch in (failing on conflicts), runs `just sync` and `just fix`, commits any changes to tracked files (`git add -u`) as `chore: apply automated fixes`, and pushes if that or the merge moved `HEAD`.
 `fmt-templates` reruns djlint with `--check` if `--reformat` fails, as `--reformat` exits 1 whenever it changes a file.
 Like `dependabot-fix`, it checks out with `persist-credentials: false`, as `just fix` runs the branch's own `justfile` and dependencies, and only the push step sees its token, the `AUTOFIX_TOKEN` Actions secret (a fine-grained PAT with Contents: read and write; the job fails if it's unset), not `GITHUB_TOKEN`, whose pushes wouldn't trigger CI.
