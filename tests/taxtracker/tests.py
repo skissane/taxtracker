@@ -903,7 +903,6 @@ class AdminViewTests(TestCase):
         self.assertIn("FY2025", content)
 
     def test_financialyear_change_view_no_context_data(self):
-
         self.client.force_login(self.user)
         url = reverse("admin:taxtracker_financialyear_change", args=[self.fy.pk])
 
