@@ -4,7 +4,9 @@ import io
 import json
 import zipfile
 from unittest import mock
+from unittest.mock import patch
 
+from django.contrib import admin
 from django.contrib.auth.models import Permission, User
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
@@ -12,7 +14,8 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.recorder import MigrationRecorder
-from django.test import Client, TestCase, TransactionTestCase
+from django.template.response import TemplateResponse
+from django.test import Client, RequestFactory, TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -901,8 +904,6 @@ class AdminViewTests(TestCase):
 
 
     def test_financialyear_change_view_no_context_data(self):
-        from unittest.mock import patch
-        from django.template.response import TemplateResponse
 
         self.client.force_login(self.user)
         url = reverse("admin:taxtracker_financialyear_change", args=[self.fy.pk])
@@ -913,11 +914,8 @@ class AdminViewTests(TestCase):
             mock_super_change.return_value = mock_resp
 
             # Use request factory to call the method directly so it doesn't render via client
-            from django.test import RequestFactory
-            from lifetracker.taxtracker.admin import FinancialYearAdmin
             request = RequestFactory().get(url)
             request.user = self.user
-            from django.contrib import admin
             admin_obj = FinancialYearAdmin(FinancialYear, admin.site)
             response = admin_obj.change_view(request, str(self.fy.pk))
             self.assertIs(response, mock_resp)
@@ -1991,11 +1989,13 @@ class ArchiveExtractorTests(TestCase):
 
 
     def test_har_log_not_object(self):
-        with self.assertRaisesMessage(UnsupportedArchiveError, "Could not parse file as a HAR archive: 'log' must be an object"):
+        with self.assertRaisesMessage(UnsupportedArchiveError, ("Could not parse file as a HAR archive: "
+                                          "'log' must be an object")):
             extract_from_archive(json.dumps({"log": []}).encode(), "export.har")
 
     def test_har_entries_not_list(self):
-        with self.assertRaisesMessage(UnsupportedArchiveError, "Could not parse file as a HAR archive: 'entries' must be a list"):
+        with self.assertRaisesMessage(UnsupportedArchiveError, ("Could not parse file as a HAR archive: "
+                                          "'entries' must be a list")):
             extract_from_archive(json.dumps({"log": {"entries": {}}}).encode(), "export.har")
 
     def test_har_entry_not_dict(self):
@@ -2035,7 +2035,8 @@ class ArchiveExtractorTests(TestCase):
             "log": {
                 "entries": [{
                     "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
-                    "response": {"content": {"mimeType": "application/json", "encoding": "", "text": '{"fileContent": "+++"}'}}
+                    "response": {"content": {"mimeType": "application/json", "encoding": "", "text":
+                                          '{"fileContent": "+++"}'}}
                 }]
             }
         }).encode()
