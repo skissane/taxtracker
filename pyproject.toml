@@ -5,7 +5,7 @@ description = "Personal life admin tracker app, with tax and task tracking modul
 readme = "README.md"
 requires-python = "~=3.14.9"
 dependencies = [
-    "boto3>=1.43.111",
+    "boto3>=1.43.114",
     "click>=8.5.0",
     "django>=6.1.2",
     "django-google-sso>=10.0.0",
@@ -30,14 +30,14 @@ packages = ["src/lifetracker"]
 [dependency-groups]
 dev = [
     "coverage>=7.16.2",
-    "djlint>=1.46.4",
+    "djlint>=1.46.6",
     "jactionlint>=2.3.0",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "pytest-django>=4.14.0",
     "pytest-xdist>=3.8.0",
     "pyyaml>=6.0.3",
-    "ruff>=0.17.0",
+    "ruff>=0.17.1",
 ]
 screenshots = [
     "playwright>=1.64.0",

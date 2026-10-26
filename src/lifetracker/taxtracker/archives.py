@@ -97,8 +97,6 @@ def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
         if not isinstance(content, dict):
             continue
         mime_type = content.get("mimeType", "")
-        if not isinstance(mime_type, str):
-            continue
         if "application/json" not in mime_type:
             continue
 
@@ -133,7 +131,7 @@ def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
 
         try:
             pdf_bytes = base64.b64decode(file_content_b64)
-        except (binascii.Error, TypeError, ValueError):
+        except binascii.Error, TypeError, ValueError:
             continue
 
         if not pdf_bytes.startswith(PDF_MAGIC):

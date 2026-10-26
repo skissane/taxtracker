@@ -1127,7 +1127,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
             for value in request.POST.getlist("fy_ids"):
                 try:
                     selected_pks.append(int(value))
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     continue
             selected_fys = list(FinancialYear.objects.filter(pk__in=selected_pks).order_by("year"))
             if not selected_fys:

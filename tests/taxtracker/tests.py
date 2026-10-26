@@ -902,7 +902,6 @@ class AdminViewTests(TestCase):
         self.assertIn("FY2024", content)
         self.assertIn("FY2025", content)
 
-
     def test_financialyear_change_view_no_context_data(self):
 
         self.client.force_login(self.user)
@@ -1987,15 +1986,16 @@ class ArchiveExtractorTests(TestCase):
         _, skipped = extract_from_archive_with_skips(zip_bytes, "export.zip")
         self.assertEqual(skipped, ["ignored.txt"])
 
-
     def test_har_log_not_object(self):
-        with self.assertRaisesMessage(UnsupportedArchiveError, ("Could not parse file as a HAR archive: "
-                                          "'log' must be an object")):
+        with self.assertRaisesMessage(
+            UnsupportedArchiveError, ("Could not parse file as a HAR archive: 'log' must be an object")
+        ):
             extract_from_archive(json.dumps({"log": []}).encode(), "export.har")
 
     def test_har_entries_not_list(self):
-        with self.assertRaisesMessage(UnsupportedArchiveError, ("Could not parse file as a HAR archive: "
-                                          "'entries' must be a list")):
+        with self.assertRaisesMessage(
+            UnsupportedArchiveError, ("Could not parse file as a HAR archive: 'entries' must be a list")
+        ):
             extract_from_archive(json.dumps({"log": {"entries": {}}}).encode(), "export.har")
 
     def test_har_entry_not_dict(self):
@@ -2006,170 +2006,212 @@ class ArchiveExtractorTests(TestCase):
         har_bytes = json.dumps({"log": {"entries": [{"request": [], "response": {}}]}}).encode()
         self.assertEqual(extract_from_archive(har_bytes, "export.har"), [])
 
-
-
     def test_har_body_b64decode_error(self):
-        har_bytes = json.dumps({
-            "log": {
-                "entries": [{
-                    "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
-                    "response": {"content": {"mimeType": "application/json", "encoding": "base64", "text": "+++"}}
-                }]
+        har_bytes = json.dumps(
+            {
+                "log": {
+                    "entries": [
+                        {
+                            "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
+                            "response": {
+                                "content": {"mimeType": "application/json", "encoding": "base64", "text": "+++"}
+                            },
+                        }
+                    ]
+                }
             }
-        }).encode()
+        ).encode()
         self.assertEqual(extract_from_archive(har_bytes, "export.har"), [])
 
     def test_har_body_empty(self):
-        har_bytes = json.dumps({
-            "log": {
-                "entries": [{
-                    "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
-                    "response": {"content": {"mimeType": "application/json", "encoding": "", "text": ""}}
-                }]
+        har_bytes = json.dumps(
+            {
+                "log": {
+                    "entries": [
+                        {
+                            "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
+                            "response": {"content": {"mimeType": "application/json", "encoding": "", "text": ""}},
+                        }
+                    ]
+                }
             }
-        }).encode()
+        ).encode()
         self.assertEqual(extract_from_archive(har_bytes, "export.har"), [])
 
     def test_har_filecontent_not_b64(self):
-        har_bytes = json.dumps({
-            "log": {
-                "entries": [{
-                    "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
-                    "response": {"content": {"mimeType": "application/json", "encoding": "", "text":
-                                          '{"fileContent": "+++"}'}}
-                }]
+        har_bytes = json.dumps(
+            {
+                "log": {
+                    "entries": [
+                        {
+                            "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
+                            "response": {
+                                "content": {
+                                    "mimeType": "application/json",
+                                    "encoding": "",
+                                    "text": '{"fileContent": "+++"}',
+                                }
+                            },
+                        }
+                    ]
+                }
             }
-        }).encode()
+        ).encode()
         self.assertEqual(extract_from_archive(har_bytes, "export.har"), [])
 
     def test_har_encoding_not_str_2(self):
-        har_bytes = json.dumps({
-            "log": {
-                "entries": [{
-                    "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
-                    "response": {"content": {"mimeType": "application/json", "encoding": 123, "text": ""}}
-                }]
+        har_bytes = json.dumps(
+            {
+                "log": {
+                    "entries": [
+                        {
+                            "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
+                            "response": {"content": {"mimeType": "application/json", "encoding": 123, "text": ""}},
+                        }
+                    ]
+                }
             }
-        }).encode()
+        ).encode()
         self.assertEqual(extract_from_archive(har_bytes, "export.har"), [])
 
     def test_har_body_empty_2(self):
-        har_bytes = json.dumps({
-            "log": {
-                "entries": [{
-                    "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
-                    "response": {"content": {"mimeType": "application/json", "encoding": "", "text": ""}}
-                }]
+        har_bytes = json.dumps(
+            {
+                "log": {
+                    "entries": [
+                        {
+                            "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
+                            "response": {"content": {"mimeType": "application/json", "encoding": "", "text": ""}},
+                        }
+                    ]
+                }
             }
-        }).encode()
+        ).encode()
         self.assertEqual(extract_from_archive(har_bytes, "export.har"), [])
-
 
     def test_har_encoding_not_str_3(self):
         # test line 98
-        har_bytes = json.dumps({
-            "log": {
-                "entries": [{
-                    "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
-                    "response": {"content": {"mimeType": "application/json", "encoding": 123}}
-                }]
+        har_bytes = json.dumps(
+            {
+                "log": {
+                    "entries": [
+                        {
+                            "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
+                            "response": {"content": {"mimeType": "application/json", "encoding": 123}},
+                        }
+                    ]
+                }
             }
-        }).encode()
+        ).encode()
         self.assertEqual(extract_from_archive(har_bytes, "export.har"), [])
 
     def test_har_body_empty_3(self):
         # test line 115
-        har_bytes = json.dumps({
-            "log": {
-                "entries": [{
-                    "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
-                    "response": {"content": {"mimeType": "application/json", "encoding": "", "text": ""}}
-                }]
+        har_bytes = json.dumps(
+            {
+                "log": {
+                    "entries": [
+                        {
+                            "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
+                            "response": {"content": {"mimeType": "application/json", "encoding": "", "text": ""}},
+                        }
+                    ]
+                }
             }
-        }).encode()
+        ).encode()
         self.assertEqual(extract_from_archive(har_bytes, "export.har"), [])
 
-
     def test_har_encoding_not_str(self):
-        har_bytes = json.dumps({
-            "log": {
-                "entries": [{
-                    "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
-                    "response": {"content": {"mimeType": "application/json", "encoding": 123}}
-                }]
+        har_bytes = json.dumps(
+            {
+                "log": {
+                    "entries": [
+                        {
+                            "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
+                            "response": {"content": {"mimeType": "application/json", "encoding": 123}},
+                        }
+                    ]
+                }
             }
-        }).encode()
+        ).encode()
         self.assertEqual(extract_from_archive(har_bytes, "export.har"), [])
 
     def test_har_body_not_str(self):
-        har_bytes = json.dumps({
-            "log": {
-                "entries": [{
-                    "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
-                    "response": {"content": {"mimeType": "application/json", "encoding": "", "text": 123}}
-                }]
+        har_bytes = json.dumps(
+            {
+                "log": {
+                    "entries": [
+                        {
+                            "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
+                            "response": {"content": {"mimeType": "application/json", "encoding": "", "text": 123}},
+                        }
+                    ]
+                }
             }
-        }).encode()
+        ).encode()
         self.assertEqual(extract_from_archive(har_bytes, "export.har"), [])
-
 
     def test_har_encoding_missing(self):
-        har_bytes = json.dumps({
-            "log": {
-                "entries": [{
-                    "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
-                    "response": {"content": {"mimeType": "application/json"}}
-                }]
+        har_bytes = json.dumps(
+            {
+                "log": {
+                    "entries": [
+                        {
+                            "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
+                            "response": {"content": {"mimeType": "application/json"}},
+                        }
+                    ]
+                }
             }
-        }).encode()
+        ).encode()
         self.assertEqual(extract_from_archive(har_bytes, "export.har"), [])
-
 
     def test_har_encoding_not_str_4(self):
-        har_bytes = json.dumps({
-            "log": {
-                "entries": [{
-                    "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
-                    "response": {"content": {"mimeType": "application/json", "encoding": 1, "text": "a"}}
-                }]
+        har_bytes = json.dumps(
+            {
+                "log": {
+                    "entries": [
+                        {
+                            "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
+                            "response": {"content": {"mimeType": "application/json", "encoding": 1, "text": "a"}},
+                        }
+                    ]
+                }
             }
-        }).encode()
+        ).encode()
         self.assertEqual(extract_from_archive(har_bytes, "export.har"), [])
-
 
     def test_har_content_missing(self):
-        har_bytes = json.dumps({
-            "log": {
-                "entries": [{
-                    "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
-                    "response": {}
-                }]
-            }
-        }).encode()
+        har_bytes = json.dumps(
+            {"log": {"entries": [{"request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"}, "response": {}}]}}
+        ).encode()
         self.assertEqual(extract_from_archive(har_bytes, "export.har"), [])
-
 
     def test_har_content_mimeType_not_string(self):
-        har_bytes = json.dumps({
-            "log": {
-                "entries": [{
-                    "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
-                    "response": {"content": {"mimeType": 123}}
-                }]
+        har_bytes = json.dumps(
+            {
+                "log": {
+                    "entries": [
+                        {
+                            "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
+                            "response": {"content": {"mimeType": 123}},
+                        }
+                    ]
+                }
             }
-        }).encode()
+        ).encode()
         self.assertEqual(extract_from_archive(har_bytes, "export.har"), [])
 
-
     def test_har_content_missing_dict(self):
-        har_bytes = json.dumps({
-            "log": {
-                "entries": [{
-                    "request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"},
-                    "response": {"content": 123}
-                }]
+        har_bytes = json.dumps(
+            {
+                "log": {
+                    "entries": [
+                        {"request": {"method": "GET", "url": f"{FIDELITY_URL_PREFIX}doc"}, "response": {"content": 123}}
+                    ]
+                }
             }
-        }).encode()
+        ).encode()
         self.assertEqual(extract_from_archive(har_bytes, "export.har"), [])
 
     def test_invalid_json_raises_unsupported(self):
