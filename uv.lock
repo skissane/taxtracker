@@ -464,7 +464,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "coverage", specifier = ">=7.16.2" },
-    { name = "djlint", specifier = ">=1.46.4" },
+    { name = "djlint", specifier = ">=1.46.6" },
     { name = "jactionlint", specifier = ">=2.3.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
