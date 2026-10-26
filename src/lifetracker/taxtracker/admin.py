@@ -245,9 +245,9 @@ class ItemAdmin(admin.ModelAdmin):
         prev_fy = FinancialYear.objects.filter(year=item.year.year - 1).first()
         next_fy = FinancialYear.objects.filter(year=item.year.year + 1).first()
 
-        response.context_data["import_archive_url"] = reverse("admin:taxtracker_item_import_archive", args=[object_id])
+        response.context_data["import_archive_url"] = reverse("admin:taxtracker_item_import_archive", args=[item.pk])
         response.context_data["reassign_attachments_url"] = reverse(
-            "admin:taxtracker_item_reassign_attachments", args=[object_id]
+            "admin:taxtracker_item_reassign_attachments", args=[item.pk]
         )
         response.context_data["prev_item"] = _find_equivalent_item(path_signature, prev_fy) if prev_fy else None
         response.context_data["next_item"] = _find_equivalent_item(path_signature, next_fy) if next_fy else None
@@ -1228,21 +1228,20 @@ class FinancialYearAdmin(admin.ModelAdmin):
 
     def change_view(self, request, object_id, form_url="", extra_context=None):
         # Let the admin look the object up first, so a malformed or unknown ID
-        # gets its usual redirect rather than reaching the queries below.
+        # gets its usual redirect rather than reaching the queries below; a
+        # successful POST redirects too.
         response = super().change_view(request, object_id, form_url, extra_context)
         if not isinstance(response, TemplateResponse):
             return response
 
+        # Reverse with fy.pk, not object_id: the admin accepts e.g. "+1", which <int:pk> URLs don't.
         context_data = response.context_data
-        context_data["summary_url"] = reverse("admin:taxtracker_financialyear_summary", args=[object_id])
-        context_data["download_zip_url"] = reverse("admin:taxtracker_financialyear_download_zip", args=[object_id])
-        context_data["copy_to_new_year_url"] = reverse(
-            "admin:taxtracker_financialyear_copy_to_new_year", args=[object_id]
-        )
-        fy = context_data.get("original")
-        if fy:
-            context_data["prev_fy"] = FinancialYear.objects.filter(year=fy.year - 1).first()
-            context_data["next_fy"] = FinancialYear.objects.filter(year=fy.year + 1).first()
+        fy = context_data["original"]
+        context_data["summary_url"] = reverse("admin:taxtracker_financialyear_summary", args=[fy.pk])
+        context_data["download_zip_url"] = reverse("admin:taxtracker_financialyear_download_zip", args=[fy.pk])
+        context_data["copy_to_new_year_url"] = reverse("admin:taxtracker_financialyear_copy_to_new_year", args=[fy.pk])
+        context_data["prev_fy"] = FinancialYear.objects.filter(year=fy.year - 1).first()
+        context_data["next_fy"] = FinancialYear.objects.filter(year=fy.year + 1).first()
         return response
 
 

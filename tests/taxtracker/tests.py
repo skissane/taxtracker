@@ -909,6 +909,21 @@ class AdminViewTests(TestCase):
         response = self.client.get("/admin/taxtracker/financialyear/abc/change/")
         self.assertRedirects(response, reverse("admin:index"))
 
+    def test_change_views_accept_ids_the_admin_normalises(self):
+        """The admin's lookup accepts "+1"; the change forms' links must still reverse."""
+        for url, link in [
+            (
+                f"/admin/taxtracker/financialyear/+{self.fy.pk}/change/",
+                reverse("admin:taxtracker_financialyear_summary", args=[self.fy.pk]),
+            ),
+            (
+                f"/admin/taxtracker/item/+{self.item.pk}/change/",
+                reverse("admin:taxtracker_item_import_archive", args=[self.item.pk]),
+            ),
+        ]:
+            with self.subTest(url=url):
+                self.assertContains(self.client.get(url), link)
+
     def test_financialyear_change_view_links_summary_and_adjacent_years(self):
         prev_fy = FinancialYear.objects.create(year=2023)
         next_fy = FinancialYear.objects.create(year=2025)
