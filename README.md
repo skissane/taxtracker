@@ -542,6 +542,7 @@ The main ones:
 The tests that send requests through Envoy run it with Docker, and are skipped without it; on macOS they need Docker Desktop's host networking turned on (Settings → Resources → Network).
 On a pull request, CI also takes the screenshots and posts them as a comment on it.
 To fix lint and formatting on a pull request without checking it out, run the **PR Fixes** workflow on its branch (Actions → PR Fixes → Run workflow): it merges in the base branch, runs `just fix` and pushes the result.
+Commenting `/autofix`, with nothing else in the comment, on an open pull request from a branch of this repo (not a fork) does the same (repo owner only).
 It needs an `AUTOFIX_TOKEN` Actions secret, a fine-grained PAT for this repo with Contents: read and write.
 
 [`AGENTS.md`](AGENTS.md) has more detail on the code's layout, CI and conventions.

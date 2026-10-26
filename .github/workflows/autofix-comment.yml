@@ -1,0 +1,63 @@
+name: PR Fixes on comment
+
+# A PR comment from the repo owner that is just `/autofix` (whitespace aside)
+# runs the PR Fixes workflow (fix.yml) on the PR's branch, as running it by
+# hand would. This runs no code from the branch.
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  dispatch:
+    # A cheap pre-filter; the exact match is checked below, as expressions
+    # can't trim whitespace.
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.comment.author_association == 'OWNER' &&
+      contains(github.event.comment.body, '/autofix')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      pull-requests: write
+    timeout-minutes: 5
+
+    steps:
+      - name: Check the comment is only /autofix
+        id: check-comment
+        env:
+          BODY: ${{ github.event.comment.body }}
+        run: |
+          if [[ $BODY =~ ^[[:space:]]*/autofix[[:space:]]*$ ]]; then
+            echo "matched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Comment has more than /autofix in it; not running PR Fixes."
+          fi
+
+      - name: Run PR Fixes on the PR's branch
+        if: steps.check-comment.outputs.matched == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          # Not read from a process substitution, whose failure wouldn't stop the step.
+          pr=$(gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json state,isCrossRepository,headRefName \
+            --jq '"\(.state) \(.isCrossRepository) \(.headRefName)"')
+          read -r state cross_repo branch <<< "$pr"
+          if [ "$state" != OPEN ]; then
+            echo "::error::Pull request #$NUMBER is not open."
+            exit 1
+          fi
+          if [ "$cross_repo" != false ]; then
+            echo "::error::Pull request #$NUMBER is from a fork, which PR Fixes can't push to."
+            exit 1
+          fi
+          gh workflow run fix.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
+          # PR Fixes has started, so a failed reaction only warns: a red run would
+          # suggest commenting again.
+          if ! gh api --method POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
+            -f content=rocket > /dev/null; then
+            echo "::warning::Couldn't react to the comment."
+          fi
+          echo "Started PR Fixes on $branch."
