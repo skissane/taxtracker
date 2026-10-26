@@ -25,6 +25,7 @@ from lifetracker.taxtracker.archives import (
     UnsupportedArchiveError,
     extract_from_archive_with_skips,
 )
+from lifetracker.taxtracker.financial_year import financial_year_for_date
 from lifetracker.taxtracker.forms import (
     AttachmentForm,
     ImportArchiveForm,
@@ -62,11 +63,6 @@ def _attachment_date_warning(obj):
             fy.end_date,
         )
     return ""
-
-
-def _financial_year_number_for_date(date):
-    """Return FY end-year number for a date (e.g. Aug-2023 -> FY2024)."""
-    return date.year if date.month <= 6 else date.year + 1
 
 
 # Matches a leading 4-digit financial year in a filename, e.g. "2024-notice.pdf".
@@ -374,7 +370,7 @@ class ItemAdmin(admin.ModelAdmin):
             if attachment.date is None or item.year.start_date <= attachment.date <= item.year.end_date:
                 continue
 
-            target_year_num = _financial_year_number_for_date(attachment.date)
+            target_year_num = financial_year_for_date(attachment.date)
             target_fy = FinancialYear.objects.filter(year=target_year_num).first()
 
             if target_fy is None:

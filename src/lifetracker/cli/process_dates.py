@@ -8,15 +8,7 @@ from datetime import date, datetime, timedelta
 
 import click
 
-
-def get_financial_year(date_obj: date) -> int:
-    """
-    Returns the Australian financial year for a given date.
-    The Australian FY ends on June 30.
-    """
-    if date_obj.month >= 7:
-        return date_obj.year + 1
-    return date_obj.year
+from lifetracker.taxtracker.financial_year import financial_year_for_date
 
 
 def parse_date_line(clean_line: str) -> date:
@@ -56,7 +48,7 @@ def group_by_financial_year(dates: set[date]) -> dict[int, list[date]]:
     """Group *dates* by Australian financial year, each group sorted chronologically."""
     fy_groups: defaultdict[int, list[date]] = defaultdict(list)
     for d in sorted(dates):
-        fy_groups[get_financial_year(d)].append(d)
+        fy_groups[financial_year_for_date(d)].append(d)
     return fy_groups
 
 

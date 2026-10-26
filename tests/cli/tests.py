@@ -25,7 +25,6 @@ from lifetracker.cli.extract_fidelity_pdfs import (
 )
 from lifetracker.cli.filter_zip import filter_zip, filter_zip_command
 from lifetracker.cli.process_dates import (
-    get_financial_year,
     group_by_financial_year,
     process_dates_command,
     read_dates,
@@ -475,10 +474,6 @@ class FilterZipTests(TestCase):
 
 
 class ProcessDatesTests(TestCase):
-    def test_get_financial_year_boundary(self):
-        self.assertEqual(get_financial_year(datetime.date(2024, 6, 30)), 2024)
-        self.assertEqual(get_financial_year(datetime.date(2024, 7, 1)), 2025)
-
     def test_read_dates_parses_iso_and_ordinal_formats(self):
         dates = read_dates(["2024-01-15\n", "November 20th 2024\n", "\n", "2024-01-15\n"], 0)
         self.assertEqual(dates, {datetime.date(2024, 1, 15), datetime.date(2024, 11, 20)})
