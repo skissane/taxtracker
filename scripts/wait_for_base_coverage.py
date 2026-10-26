@@ -136,11 +136,16 @@ def main(argv=None, *, clock=time.monotonic, sleep=time.sleep) -> int:
     attempt = 0
     while True:
         attempt += 1
-        has_coverage, coverage = codecov_coverage(args.repo, args.sha, args.request_timeout)
+        # Don't let slow requests run far past the deadline.
+        has_coverage, coverage = codecov_coverage(
+            args.repo, args.sha, min(args.request_timeout, max(deadline - clock(), 1))
+        )
         if has_coverage:
             print(f"Attempt {attempt}: Codecov has the base report for {args.sha} ({coverage})")
             return 0
-        finished, ci = base_ci_finished(args.repo, args.sha, args.check_name, token, args.request_timeout)
+        finished, ci = base_ci_finished(
+            args.repo, args.sha, args.check_name, token, min(args.request_timeout, max(deadline - clock(), 1))
+        )
         print(f"Attempt {attempt}: Codecov: {coverage}; base CI: {ci}", flush=True)
         if finished:
             if finished_at is None:

@@ -1164,3 +1164,28 @@ class WaitForBaseCoverageTests(SimpleTestCase):
         self.assertEqual(code, 0)
         self.assertEqual(sleeps, [10, 10])
         self.assertIn("::warning::Codecov still has no coverage for base commit abc123 after 25 seconds", out)
+
+    def test_request_timeout_capped_by_deadline(self):
+        now = [0.0]
+        timeouts = []
+
+        def request(*args):
+            timeouts.append(args[-1])
+            now[0] += 4
+            return False, "slow"
+
+        def sleep(seconds):
+            now[0] += seconds
+
+        with (
+            mock.patch("scripts.wait_for_base_coverage.codecov_coverage", side_effect=request),
+            mock.patch("scripts.wait_for_base_coverage.base_ci_finished", side_effect=request),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            code = wait_for_base_coverage_main(
+                [self.REPO, self.SHA, "--timeout", "20", "--interval", "1", "--request-timeout", "15"],
+                clock=lambda: now[0],
+                sleep=sleep,
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(timeouts, [15, 15, 11, 7, 2, 1])
