@@ -834,11 +834,12 @@ class DatabaseStorageTests(TestCase):
     def test_get_available_name_short_name_unchanged(self):
         self.assertEqual(self.storage.get_available_name("short.txt", max_length=100), "short.txt")
 
-    def test_get_available_name_truncates_long_stem(self):
-        name = "a" * 50 + ".txt"
-        result = self.storage.get_available_name(name, max_length=20)
+    def test_get_available_name_reserves_storage_prefix_space(self):
+        name = "a" * 90 + ".txt"
+        reserved = len(self.storage._PREFIX) + self.storage._MAX_PK_CHARS + 1
+        result = self.storage.get_available_name(name, max_length=100)
         self.assertTrue(result.endswith(".txt"))
-        self.assertLessEqual(len(result), 20)
+        self.assertLessEqual(len(result), 100 - reserved)
 
     def test_get_available_name_truncates_hard_when_suffix_too_long(self):
         # allowed <= 0: suffix alone exceeds max_length, so we hard-truncate.

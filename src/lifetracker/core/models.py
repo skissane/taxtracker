@@ -198,22 +198,22 @@ class DatabaseStorage(Storage):
         # Each save creates a new record so there are no name conflicts.
         if not max_length:
             return name
-        if len(name) <= max_length:
-            return name
 
         # The actual stored path is "db/<pk>/<filename>", so leave room for the
-        # fixed prefix as well as the field's own max_length when the backend
-        # enforces it on the bare filename.
+        # fixed prefix (and the maximum integer primary key length) before
+        # truncating the bare filename.
         reserved = len(self._PREFIX) + self._MAX_PK_CHARS + 1
         effective_max_length = max_length - reserved
         if effective_max_length <= 0:
             return name[:max_length]
+        if len(name) <= effective_max_length:
+            return name
 
         stem = Path(name).stem
         suffix = Path(name).suffix
         allowed = effective_max_length - len(suffix)
         if allowed <= 0:
-            return name[:effective_max_length] + suffix[: max(0, max_length - effective_max_length)]
+            return name[:effective_max_length]
         return stem[:allowed] + suffix
 
     def _name_to_pk(self, name):
