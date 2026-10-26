@@ -50,6 +50,10 @@ class FinancialYearModelTests(TestCase):
     def test_end_date(self):
         self.assertEqual(self.fy.end_date, datetime.date(2024, 6, 30))
 
+    def test_year_for_date_boundary(self):
+        self.assertEqual(FinancialYear.year_for(datetime.date(2024, 6, 30)), 2024)
+        self.assertEqual(FinancialYear.year_for(datetime.date(2024, 7, 1)), 2025)
+
     def test_default_lodgement_date(self):
         self.assertEqual(self.fy.default_lodgement_date, datetime.date(2024, 10, 31))
 

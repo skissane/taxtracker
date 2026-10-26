@@ -8,15 +8,10 @@ from datetime import date, datetime, timedelta
 
 import click
 
+from lifetracker.taxtracker.financial_year import financial_year_for_date
 
-def get_financial_year(date_obj: date) -> int:
-    """
-    Returns the Australian financial year for a given date.
-    The Australian FY ends on June 30.
-    """
-    if date_obj.month >= 7:
-        return date_obj.year + 1
-    return date_obj.year
+# Backwards-compatible name used by existing tests/imports.
+get_financial_year = financial_year_for_date
 
 
 def parse_date_line(clean_line: str) -> date:
