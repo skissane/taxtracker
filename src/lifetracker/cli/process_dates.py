@@ -10,9 +10,6 @@ import click
 
 from lifetracker.taxtracker.financial_year import financial_year_for_date
 
-# Backwards-compatible name used by existing tests/imports.
-get_financial_year = financial_year_for_date
-
 
 def parse_date_line(clean_line: str) -> date:
     """Parse a single date line, in ISO 8601 or 'Month Dth YYYY' format."""
@@ -51,7 +48,7 @@ def group_by_financial_year(dates: set[date]) -> dict[int, list[date]]:
     """Group *dates* by Australian financial year, each group sorted chronologically."""
     fy_groups: defaultdict[int, list[date]] = defaultdict(list)
     for d in sorted(dates):
-        fy_groups[get_financial_year(d)].append(d)
+        fy_groups[financial_year_for_date(d)].append(d)
     return fy_groups
 
 

@@ -8,7 +8,6 @@ from django.utils import timezone
 from lifetracker.core.attachments import AttachmentAutofillMixin
 from lifetracker.core.models import FileType, database_storage
 from lifetracker.core.trees import TreeNodeMixin
-from lifetracker.taxtracker.financial_year import financial_year_for_date
 
 
 class FinancialYear(models.Model):
@@ -51,10 +50,6 @@ class FinancialYear(models.Model):
 
     def __str__(self):
         return f"FY{self.year}"
-
-    @classmethod
-    def year_for(cls, date_obj):
-        return financial_year_for_date(date_obj)
 
     @classmethod
     def from_db(cls, db, field_names, values, *, fetch_mode=None):

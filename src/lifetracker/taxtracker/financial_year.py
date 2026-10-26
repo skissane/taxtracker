@@ -1,3 +1,8 @@
+"""The Australian financial year a date falls in.
+
+Kept free of Django imports, as the command-line tools (`lifetracker.cli`) use it too.
+"""
+
 from datetime import date
 
 

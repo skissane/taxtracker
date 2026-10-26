@@ -27,6 +27,7 @@ from lifetracker.taxtracker.archives import (
     extract_from_archive,
     extract_from_archive_with_skips,
 )
+from lifetracker.taxtracker.financial_year import financial_year_for_date
 from lifetracker.taxtracker.forms import AttachmentForm
 from lifetracker.taxtracker.models import (
     Attachment,
@@ -50,9 +51,16 @@ class FinancialYearModelTests(TestCase):
     def test_end_date(self):
         self.assertEqual(self.fy.end_date, datetime.date(2024, 6, 30))
 
-    def test_year_for_date_boundary(self):
-        self.assertEqual(FinancialYear.year_for(datetime.date(2024, 6, 30)), 2024)
-        self.assertEqual(FinancialYear.year_for(datetime.date(2024, 7, 1)), 2025)
+    def test_financial_year_for_date_boundary(self):
+        self.assertEqual(financial_year_for_date(datetime.date(2024, 6, 30)), 2024)
+        self.assertEqual(financial_year_for_date(datetime.date(2024, 7, 1)), 2025)
+
+    def test_start_and_end_dates_are_in_the_year(self):
+        # start_date/end_date spell out the same 1 July boundary as financial_year_for_date.
+        self.assertEqual(financial_year_for_date(self.fy.start_date), self.fy.year)
+        self.assertEqual(financial_year_for_date(self.fy.end_date), self.fy.year)
+        self.assertEqual(financial_year_for_date(self.fy.start_date - datetime.timedelta(days=1)), self.fy.year - 1)
+        self.assertEqual(financial_year_for_date(self.fy.end_date + datetime.timedelta(days=1)), self.fy.year + 1)
 
     def test_default_lodgement_date(self):
         self.assertEqual(self.fy.default_lodgement_date, datetime.date(2024, 10, 31))
