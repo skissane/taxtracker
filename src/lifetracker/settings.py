@@ -158,6 +158,10 @@ if _env_bool("LIFETRACKER_TRUST_X_FORWARDED_PROTO", False):
 # Production is assumed to be HTTPS: don't send session/CSRF cookies over HTTP.
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
+# HSTS: SecurityMiddleware sends it only on requests Django sees as HTTPS (so
+# behind a proxy, only with LIFETRACKER_TRUST_X_FORWARDED_PROTO). One day to
+# start; raise it once it's confirmed working.
+SECURE_HSTS_SECONDS = 86400 if not DEBUG else 0
 
 
 # Application definition

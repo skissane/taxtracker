@@ -1440,7 +1440,7 @@ class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
     EXPR = (
         "(s.DEBUG, s.ALLOWED_HOSTS, s.CSRF_TRUSTED_ORIGINS,"
         " getattr(s, 'SECURE_PROXY_SSL_HEADER', None),"
-        " s.SESSION_COOKIE_SECURE, s.CSRF_COOKIE_SECURE)"
+        " s.SESSION_COOKIE_SECURE, s.CSRF_COOKIE_SECURE, s.SECURE_HSTS_SECONDS > 0)"
     )
 
     def _settings(self, **env):
@@ -1457,7 +1457,7 @@ class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
         return proc.stderr
 
     def test_defaults_are_local_development(self):
-        self.assertEqual(self._settings(), (True, [], [], None, False, False))
+        self.assertEqual(self._settings(), (True, [], [], None, False, False, False))
 
     def test_debug_off_with_hosts(self):
         self.assertEqual(
@@ -1470,6 +1470,7 @@ class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
                 ["tax.example.com", "other.example.com"],
                 [],
                 None,
+                True,
                 True,
                 True,
             ),
@@ -1504,7 +1505,7 @@ class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
         )
 
     def test_proxy_settings(self):
-        debug, _, origins, proxy_header, _, _ = self._settings(
+        debug, _, origins, proxy_header, _, _, hsts_on = self._settings(
             LIFETRACKER_DEBUG="true",
             LIFETRACKER_CSRF_TRUSTED_ORIGINS="https://tax.example.com",
             LIFETRACKER_TRUST_X_FORWARDED_PROTO="1",
@@ -1512,6 +1513,7 @@ class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
         self.assertTrue(debug)
         self.assertEqual(origins, ["https://tax.example.com"])
         self.assertEqual(proxy_header, ("HTTP_X_FORWARDED_PROTO", "https"))
+        self.assertFalse(hsts_on)
 
 
 class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
