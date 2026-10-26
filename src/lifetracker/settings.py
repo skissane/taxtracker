@@ -158,6 +158,9 @@ if _env_bool("LIFETRACKER_TRUST_X_FORWARDED_PROTO", False):
 # Production is assumed to be HTTPS: don't send session/CSRF cookies over HTTP.
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
+# Browser HSTS lasts only when the app is served over HTTPS. Start with a small
+# value in production and keep it disabled while developing locally.
+SECURE_HSTS_SECONDS = 86400 if not DEBUG else 0
 
 
 # Application definition
