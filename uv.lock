@@ -449,7 +449,7 @@ screenshots = [
 
 [package.metadata]
 requires-dist = [
-    { name = "boto3", specifier = ">=1.43.111" },
+    { name = "boto3", specifier = ">=1.43.114" },
     { name = "click", specifier = ">=8.5.0" },
     { name = "django", specifier = ">=6.1.2" },
     { name = "django-google-sso", specifier = ">=10.0.0" },

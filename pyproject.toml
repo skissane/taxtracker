@@ -5,7 +5,7 @@ description = "Personal life admin tracker app, with tax and task tracking modul
 readme = "README.md"
 requires-python = "~=3.14.9"
 dependencies = [
-    "boto3>=1.43.111",
+    "boto3>=1.43.114",
     "click>=8.5.0",
     "django>=6.1.2",
     "django-google-sso>=10.0.0",
