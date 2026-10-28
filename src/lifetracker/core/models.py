@@ -2,7 +2,7 @@ import os
 import re
 from pathlib import Path
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import SuspiciousFileOperation, ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.storage import Storage
 from django.db import models
@@ -158,7 +158,8 @@ class DatabaseStorage(Storage):
     """Django storage backend that saves file content in the database."""
 
     _PREFIX = "db/"
-    _MAX_PK_CHARS = len(str((1 << 63) - 1))
+    # "db/<pk>/" with the largest BigAutoField pk.
+    _MAX_PREFIX_CHARS = len(f"{_PREFIX}{(1 << 63) - 1}/")
 
     def _open(self, name, mode="rb"):
         pk = self._name_to_pk(name)
@@ -196,25 +197,19 @@ class DatabaseStorage(Storage):
 
     def get_available_name(self, name, max_length=None):
         # Each save creates a new record so there are no name conflicts.
-        if not max_length:
-            return name
-
-        # The actual stored path is "db/<pk>/<filename>", so leave room for the
-        # fixed prefix (and the maximum integer primary key length) before
-        # truncating the bare filename.
-        reserved = len(self._PREFIX) + self._MAX_PK_CHARS + 1
-        effective_max_length = max_length - reserved
-        if effective_max_length <= 0:
-            return name[:max_length]
-        if len(name) <= effective_max_length:
-            return name
-
-        stem = Path(name).stem
-        suffix = Path(name).suffix
-        allowed = effective_max_length - len(suffix)
-        if allowed <= 0:
-            return name[:effective_max_length]
-        return stem[:allowed] + suffix
+        # _save returns "db/<pk>/<filename>", so leave room for that prefix with the longest pk.
+        if max_length:
+            max_length -= self._MAX_PREFIX_CHARS
+            if max_length <= 0:
+                raise SuspiciousFileOperation(
+                    f"max_length leaves no room for a filename after the {self._PREFIX}<pk>/ prefix"
+                )
+            if len(name) > max_length:
+                stem = Path(name).stem
+                suffix = Path(name).suffix
+                allowed = max_length - len(suffix)
+                name = stem[:allowed] + suffix if allowed > 0 else name[:max_length]
+        return name
 
     def _name_to_pk(self, name):
         # Expected format: "db/<pk>/<filename>"

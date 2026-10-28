@@ -30,7 +30,7 @@ from django.contrib import admin
 from django.contrib.auth.models import Permission, User
 from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.staticfiles import finders
-from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.core.exceptions import ImproperlyConfigured, SuspiciousFileOperation, ValidationError
 from django.core.files.base import ContentFile
 from django.core.management import CommandError, call_command
 from django.db import DatabaseError, IntegrityError, connection, transaction
@@ -834,18 +834,26 @@ class DatabaseStorageTests(TestCase):
     def test_get_available_name_short_name_unchanged(self):
         self.assertEqual(self.storage.get_available_name("short.txt", max_length=100), "short.txt")
 
-    def test_get_available_name_reserves_storage_prefix_space(self):
-        name = "a" * 90 + ".txt"
-        reserved = len(self.storage._PREFIX) + self.storage._MAX_PK_CHARS + 1
-        result = self.storage.get_available_name(name, max_length=100)
-        self.assertTrue(result.endswith(".txt"))
-        self.assertLessEqual(len(result), 100 - reserved)
+    def test_get_available_name_truncates_long_stem(self):
+        # Room is left for "db/<pk>/" with a 19-digit pk, the most a BigAutoField can have.
+        result = self.storage.get_available_name("a" * 90 + ".txt", max_length=100)
+        self.assertEqual(result, "a" * 73 + ".txt")
+        self.assertEqual(len(f"db/{(1 << 63) - 1}/{result}"), 100)
 
     def test_get_available_name_truncates_hard_when_suffix_too_long(self):
-        # allowed <= 0: suffix alone exceeds max_length, so we hard-truncate.
-        name = "a." + "b" * 30
-        result = self.storage.get_available_name(name, max_length=10)
-        self.assertEqual(result, name[:10])
+        # allowed <= 0: suffix alone exceeds the room left, so we hard-truncate.
+        name = "a." + "b" * 100
+        result = self.storage.get_available_name(name, max_length=100)
+        self.assertEqual(result, name[:77])
+
+    def test_get_available_name_rejects_max_length_without_room_for_prefix(self):
+        with self.assertRaises(SuspiciousFileOperation):
+            self.storage.get_available_name("short.txt", max_length=23)
+
+    def test_save_name_fits_max_length(self):
+        name = self.storage.save("a" * 200 + ".pdf", ContentFile(b"x"), max_length=100)
+        self.assertLessEqual(len(name), 100)
+        self.assertTrue(name.endswith(".pdf"))
 
     def test_name_to_pk_rejects_non_str(self):
         with self.assertRaises(ValueError):
