@@ -80,6 +80,9 @@ uv run pytest tests/taxtracker/tests.py::ItemModelTests::test_str_root
 # Run tests under coverage, print a report, and write coverage.xml and junit.xml (no minimum enforced)
 just coverage
 
+# Check patch coverage against the PR target branch (falls back to origin/master); run this before submitting a PR and try to cover all changed lines where the value of coverage is worth the extra test complexity
+just patch-coverage
+
 # Screenshot the admin login, index, backups, cloud backup list, idle watchdog, uptime, uptime day, client IPs and app icon pages, in light and dark mode, into screenshots/ (gitignored)
 just screenshots
 
