@@ -85,6 +85,10 @@ test:
 coverage:
     uv run --group dev pytest --cov=src/lifetracker --cov=scripts --cov-report=term --cov-report=xml --junitxml=junit.xml -o junit_family=legacy
 
+# Show patch coverage from coverage.xml against a base branch (or PR base)
+patch-coverage compare_branch="":
+    COMPARE_BRANCH="{{compare_branch}}"; compare_branch="${COMPARE_BRANCH:-${GITHUB_BASE_REF:+origin/$GITHUB_BASE_REF}}"; compare_branch="${compare_branch:-origin/master}"; uv run --group dev diff-cover coverage.xml --compare-branch="$compare_branch"
+
 # The screenshot tests live outside `testpaths`, so plain `pytest` (and
 # `just test`/`just coverage`) never collects them; `-n 0` because two tests
 # don't justify a worker per core. `playwright install` is a quick no-op once
