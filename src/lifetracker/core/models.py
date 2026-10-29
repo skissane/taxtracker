@@ -2,7 +2,7 @@ import os
 import re
 from pathlib import Path
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import SuspiciousFileOperation, ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.storage import Storage
 from django.db import models
@@ -158,6 +158,8 @@ class DatabaseStorage(Storage):
     """Django storage backend that saves file content in the database."""
 
     _PREFIX = "db/"
+    # "db/<pk>/" with the largest BigAutoField pk.
+    _MAX_PREFIX_CHARS = len(f"{_PREFIX}{(1 << 63) - 1}/")
 
     def _open(self, name, mode="rb"):
         pk = self._name_to_pk(name)
@@ -195,11 +197,18 @@ class DatabaseStorage(Storage):
 
     def get_available_name(self, name, max_length=None):
         # Each save creates a new record so there are no name conflicts.
-        if max_length and len(name) > max_length:
-            stem = Path(name).stem
-            suffix = Path(name).suffix
-            allowed = max_length - len(suffix)
-            name = stem[:allowed] + suffix if allowed > 0 else name[:max_length]
+        # _save returns "db/<pk>/<filename>", so leave room for that prefix with the longest pk.
+        if max_length:
+            max_length -= self._MAX_PREFIX_CHARS
+            if max_length <= 0:
+                raise SuspiciousFileOperation(
+                    f"max_length leaves no room for a filename after the {self._PREFIX}<pk>/ prefix"
+                )
+            if len(name) > max_length:
+                stem = Path(name).stem
+                suffix = Path(name).suffix
+                allowed = max_length - len(suffix)
+                name = stem[:allowed] + suffix if allowed > 0 else name[:max_length]
         return name
 
     def _name_to_pk(self, name):
