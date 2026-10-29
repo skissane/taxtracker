@@ -151,6 +151,16 @@ class FinancialYearModelTests(TestCase):
 
         self.assertEqual(self.fy.status_history.count(), 1)
 
+    def test_refresh_from_db_resets_loaded_status(self):
+        fy = FinancialYear.objects.get(pk=self.fy.pk)
+        FinancialYear.objects.filter(pk=fy.pk).update(status=FinancialYear.STATUS_SUBMITTED)
+
+        fy.refresh_from_db()
+        self.assertEqual(fy._loaded_status, FinancialYear.STATUS_SUBMITTED)
+        fy.save()
+
+        self.assertEqual(fy.status_history.count(), 1)
+
     def test_ordering(self):
         fy2025 = FinancialYear.objects.create(year=2025)
         fy2023 = FinancialYear.objects.create(year=2023)

@@ -57,6 +57,11 @@ class FinancialYear(models.Model):
         instance._loaded_status = instance.status
         return instance
 
+    def refresh_from_db(self, using=None, fields=None, from_queryset=None):
+        super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        if fields is None or "status" in fields:
+            self._loaded_status = self.status
+
     @property
     def start_date(self):
         return datetime.date(self.year - 1, 7, 1)
