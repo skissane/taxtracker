@@ -27,6 +27,17 @@ def test_extract_pdfs_from_zip():
     assert extract_pdfs_from_zip(zip_bytes) == ([("statement.pdf", PDF_MAGIC + b"a")], ["notes.txt", "fake.pdf"])
 
 
+def test_extract_pdfs_from_zip_skips_corrupt_deflate_data():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("corrupt.pdf", PDF_MAGIC + bytes(range(256)) * 50)
+        zf.writestr("good.pdf", PDF_MAGIC + b"a")
+    zip_bytes = bytearray(buf.getvalue())
+    data_start = zip_bytes.find(b"PK\x03\x04") + 30 + len("corrupt.pdf")
+    zip_bytes[data_start : data_start + 20] = b"\xff" * 20
+    assert extract_pdfs_from_zip(bytes(zip_bytes)) == ([("good.pdf", PDF_MAGIC + b"a")], ["corrupt.pdf"])
+
+
 def test_extract_pdfs_from_zip_raises_bad_zip_file():
     with pytest.raises(zipfile.BadZipFile):
         extract_pdfs_from_zip(b"not a zip")

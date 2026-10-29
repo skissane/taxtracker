@@ -355,7 +355,7 @@ Both ZIPs are built in a `SpooledTemporaryFile` (in memory up to `_ZIP_SPOOL_MAX
 `taxtracker/archives.py` dispatches on file extension:
 - **`.har`** — Fidelity HAR: extracts PDFs embedded as base64 `fileContent` in JSON responses from `netbenefitsww.fidelity.com` activity URLs.
   This one is taxtracker's own.
-- **`.zip`** — `core/archives.py`'s `extract_pdfs_from_zip`, generic so other modules can reuse it: extracts `.pdf`/`.PDF` files only; non-PDF entries, PDFs over `MAX_ZIP_PDF_MEMBER_BYTES` (20 MiB) or past `MAX_ZIP_PDF_TOTAL_BYTES` (100 MiB in all) and ones neither stored nor deflated are reported as skipped.
+- **`.zip`** — `core/archives.py`'s `extract_pdfs_from_zip`, generic so other modules can reuse it: extracts `.pdf`/`.PDF` files only; non-PDF entries, PDFs over `MAX_ZIP_PDF_MEMBER_BYTES` (20 MiB) or past `MAX_ZIP_PDF_TOTAL_BYTES` (100 MiB in all) and ones neither stored nor deflated, or whose data is corrupt, are reported as skipped.
   It raises `zipfile.BadZipFile`, which taxtracker turns into its `UnsupportedArchiveError`.
 
 `core/archives.py`'s `select_importable_files` drops extracted files whose basename is already attached (or earlier in the same archive); `ItemAdmin`'s import uses it, while `ReceivedDocumentAdmin`'s checks names per FY itself.
