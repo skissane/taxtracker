@@ -115,7 +115,7 @@ def extract_pdfs_from_har(
 
         file_content_b64 = _field(payload, "fileContent", str)
         if not file_content_b64:
-            skip(url, "'fileContent' missing from response")
+            skip(url, "'fileContent' key missing in response")
             continue
 
         try:

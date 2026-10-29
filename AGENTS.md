@@ -354,7 +354,7 @@ Both ZIPs are built in a `SpooledTemporaryFile` (in memory up to `_ZIP_SPOOL_MAX
 
 `archives.py` dispatches on file extension:
 - **`.har`** — Fidelity HAR: extracts PDFs embedded as base64 `fileContent` in JSON responses from `netbenefitsww.fidelity.com` activity URLs.
-  The extraction is `taxtracker/fidelity_har.py`'s `extract_pdfs_from_har` (no Django imports), which the CLI's `extract-fidelity-pdfs` also uses, printing a warning for each entry it skips (`on_skip`), which the archive import skips silently.
+  The extraction is `taxtracker/fidelity_har.py`'s `extract_pdfs_from_har` (no Django imports), which the CLI's `extract-fidelity-pdfs` also uses, printing a warning via `on_skip` for each matching Fidelity entry it cannot extract; the archive import skips those silently.
 - **`.zip`** — extracts `.pdf`/`.PDF` files only; non-PDF entries are reported as skipped.
 
 ## Secret key
