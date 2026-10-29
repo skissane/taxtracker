@@ -58,6 +58,7 @@ class FinancialYear(models.Model):
         return instance
 
     def refresh_from_db(self, using=None, fields=None, from_queryset=None):
+        fields = None if fields is None else set(fields)
         super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
         if fields is None or "status" in fields:
             self._loaded_status = self.status
