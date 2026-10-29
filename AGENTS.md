@@ -108,7 +108,7 @@ No frontend framework.
 
 **Package layout:** `src/lifetracker/` is the Django project (settings, urls).
 It contains three apps:
-- `src/lifetracker/core/` (label `core`) — generic infrastructure any future module can reuse: the file-type registry (`FileType`/`MimeType`/`FileExtension`), DB-backed file storage (`DBStoredFile`/`DatabaseStorage`) and the file-serving admin view, shared attachment behaviour (`core/attachments.py`: filename date/file-type autofill and stored-file cleanup on delete) and `FlexibleDateField` (`core/forms.py`), shared tree behaviour for self-referential models (`core/trees.py`'s `TreeNodeMixin`: pending/done status choices and `is_done`, the `A > B > C` path for `__str__` and `get_folder_path()`, and parent cycle detection for `clean()`), whole-database backups (DB download and cloud backup, `core/backup.py`, with `CloudBackupStatus`), the idle watchdog (`core/idle_watchdog.py`) and the uptime log it writes (`core/uptime_log.py`; see Deployment for both), the client IP record (`core/client_ips.py`; see Client IPs), the JWT cookie for the authenticating front proxy and that proxy's config (`core/jwt_auth.py`, `core/auth_whitelist.py` and `core/envoy_config.py`; see Auth front layer), a client for the Fly Machines API over the Machine's `/.fly/api` socket (`core/fly_api.py`, no Django imports; see Deployment), and `core/admin_pages.css` for custom admin pages.
+- `src/lifetracker/core/` (label `core`) — generic infrastructure any future module can reuse: the file-type registry (`FileType`/`MimeType`/`FileExtension`), DB-backed file storage (`DBStoredFile`/`DatabaseStorage`) and the file-serving admin view, shared attachment behaviour (`core/attachments.py`: filename date/file-type autofill and stored-file cleanup on delete) and `FlexibleDateField` (`core/forms.py`), ZIP-of-PDFs archive import and duplicate-filename skipping (`core/archives.py`; see Archive import formats), shared tree behaviour for self-referential models (`core/trees.py`'s `TreeNodeMixin`: pending/done status choices and `is_done`, the `A > B > C` path for `__str__` and `get_folder_path()`, and parent cycle detection for `clean()`), whole-database backups (DB download and cloud backup, `core/backup.py`, with `CloudBackupStatus`), the idle watchdog (`core/idle_watchdog.py`) and the uptime log it writes (`core/uptime_log.py`; see Deployment for both), the client IP record (`core/client_ips.py`; see Client IPs), the JWT cookie for the authenticating front proxy and that proxy's config (`core/jwt_auth.py`, `core/auth_whitelist.py` and `core/envoy_config.py`; see Auth front layer), a client for the Fly Machines API over the Machine's `/.fly/api` socket (`core/fly_api.py`, no Django imports; see Deployment), and `core/admin_pages.css` for custom admin pages.
 - `src/lifetracker/taxtracker/` (label `taxtracker`) — the tax-tracking module: `FinancialYear`/`Item`/`Attachment`, archive import, and their admin views/templates.
   This was the original module; more modules (banking, portfolio, insurance, etc.) may be added as siblings of `taxtracker` under `lifetracker` in future.
 - `src/lifetracker/tasktracker/` (label `tasktracker`) — the task-tracking module: `TaskType`/`Task`/`TaskAttachment`, with plain admin views (no custom templates).
@@ -352,10 +352,13 @@ Both ZIPs are built in a `SpooledTemporaryFile` (in memory up to `_ZIP_SPOOL_MAX
 
 ## Archive import formats
 
-`archives.py` dispatches on file extension:
+`taxtracker/archives.py` dispatches on file extension:
 - **`.har`** — Fidelity HAR: extracts PDFs embedded as base64 `fileContent` in JSON responses from `netbenefitsww.fidelity.com` activity URLs.
   The extraction is `taxtracker/fidelity_har.py`'s `extract_pdfs_from_har` (no Django imports), which the CLI's `extract-fidelity-pdfs` also uses, printing a warning via `on_skip` for each matching Fidelity entry it cannot extract; the archive import skips those silently.
-- **`.zip`** — extracts `.pdf`/`.PDF` files only; non-PDF entries are reported as skipped.
+- **`.zip`** — `core/archives.py`'s `extract_pdfs_from_zip`, generic so other modules can reuse it: extracts `.pdf`/`.PDF` files only; non-PDF entries, PDFs over `MAX_ZIP_PDF_MEMBER_BYTES` (20 MiB) or past `MAX_ZIP_PDF_TOTAL_BYTES` (100 MiB in all) and ones neither stored nor deflated, or whose data is corrupt, are reported as skipped.
+  It raises `zipfile.BadZipFile`, which taxtracker turns into its `UnsupportedArchiveError`.
+
+`core/archives.py`'s `select_importable_files` drops extracted files whose basename is already attached (or earlier in the same archive); `ItemAdmin`'s import uses it, while `ReceivedDocumentAdmin`'s checks names per FY itself.
 
 ## Secret key
 

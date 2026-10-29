@@ -18,6 +18,7 @@ from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
 
+from lifetracker.core.archives import select_importable_files
 from lifetracker.core.attachments import extract_date_from_filename
 from lifetracker.core.models import DBStoredFile
 from lifetracker.core.trees import CYCLE_MARKER
@@ -109,19 +110,6 @@ def _existing_attachment_names(**filters):
         for file_name in Attachment.objects.filter(**filters).values_list("file", flat=True)
         if file_name
     }
-
-
-def _select_importable_files(extracted, existing_names, duplicate_names):
-    """Return archive files not already present, appending duplicates to *duplicate_names*."""
-    importable = []
-    for pdf_filename, pdf_bytes in extracted:
-        base_name = Path(pdf_filename).name
-        if base_name in existing_names:
-            duplicate_names.append(base_name)
-            continue
-        importable.append((base_name, pdf_bytes))
-        existing_names.add(base_name)
-    return importable
 
 
 def _save_imported_attachment(attachment, filename, file_bytes):
@@ -318,7 +306,7 @@ class ItemAdmin(admin.ModelAdmin):
             duplicate_names: list[str] = []
             if extracted:
                 existing_names = _existing_attachment_names(item=item)
-                importable = _select_importable_files(extracted, existing_names, duplicate_names)
+                importable = select_importable_files(extracted, existing_names, duplicate_names)
 
                 with transaction.atomic():
                     for pdf_filename, pdf_bytes in importable:

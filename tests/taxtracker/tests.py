@@ -20,7 +20,6 @@ from lifetracker.taxtracker.admin import (
     FinancialYearAdmin,
     _adjust_notes_headings,
     _attachment_date_warning,
-    _select_importable_files,
 )
 from lifetracker.taxtracker.archives import (
     UnsupportedArchiveError,
@@ -443,22 +442,6 @@ class CopyItemsTests(TestCase):
             list(new_fy.items.order_by("order", "title").values_list("title", flat=True)),
             ["Child", "Root"],
         )
-
-
-class ArchiveImportHelperTests(TestCase):
-    def test_select_importable_files_skips_duplicates(self):
-        existing = {"invoice.pdf"}
-        duplicate_names = []
-
-        importable = _select_importable_files(
-            [("invoice.pdf", b"duplicate"), ("new.pdf", b"new")],
-            existing,
-            duplicate_names,
-        )
-
-        self.assertEqual(importable, [("new.pdf", b"new")])
-        self.assertEqual(duplicate_names, ["invoice.pdf"])
-        self.assertEqual(existing, {"invoice.pdf", "new.pdf"})
 
 
 class ReceivedDocumentAdminViewTests(TestCase):
@@ -2064,7 +2047,7 @@ class ArchiveExtractorTests(TestCase):
 
     def test_zip_skips_pdf_over_member_size_limit(self):
         zip_bytes = _make_zip_archive([("too-big.pdf", PDF_MAGIC + b"x" * 20)])
-        with mock.patch("lifetracker.taxtracker.archives.MAX_ZIP_PDF_MEMBER_BYTES", 10):
+        with mock.patch("lifetracker.core.archives.MAX_ZIP_PDF_MEMBER_BYTES", 10):
             extracted, skipped = extract_from_archive_with_skips(zip_bytes, "export.zip")
         self.assertEqual(extracted, [])
         self.assertEqual(skipped, ["too-big.pdf"])
@@ -2078,7 +2061,7 @@ class ArchiveExtractorTests(TestCase):
                 ("second.pdf", second_pdf),
             ]
         )
-        with mock.patch("lifetracker.taxtracker.archives.MAX_ZIP_PDF_TOTAL_BYTES", len(first_pdf)):
+        with mock.patch("lifetracker.core.archives.MAX_ZIP_PDF_TOTAL_BYTES", len(first_pdf)):
             extracted, skipped = extract_from_archive_with_skips(zip_bytes, "export.zip")
         self.assertEqual([name for name, _ in extracted], ["first.pdf"])
         self.assertEqual(skipped, ["second.pdf"])
@@ -2106,11 +2089,12 @@ class ArchiveExtractorTests(TestCase):
         struct.pack_into("<I", zip_bytes, zip_bytes.find(b"PK\x01\x02") + 24, 100)
         tracemalloc.start()
         try:
-            with self.assertRaises(UnsupportedArchiveError):
-                extract_from_archive_with_skips(bytes(zip_bytes), "export.zip")
+            # Reading only the claimed 100 bytes fails the CRC check, so the entry is skipped.
+            result = extract_from_archive_with_skips(bytes(zip_bytes), "export.zip")
             _, peak = tracemalloc.get_traced_memory()
         finally:
             tracemalloc.stop()
+        self.assertEqual(result, ([], ["bomb.pdf"]))
         self.assertLess(peak, 4 * 1024 * 1024)
 
     def test_invalid_json_raises_unsupported(self):
