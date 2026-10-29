@@ -398,7 +398,7 @@ class CopyItemsTests(TestCase):
         )
 
 
-class InvoiceImportHelperTests(TestCase):
+class ArchiveImportHelperTests(TestCase):
     def test_select_importable_files_skips_duplicates(self):
         existing = {"invoice.pdf"}
         duplicate_names = []
