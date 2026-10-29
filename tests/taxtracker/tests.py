@@ -2,6 +2,8 @@ import base64
 import datetime
 import io
 import json
+import struct
+import tracemalloc
 import zipfile
 from unittest import mock
 
@@ -2060,6 +2062,57 @@ class ArchiveExtractorTests(TestCase):
         _, skipped = extract_from_archive_with_skips(zip_bytes, "export.zip")
         self.assertEqual(skipped, ["ignored.txt"])
 
+    def test_zip_skips_pdf_over_member_size_limit(self):
+        zip_bytes = _make_zip_archive([("too-big.pdf", PDF_MAGIC + b"x" * 20)])
+        with mock.patch("lifetracker.taxtracker.archives.MAX_ZIP_PDF_MEMBER_BYTES", 10):
+            extracted, skipped = extract_from_archive_with_skips(zip_bytes, "export.zip")
+        self.assertEqual(extracted, [])
+        self.assertEqual(skipped, ["too-big.pdf"])
+
+    def test_zip_skips_pdf_over_total_size_limit(self):
+        first_pdf = PDF_MAGIC + b"x" * 5
+        second_pdf = PDF_MAGIC + b"y" * 5
+        zip_bytes = _make_zip_archive(
+            [
+                ("first.pdf", first_pdf),
+                ("second.pdf", second_pdf),
+            ]
+        )
+        with mock.patch("lifetracker.taxtracker.archives.MAX_ZIP_PDF_TOTAL_BYTES", len(first_pdf)):
+            extracted, skipped = extract_from_archive_with_skips(zip_bytes, "export.zip")
+        self.assertEqual([name for name, _ in extracted], ["first.pdf"])
+        self.assertEqual(skipped, ["second.pdf"])
+
+    def test_zip_skips_pdf_not_stored_or_deflated(self):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, mode="w") as zf:
+            zf.writestr("deflated.pdf", PDF_MAGIC + b"a", compress_type=zipfile.ZIP_DEFLATED)
+            zf.writestr("bzip2.pdf", PDF_MAGIC + b"b", compress_type=zipfile.ZIP_BZIP2)
+            zf.writestr("lzma.pdf", PDF_MAGIC + b"c", compress_type=zipfile.ZIP_LZMA)
+        extracted, skipped = extract_from_archive_with_skips(buf.getvalue(), "export.zip")
+        self.assertEqual([name for name, _ in extracted], ["deflated.pdf"])
+        self.assertEqual(skipped, ["bzip2.pdf", "lzma.pdf"])
+
+    def test_zip_understated_member_size_does_not_exhaust_memory(self):
+        # 32 MiB of zeros compresses to about 32 KiB; the headers then claim it's only 100 bytes.
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            with zf.open("bomb.pdf", "w") as member:
+                member.write(PDF_MAGIC)
+                for _ in range(32):
+                    member.write(bytes(1024 * 1024))
+        zip_bytes = bytearray(buf.getvalue())
+        struct.pack_into("<I", zip_bytes, zip_bytes.find(b"PK\x03\x04") + 22, 100)
+        struct.pack_into("<I", zip_bytes, zip_bytes.find(b"PK\x01\x02") + 24, 100)
+        tracemalloc.start()
+        try:
+            with self.assertRaises(UnsupportedArchiveError):
+                extract_from_archive_with_skips(bytes(zip_bytes), "export.zip")
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 4 * 1024 * 1024)
+
     def test_invalid_json_raises_unsupported(self):
         with self.assertRaises(UnsupportedArchiveError):
             extract_from_archive(b"not json at all", "export.har")
@@ -2250,7 +2303,7 @@ class ImportArchiveViewTests(TestCase):
             follow=True,
         )
         self.assertContains(response, "Imported 2 attachment(s)")
-        self.assertContains(response, "Skipped 1 non-PDF file(s): ignored.txt")
+        self.assertContains(response, "Skipped 1 non-PDF, too large or unreadable file(s): ignored.txt")
         self.assertTrue(Attachment.objects.filter(item=self.item, file__endswith="/statement.pdf").exists())
         self.assertTrue(Attachment.objects.filter(item=self.item, file__endswith="/report.pdf").exists())
 
@@ -2401,7 +2454,7 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
         upload.name = "archive.zip"
         response = self.client.post(self._import_url(), {"archive": upload}, follow=True)
         self.assertContains(response, "Imported 1 received document(s)")
-        self.assertContains(response, "Skipped 1 non-PDF file(s): ignored.txt")
+        self.assertContains(response, "Skipped 1 non-PDF, too large or unreadable file(s): ignored.txt")
 
     def test_post_zip_skips_pdf_without_year_prefix(self):
         zip_bytes = _make_zip_archive(
