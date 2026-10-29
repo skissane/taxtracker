@@ -102,21 +102,50 @@ def _find_equivalent_item(path_signature, target_fy):
     return current
 
 
+def _existing_attachment_names(**filters):
+    """Return the basename of every stored file name matching *filters*."""
+    return {
+        Path(file_name).name
+        for file_name in Attachment.objects.filter(**filters).values_list("file", flat=True)
+        if file_name
+    }
+
+
+def _select_importable_files(extracted, existing_names, duplicate_names):
+    """Return archive files not already present, appending duplicates to *duplicate_names*."""
+    importable = []
+    for pdf_filename, pdf_bytes in extracted:
+        base_name = Path(pdf_filename).name
+        if base_name in existing_names:
+            duplicate_names.append(base_name)
+            continue
+        importable.append((base_name, pdf_bytes))
+        existing_names.add(base_name)
+    return importable
+
+
+def _save_imported_attachment(attachment, filename, file_bytes):
+    """Persist an extracted attachment byte stream to the configured storage."""
+    attachment.file.save(filename, io.BytesIO(file_bytes), save=False)
+    attachment.save()
+
+
 # ---------------------------------------------------------------------------
 # Inlines
 # ---------------------------------------------------------------------------
 
 
-class AttachmentInline(admin.TabularInline):
+class AttachmentInlineBase(admin.TabularInline):
     model = Attachment
     form = AttachmentForm
     extra = 1
     fields = ("title", "date", "date_warning", "file_type", "file", "change_link")
     readonly_fields = ("date_warning", "change_link")
     autocomplete_fields = ("file_type",)
+    select_related_path = "item__year"
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related("item__year")
+        return super().get_queryset(request).select_related(self.select_related_path)
 
     @admin.display(description="")
     def date_warning(self, obj):
@@ -130,28 +159,13 @@ class AttachmentInline(admin.TabularInline):
         return format_html('<a href="{}">Edit</a>', url)
 
 
-class ReceivedAttachmentInline(admin.TabularInline):
-    model = Attachment
+class AttachmentInline(AttachmentInlineBase):
+    select_related_path = "item__year"
+
+
+class ReceivedAttachmentInline(AttachmentInlineBase):
     fk_name = "received_document"
-    form = AttachmentForm
-    extra = 1
-    fields = ("title", "date", "date_warning", "file_type", "file", "change_link")
-    readonly_fields = ("date_warning", "change_link")
-    autocomplete_fields = ("file_type",)
-
-    def get_queryset(self, request):
-        return super().get_queryset(request).select_related("received_document__year")
-
-    @admin.display(description="")
-    def date_warning(self, obj):
-        return _attachment_date_warning(obj)
-
-    @admin.display(description="Edit")
-    def change_link(self, obj):
-        if not obj.pk:
-            return "—"
-        url = reverse("admin:taxtracker_attachment_change", args=[obj.pk])
-        return format_html('<a href="{}">Edit</a>', url)
+    select_related_path = "received_document__year"
 
 
 class ChildItemInline(admin.TabularInline):
@@ -285,19 +299,8 @@ class ItemAdmin(admin.ModelAdmin):
 
             duplicate_names: list[str] = []
             if extracted:
-                existing_names = {
-                    Path(file_name).name
-                    for file_name in Attachment.objects.filter(item=item).values_list("file", flat=True)
-                    if file_name
-                }
-                importable: list[tuple[str, bytes]] = []
-                for pdf_filename, pdf_bytes in extracted:
-                    base_name = Path(pdf_filename).name
-                    if base_name in existing_names:
-                        duplicate_names.append(base_name)
-                        continue
-                    importable.append((base_name, pdf_bytes))
-                    existing_names.add(base_name)
+                existing_names = _existing_attachment_names(item=item)
+                importable = _select_importable_files(extracted, existing_names, duplicate_names)
 
                 with transaction.atomic():
                     for pdf_filename, pdf_bytes in importable:
@@ -306,12 +309,7 @@ class ItemAdmin(admin.ModelAdmin):
                         # but don't yet write the Attachment row; att.save()
                         # below will auto-extract the title, date, and file_type
                         # from the filename before persisting to the DB.
-                        att.file.save(
-                            pdf_filename,
-                            io.BytesIO(pdf_bytes),
-                            save=False,
-                        )
-                        att.save()
+                        _save_imported_attachment(att, pdf_filename, pdf_bytes)
                 if importable:
                     messages.success(
                         request,
@@ -591,13 +589,7 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
                             missing_fy_names.append(f"{base_name} (FY{year_num})")
                             continue
                         if year_num not in existing_names_by_year:
-                            existing_names_by_year[year_num] = {
-                                Path(file_name).name
-                                for file_name in Attachment.objects.filter(received_document__year=fy).values_list(
-                                    "file", flat=True
-                                )
-                                if file_name
-                            }
+                            existing_names_by_year[year_num] = _existing_attachment_names(received_document__year=fy)
                         existing_names = existing_names_by_year[year_num]
                         if base_name in existing_names:
                             duplicate_names.append(base_name)
@@ -613,8 +605,7 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
                         # but don't yet write the Attachment row; att.save()
                         # below will auto-extract the title and file_type from
                         # the filename before persisting to the DB.
-                        att.file.save(base_name, io.BytesIO(pdf_bytes), save=False)
-                        att.save()
+                        _save_imported_attachment(att, base_name, pdf_bytes)
                         existing_names.add(base_name)
                         created_count += 1
 
