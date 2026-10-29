@@ -12,7 +12,7 @@ Keep to this when editing them: put each new sentence on its own line, don't rew
 
 ## Commands
 
-CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `justfile-check`, `coverage`, `screenshots`, `screenshots-post`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
+CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `justfile-check`, `coverage`, `patch-coverage`, `patch-coverage-post`, `screenshots`, `screenshots-post`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
 `just ci` drifts from `ci.yml` if the workflow changes without a matching justfile edit; `run_workflow_local.py` avoids that by parsing the workflow YAML directly and running its `run:` steps as written (see its docstring for what it does and doesn't support).
 After `just coverage` runs, CI uploads `coverage.xml` to Codecov (`codecov/codecov-action`), and also uploads the `junit.xml` test results it writes for Codecov Test Analytics (`report_type: test_results`, even if the tests failed; not `codecov/test-results-action`, which is deprecated); these steps need a `CODECOV_TOKEN` repo secret from codecov.io and are skipped by `run_workflow_local.py` since they're `uses:` steps.
 Codecov works out a PR's comparison with its base commit's report only when the PR's own upload is processed, and never redoes it when the base's report arrives later, so a stacked PR rebased onto `master` as its parent merges (whose CI races `master`'s, which uploads last as it saves the Docker image first) got "Please upload report for BASE".
@@ -20,7 +20,7 @@ So on PRs, the `test` job first runs `scripts/wait_for_base_coverage.py` (stdlib
 It never fails the job, only prints a warning annotation when it gives up, as a broken `master` mustn't fail the required `test` check of the PR fixing it.
 `codecov.yml` sets `if_not_found: failure` on the project status, so then `codecov/project` fails (it passes by default); re-run the PR's `test` job once the base has uploaded.
 That only applies when Codecov knows the base commit but has no report for it; for a commit it has never heard of, Codecov compares with the newest earlier commit on the base branch that passed CI instead (`allow_pseudo_compare`, which despite Codecov's docs affects only its web UI, not the statuses).
-`ci.yml` has seven jobs, `test`, `screenshots` and `post-screenshots` (see Screenshots), `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment); `run_workflow_local.py` runs the first job in the file unless given `--job`, so keep `test` first.
+`ci.yml` has eight jobs, `test`, `post-patch-coverage` (see Patch coverage), `screenshots` and `post-screenshots` (see Screenshots), `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment); `run_workflow_local.py` runs the first job in the file unless given `--job`, so keep `test` first.
 Don't run `--job dependabot-fix`, `--job publish` or `--job deploy` locally: it doesn't evaluate `if:`, so it would push commits to the current branch, push to GHCR or deploy to production.
 
 **PR Fixes:** `.github/workflows/fix.yml` (issue #254) is run by hand (`workflow_dispatch`) on an open PR's branch.
@@ -82,6 +82,9 @@ just coverage
 # Check patch coverage of coverage.xml against the PR target branch ($GITHUB_BASE_REF, else origin/master); run `just coverage` first, as it reads whatever coverage.xml is there, and it exits 0 even with lines missing, so read its report; run this before submitting a PR and try to cover all changed lines where the value of coverage is worth the extra test complexity
 just patch-coverage
 
+# Post patch-coverage.md (from `just patch-coverage '' --format markdown:patch-coverage.md`) to PR 123 as a comment, or update it (as gh's logged-in user)
+just patch-coverage-post 123
+
 # Screenshot the admin login, index, backups, cloud backup list, idle watchdog, uptime, uptime day, client IPs and app icon pages, in light and dark mode, into screenshots/ (gitignored)
 just screenshots
 
@@ -127,13 +130,22 @@ Coverage measures `scripts` alongside `src/lifetracker`.
 Run via `pytest` (using `pytest-django`, configured in `pyproject.toml`'s `[tool.pytest.ini_options]` with `testpaths = ["tests"]`), parallelised across CPU cores by `pytest-xdist` (`-n auto`, set as a default in `addopts`).
 `manage.py test tests.core tests.taxtracker tests.tasktracker tests.cli tests.scripts` still works as an unparallelised fallback, referencing these as `tests.*` labels rather than the `lifetracker.*` app labels.
 
+**Patch coverage:** `just patch-coverage [<base>] [<diff-cover option>...]` runs diff-cover over `coverage.xml` against `<base>` (default `origin/$GITHUB_BASE_REF`, else `origin/master`), passing it any further arguments.
+On a PR, the `test` job runs it after the tests, as `just patch-coverage "origin/<base>" --format markdown:patch-coverage.md`, and uploads `patch-coverage.md` as a `patch-coverage` workflow artifact (kept 14 days); both steps are `continue-on-error`, as the report is informational and `codecov/patch` stays the gate.
+Then `post-patch-coverage` (once `test` has finished, whether it succeeded or failed, but only if the artifact is there) runs `just patch-coverage-post` (`scripts/post_patch_coverage.py`, run like `post_screenshots.py`), which posts the report as a `github-actions[bot]` PR comment, so it can be read without Codecov (whose comment arrives late, says little and links to a site agents may not reach).
+It works like the screenshot comment: found by a hidden `<!-- lifetracker-patch-coverage -->` marker and edited in place, nothing posted unless `--commit` is still the PR's head, a per-PR `concurrency` group, and skipped for fork PRs and Dependabot.
+It needs only `GITHUB_TOKEN` (`pull-requests: write`), no secret, and installs nothing.
+The script moves diff-cover's headings down a level to nest under the comment's title, and turns its per-file and summary lists into tables, parsing the lines its `markdown_coverage_report.md` template writes before the per-file snippets.
+It fails, posting nothing, if they're in any other shape, and `PatchCoverageRealDiffCoverTests` runs it on reports from the installed diff-cover, so a diff-cover upgrade that changes the format fails the `test` job, Dependabot's PR included (which `post-patch-coverage` skips).
+A report too long for a comment (65,536 characters) is cut at `MAX_BODY_CHARS`, closing any code block the cut leaves open, with a note pointing at the artifact.
+
 **Screenshots:** `screenshot_tests/` holds Playwright tests that drive a headless Chromium against pytest-django's `live_server` (empty test DB) and save full-page PNGs to the gitignored `screenshots/` directory (each screen as `<name>-light.png` and `<name>-dark.png`), for eyeballing UI changes.
 `just screenshots` sets `LIFETRACKER_COMMIT_ID` to `git rev-parse HEAD` unless it's already set, so the admin header shows the commit; the `screenshots` CI job sets it to the PR's head commit (`github.event.pull_request.head.sha`, falling back to `github.sha` off PRs), since on a PR `actions/checkout` checks out a merge commit.
 The tests are run by `just screenshots` (which also runs `playwright install chromium`): they're outside `testpaths`, so `pytest`, `just coverage` and the `test` job never collect or measure them, and Playwright is in its own `screenshots` dependency group, which only the `screenshots` CI job installs.
 That job (which first runs `playwright install chromium` as a step of its own, without `--with-deps`, as the runner image already has Chromium's system libraries and installing them with apt was sometimes slowed to minutes by the Ubuntu mirror) runs `just screenshots` and uploads `screenshots/*.png` as a `screenshots` workflow artifact (kept 14 days), downloadable from the run's summary page.
 Like `test`, it waits on `dependabot-fix`.
 They assert nothing beyond the pages loading.
-On a PR, once it succeeds, `post-screenshots` downloads that artifact and runs `just screenshots-post` (`scripts/post_screenshots.py`, stdlib-only, run with `uv run --no-project`).
+On a PR, once it succeeds, `post-screenshots` downloads that artifact and runs `just screenshots-post` (`scripts/post_screenshots.py`, stdlib-only, run with `uv run --no-project` as `python -m scripts.post_screenshots`, so it can import `scripts/github_comments.py`, which it shares with `post_patch_coverage.py`).
 It uploads each PNG as a user attachment, then writes one `github-actions[bot]` PR comment embedding them, editing the previous one in place if there is one (found by a hidden `<!-- lifetracker-screenshots -->` marker and the `--author` login).
 Given `--commit` (CI passes the PR's head commit), it first checks that commit is still the PR's head, and otherwise posts nothing and exits 0: the job's per-PR `concurrency` group only stops two posts running at once, not an older commit's slow run posting after a newer one's, which would overwrite newer screenshots with stale ones.
 The upload uses the undocumented `POST https://uploads.github.com/user-attachments/assets` endpoint, sending the same request `gh ... --attach` does (cli/cli `internal/attachments/client.go`), which only accepts user tokens, not installation tokens such as `GITHUB_TOKEN`.

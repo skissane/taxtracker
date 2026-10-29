@@ -96,6 +96,25 @@ jobs:
           files: junit.xml
           report_type: test_results
 
+      # Kept for post-patch-coverage to post to the PR, for reading without
+      # Codecov. Informational only, so it never fails the job: codecov/patch
+      # is still the gate. The base is there, as checkout fetched every branch.
+      - name: Report patch coverage
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: just patch-coverage "origin/$BASE_REF" --format markdown:patch-coverage.md
+
+      - name: Upload patch coverage report
+        if: github.event_name == 'pull_request' && hashFiles('patch-coverage.md') != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: patch-coverage
+          path: patch-coverage.md
+          retention-days: 14
+
       - name: Build Docker image
         run: just docker-build
 
@@ -251,6 +270,60 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         # GITHUB_TOKEN can't look up its own login, so name it.
         run: just screenshots-post "$PR_NUMBER" --commit "$HEAD_SHA" --run-url "$RUN_URL" --author 'github-actions[bot]'
+
+  # Post the patch-coverage artifact (diff-cover's Markdown report) to the PR
+  # as a github-actions[bot] comment, or edit the one posted before, so it can
+  # be read without Codecov. Runs whether or not test then failed (e.g. on
+  # the Docker smoke test), but only if test uploaded the report. Skipped, and
+  # queued per PR, like post-screenshots, and likewise posts only if HEAD_SHA is
+  # still the PR's head. Needs no secrets: it runs the PR branch's stdlib-only
+  # script with `uv run --no-project`, installing nothing.
+  post-patch-coverage:
+    needs: test
+    if: ${{ !cancelled() && (needs.test.result == 'success' || needs.test.result == 'failure') && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: post-patch-coverage-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+
+      - name: Set up Python
+        run: uv python install 3.14.9
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+        with:
+          just-version: "1.58.0"
+
+      # Missing if the tests failed, or diff-cover did.
+      - name: Download patch coverage report
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: patch-coverage
+
+      - name: Post patch coverage to the PR
+        if: steps.download.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        # GITHUB_TOKEN can't look up its own login, so name it.
+        run: just patch-coverage-post "$PR_NUMBER" --commit "$HEAD_SHA" --run-url "$RUN_URL" --author 'github-actions[bot]'
 
   # Runs on a Dependabot branch, whose bumped dependency we don't trust, so the
   # write-capable DEPENDABOT_FIX_TOKEN is only exposed to the final push step:

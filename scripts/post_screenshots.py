@@ -1,18 +1,18 @@
 import argparse
-import json
 import os
 import re
 import subprocess
 import sys
 import urllib.error
 import urllib.parse
-import urllib.request
 from pathlib import Path
+
+from scripts import github_comments
+from scripts.github_comments import API_URL
 
 # Marks the comment this script posts, so the next run can find and edit it.
 MARKER = "<!-- lifetracker-screenshots -->"
 
-API_URL = "https://api.github.com"
 # The endpoint `gh ... --attach` (cli/cli internal/attachments/client.go) uploads
 # to. It's undocumented, so this sends the same request gh 2.102.0 does.
 UPLOAD_URL = "https://uploads.github.com/user-attachments/assets"
@@ -52,42 +52,6 @@ def _build_body(urls: dict[str, str], commit: str | None, run_url: str | None) -
     return "\n".join(lines)
 
 
-def _request(
-    method: str,
-    url: str,
-    token: str,
-    *,
-    json_body: object = None,
-    data: bytes | None = None,
-    content_type: str | None = None,
-):
-    """Send an API request and return its decoded JSON response (None if empty).
-    A 307/308 redirect is followed with the same method and body, keeping the
-    token only if the host is unchanged."""
-    if json_body is not None:
-        data = json.dumps(json_body).encode()
-        content_type = "application/json"
-    host = urllib.parse.urlsplit(url).hostname
-    for _ in range(5):
-        request = urllib.request.Request(url, data=data, method=method)
-        request.add_header("Accept", "application/vnd.github+json")
-        if content_type:
-            request.add_header("Content-Type", content_type)
-        if urllib.parse.urlsplit(url).hostname == host:
-            request.add_header("Authorization", f"Bearer {token}")
-        try:
-            with urllib.request.urlopen(request, timeout=60) as response:
-                payload = response.read()
-            return json.loads(payload) if payload else None
-        except urllib.error.HTTPError as e:
-            location = e.headers.get("Location")
-            if e.code not in (307, 308) or not location:
-                raise
-            e.close()
-            url = urllib.parse.urljoin(url, location)
-    raise RuntimeError(f"too many redirects for {method} {url}")
-
-
 def _upload(path: Path, repository_id: int, token: str) -> str:
     """Upload a PNG as a user attachment of the repository; return its URL."""
     query = urllib.parse.urlencode(
@@ -97,7 +61,7 @@ def _upload(path: Path, repository_id: int, token: str) -> str:
             "repository_id": repository_id,
         }
     )
-    asset = _request(
+    asset = github_comments.request(
         "POST",
         f"{UPLOAD_URL}?{query}",
         token,
@@ -107,26 +71,6 @@ def _upload(path: Path, repository_id: int, token: str) -> str:
     if not isinstance(asset, dict) or not asset.get("url"):
         raise RuntimeError(f"upload of {path} returned no asset URL")
     return asset["url"]
-
-
-def _screenshot_comments(repo: str, pr: int, author: str, token: str) -> list[dict]:
-    """The screenshot comments author has posted on pr, oldest first."""
-    comments = []
-    page = 1
-    while True:
-        batch = _request(
-            "GET",
-            f"{API_URL}/repos/{repo}/issues/{pr}/comments?per_page=100&page={page}",
-            token,
-        )
-        comments += [c for c in batch if c["user"]["login"] == author and c["body"].startswith(MARKER)]
-        if len(batch) < 100:
-            return comments
-        page += 1
-
-
-def _gh_output(*args: str) -> str:
-    return subprocess.run(["gh", *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
 def main(argv: list[str]) -> int:
@@ -162,43 +106,26 @@ def main(argv: list[str]) -> int:
         return 1
 
     try:
-        upload_token = os.environ.get("SCREENSHOTS_TOKEN") or _gh_output("auth", "token")
-        comment_token = os.environ.get("GITHUB_TOKEN") or _gh_output("auth", "token")
-        repo = args.repo or _gh_output("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
-        author = args.author or _request("GET", f"{API_URL}/user", comment_token)["login"]
+        upload_token = os.environ.get("SCREENSHOTS_TOKEN") or github_comments.gh_output("auth", "token")
+        comment_token = os.environ.get("GITHUB_TOKEN") or github_comments.gh_output("auth", "token")
+        repo = args.repo or github_comments.gh_output(
+            "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"
+        )
+        author = args.author or github_comments.request("GET", f"{API_URL}/user", comment_token)["login"]
         if args.commit:
             # A run for an older commit can finish after the run for a newer
             # one (CI queues posts per PR, but not in commit order), so post
             # only screenshots of the PR's current head, rather than overwrite
             # newer ones with stale ones.
-            head = _request("GET", f"{API_URL}/repos/{repo}/pulls/{args.pr}", comment_token)["head"]["sha"]
+            head = github_comments.pr_head(repo, args.pr, comment_token)
             if not head.startswith(args.commit):
                 print(f"Not posting: screenshots are of {args.commit}, but PR #{args.pr}'s head is now {head}.")
                 return 0
-        repository_id = _request("GET", f"{API_URL}/repos/{repo}", comment_token)["id"]
+        repository_id = github_comments.request("GET", f"{API_URL}/repos/{repo}", comment_token)["id"]
         urls = {path.stem: _upload(path, repository_id, upload_token) for path in paths}
         body = _build_body(urls, args.commit, args.run_url)
 
-        previous = _screenshot_comments(repo, args.pr, author, comment_token)
-        comments_url = f"{API_URL}/repos/{repo}/issues/comments"
-        if previous:
-            # Edit in place, so the comment keeps its place in the conversation.
-            _request(
-                "PATCH",
-                f"{comments_url}/{previous[0]['id']}",
-                comment_token,
-                json_body={"body": body},
-            )
-            # Keep only one, should a failed or raced run have left another.
-            for comment in previous[1:]:
-                _request("DELETE", f"{comments_url}/{comment['id']}", comment_token)
-        else:
-            _request(
-                "POST",
-                f"{API_URL}/repos/{repo}/issues/{args.pr}/comments",
-                comment_token,
-                json_body={"body": body},
-            )
+        github_comments.upsert_comment(repo, args.pr, author, MARKER, body, comment_token)
     except subprocess.CalledProcessError as e:
         print(f"{' '.join(e.cmd)} failed:\n{e.stderr}", file=sys.stderr)
         return 1

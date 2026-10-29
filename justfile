@@ -85,9 +85,15 @@ test:
 coverage:
     uv run --group dev pytest --cov=src/lifetracker --cov=scripts --cov-report=term --cov-report=xml --junitxml=junit.xml -o junit_family=legacy
 
+# patch-coverage's first argument is the branch to compare with (default:
+# origin/$GITHUB_BASE_REF on a PR, else origin/master); any more go to
+# diff-cover, e.g. `--format markdown:patch-coverage.md`, as CI passes to post
+# the report as a PR comment.
+
 # Show patch coverage from coverage.xml against a base branch (or PR base)
-patch-coverage compare_branch="":
-    COMPARE_BRANCH="{{compare_branch}}"; compare_branch="${COMPARE_BRANCH:-${GITHUB_BASE_REF:+origin/$GITHUB_BASE_REF}}"; compare_branch="${compare_branch:-origin/master}"; uv run --group dev diff-cover coverage.xml --compare-branch="$compare_branch"
+[positional-arguments]
+patch-coverage compare_branch="" *args:
+    compare_branch="${1:-${GITHUB_BASE_REF:+origin/$GITHUB_BASE_REF}}"; shift $(( $# > 0 )); uv run --group dev diff-cover coverage.xml --compare-branch="${compare_branch:-origin/master}" "$@"
 
 # The screenshot tests live outside `testpaths`, so plain `pytest` (and
 # `just test`/`just coverage`) never collects them; `-n 0` because two tests
@@ -112,7 +118,19 @@ screenshots:
 # Post screenshots/ to a PR as a comment, or update the existing one
 [positional-arguments]
 screenshots-post *args:
-    uv run --no-project python scripts/post_screenshots.py "$@"
+    uv run --no-project python -m scripts.post_screenshots "$@"
+
+# patch-coverage-post's arguments are a PR number and, optionally, --report
+# (default patch-coverage.md, from `just patch-coverage '' --format
+# markdown:patch-coverage.md`), --commit and --run-url (see --help for the
+# rest); like screenshots-post, it comments with $GITHUB_TOKEN (default `gh auth
+# token`), posts nothing unless --commit is still the PR's head, and edits its
+# previous comment rather than posting another.
+
+# Post a patch coverage report to a PR as a comment, or update the existing one
+[positional-arguments]
+patch-coverage-post *args:
+    uv run --no-project python -m scripts.post_patch_coverage "$@"
 
 # Build the container image
 docker-build:
