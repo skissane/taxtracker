@@ -3,6 +3,7 @@ import http.client
 import io
 import json
 import subprocess
+import sys
 import tempfile
 import textwrap
 import urllib.error
@@ -22,7 +23,7 @@ from scripts.check_whitespace import main as whitespace_main
 from scripts.dependabot_relock import main as relock_main
 from scripts.github_comments import request as github_request
 from scripts.post_patch_coverage import MARKER as PATCH_COVERAGE_MARKER
-from scripts.post_patch_coverage import MAX_BODY_CHARS
+from scripts.post_patch_coverage import MAX_BODY_CHARS, _build_body
 from scripts.post_patch_coverage import main as post_patch_coverage_main
 from scripts.post_screenshots import MARKER
 from scripts.post_screenshots import main as post_screenshots_main
@@ -514,7 +515,11 @@ class PostScreenshotsTests(SimpleTestCase):
 
 
 class PostPatchCoverageTests(SimpleTestCase):
-    REPORT = "# Diff Coverage\n## Diff: origin/master...HEAD\n\n- a.py (50.0%): Missing lines 2\n"
+    HEAD = (
+        "# Diff Coverage\n## Diff: origin/master...HEAD\n\n- a&#46;py (50.0%): Missing lines 2\n\n"
+        "## Summary\n\n- **Total**: 2 lines\n- **Missing**: 1 line\n- **Coverage**: 50%\n"
+    )
+    REPORT = HEAD + "\n\n\n## a&#46;py\n\nLines 1-2\n\n```python\n  1 a = 1\n! 2 b = 2\n```\n\n\n---\n"
 
     def _run(self, *args, report=REPORT, comments=(), fail=None, head="abc1234def") -> tuple[int, str, list[tuple]]:
         """Run main() on PR 7 in a temp dir holding patch-coverage.md (unless
@@ -572,16 +577,40 @@ class PostPatchCoverageTests(SimpleTestCase):
             f"{PATCH_COVERAGE_MARKER}\n## Diff Coverage\n\n"
             "Patch coverage of abc1234, from [this workflow run](https://example.com/run).\n\n"
             "### Diff: origin/master...HEAD\n\n"
-            "| File | Coverage | Missing lines |\n| --- | ---: | --- |\n| `a.py` | 50.0% | 2 |",
+            "| File | Coverage | Missing lines |\n| --- | ---: | --- |\n| `a.py` | 50.0% | 2 |\n\n"
+            "### Summary\n\n| Total | Missing | Coverage |\n| ---: | ---: | ---: |\n| 2 lines | 1 line | 50% |\n\n\n\n"
+            "### a&#46;py\n\nLines 1-2\n\n```python\n  1 a = 1\n! 2 b = 2\n```\n\n\n---",
         )
 
-    def test_report_without_title(self):
-        code, _, requests = self._run(report="No lines with coverage information in this diff.\n")
+    def test_no_lines(self):
+        report = "# Diff Coverage\n## Diff: origin/master...HEAD\n\nNo lines with coverage information in this diff.\n"
+        code, _, requests = self._run(report=report)
         self.assertEqual(code, 0)
         self.assertEqual(
             self._writes(requests)[0][3]["body"],
-            f"{PATCH_COVERAGE_MARKER}\n## Diff Coverage\n\nNo lines with coverage information in this diff.",
+            f"{PATCH_COVERAGE_MARKER}\n## Diff Coverage\n\n### Diff: origin/master...HEAD\n\n"
+            "No lines with coverage information in this diff.",
         )
+
+    def test_unexpected_report_fails(self):
+        no_lines = "# Diff Coverage\n## Diff: x\n\nNo lines with coverage information in this diff.\n"
+        cases = {
+            "": "line 1: expected '# Diff Coverage', found ''",
+            "# Coverage\n": "line 1: expected '# Diff Coverage'",
+            "# Diff Coverage\n": "line 2: expected '## Diff: ...', found the end of the report",
+            "# Diff Coverage\n## Diff: x\n\n* a.py (50%)\n": "line 4: expected a file's coverage",
+            "# Diff Coverage\n## Diff: x\n\n- a.py (50%): Missing 2\n": "line 4: expected a file's coverage",
+            no_lines + "more\n": "line 5: expected nothing more, found 'more'",
+            self.HEAD.replace("## Summary", "## Totals"): "line 6: expected '## Summary', found '## Totals'",
+            self.HEAD.replace("**Missing**", "**Uncovered**"): "line 9: expected '- **Missing**: ...'",
+            self.HEAD.replace("- **Coverage**: 50%\n", ""): "line 10: expected '- **Coverage**: ...', found the end",
+        }
+        for report, error in cases.items():
+            with self.subTest(report):
+                code, stderr, requests = self._run(report=report)
+                self.assertEqual(code, 1)
+                self.assertIn(f"diff-cover report {error}", stderr)
+                self.assertEqual(requests, [])
 
     def test_stale_commit_posts_nothing(self):
         code, _, requests = self._run("--commit", "0ld0ld0")
@@ -605,7 +634,7 @@ class PostPatchCoverageTests(SimpleTestCase):
             "# Diff Coverage\n## Diff: origin/master...HEAD\n\n"
             "- scripts/a&#46;py (100%)\n- b&#46;py (40.0%): Missing lines 3,5-9,12\n\n"
             "## Summary\n\n- **Total**: 10 lines\n- **Missing**: 6 lines\n- **Coverage**: 40%\n\n"
-            "## b&#46;py\n\n```python\n- **Total**: not a summary\n```\n- something else\n"
+            "## b&#46;py\n\n```python\n# not a heading\n```\n- something else\n"
         )
         code, _, requests = self._run(report=report)
         self.assertEqual(code, 0)
@@ -628,23 +657,15 @@ class PostPatchCoverageTests(SimpleTestCase):
                 "### b&#46;py",
                 "",
                 "```python",
-                "- **Total**: not a summary",
+                "# not a heading",
                 "```",
                 "- something else",
             ],
         )
 
-    def test_headings_in_code_blocks_kept(self):
-        report = "# Diff Coverage\n## a.py\n\n```python\n# not a heading\n```\n"
-        code, _, requests = self._run(report=report)
-        self.assertEqual(code, 0)
-        self.assertTrue(
-            self._writes(requests)[0][3]["body"].endswith("### a.py\n\n```python\n# not a heading\n```"),
-        )
-
     def test_long_report_truncated(self):
         lines = "\n".join(f"  {n} x = {n}" for n in range(20_000))
-        report = f"# Diff Coverage\n\n## a.py\n\n```python\n{lines}\n```\n"
+        report = f"{self.HEAD}\n## a.py\n\n```python\n{lines}\n```\n"
         code, _, requests = self._run("--run-url", "https://example.com/run", report=report)
         self.assertEqual(code, 0)
         body = self._writes(requests)[0][3]["body"]
@@ -653,6 +674,7 @@ class PostPatchCoverageTests(SimpleTestCase):
         self.assertLessEqual(len(before), MAX_BODY_CHARS + 4)
         self.assertTrue(before.endswith("\n```"))
         self.assertEqual(before.count("```"), 2)
+        self.assertIn("| 2 lines | 1 line | 50% |", before)
         self.assertEqual(
             note,
             "_Report truncated; the whole of it is in the `patch-coverage` artifact of "
@@ -691,6 +713,69 @@ class PostPatchCoverageTests(SimpleTestCase):
             code = post_patch_coverage_main(["7"])
         self.assertEqual(code, 1)
         self.assertIn("not logged in", stderr.getvalue())
+
+
+class PatchCoverageRealDiffCoverTests(SimpleTestCase):
+    """post_patch_coverage on reports from the installed diff-cover, so a
+    diff-cover upgrade (e.g. Dependabot's) that changes the Markdown format
+    the script expects fails here, rather than only in post-patch-coverage,
+    which doesn't run on Dependabot PRs."""
+
+    def _report(self, new_source: str, hits: dict[int, int]) -> str:
+        """diff-cover's Markdown report for a branch that changes a.py from
+        one line to new_source, with coverage.xml giving each line's hits."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+
+            def git(*args):
+                subprocess.run(
+                    ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+                    cwd=path,
+                    check=True,
+                    capture_output=True,
+                )
+
+            git("init", "-q", "-b", "main")
+            (path / "a.py").write_text("a = 1\n")
+            git("add", "a.py")
+            git("commit", "-qm", "base")
+            git("checkout", "-qb", "change")
+            (path / "a.py").write_text(new_source)
+            git("commit", "-qam", "change")
+            lines = "".join(f'<line number="{n}" hits="{h}"/>' for n, h in hits.items())
+            (path / "coverage.xml").write_text(
+                '<?xml version="1.0" ?><coverage version="7"><sources><source>.</source></sources>'
+                '<packages><package name="."><classes><class name="a.py" filename="a.py">'
+                f"<lines>{lines}</lines></class></classes></package></packages></coverage>"
+            )
+            subprocess.run(
+                [
+                    Path(sys.executable).parent / "diff-cover",
+                    "coverage.xml",
+                    "--compare-branch=main",
+                    "--format",
+                    "markdown:report.md",
+                ],
+                cwd=path,
+                check=True,
+                capture_output=True,
+            )
+            return (path / "report.md").read_text()
+
+    def test_missing_lines(self):
+        body = _build_body(self._report("a = 1\nb = 2\nc = 3\nd = 4\n", {1: 1, 2: 0, 3: 1, 4: 0}), "abc", None)
+        self.assertIn("| `a.py` | 33.3% | 2, 4 |", body)
+        self.assertIn("| 3 lines | 2 lines | 33% |", body)
+        self.assertIn("! 2 b = 2", body)
+
+    def test_all_covered(self):
+        body = _build_body(self._report("a = 1\nb = 2\n", {1: 1, 2: 1}), "abc", None)
+        self.assertIn("| `a.py` | 100% |  |", body)
+        self.assertIn("| 1 line | 0 lines | 100% |", body)
+
+    def test_no_lines(self):
+        body = _build_body(self._report("a = 1\n# comment\n", {1: 1}), "abc", None)
+        self.assertTrue(body.endswith("No lines with coverage information in this diff."))
 
 
 class GitHubCommentsRequestTests(SimpleTestCase):

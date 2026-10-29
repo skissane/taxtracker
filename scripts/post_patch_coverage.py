@@ -16,12 +16,19 @@ MARKER = "<!-- lifetracker-patch-coverage -->"
 MAX_BODY_CHARS = 65_000
 
 
-# diff-cover's Markdown lists each file as `- <path> (<pct>%)`, then
-# `: Missing lines <lines>` if any are, and its summary as `- **<name>**: <value>`
-# (markdown_coverage_report.md); the path's dots are escaped as `&#46;` so
-# GitHub doesn't turn it into a link.
-_FILE_RE = re.compile(r"^- (?P<path>.+) \((?P<percent>[0-9.]+%)\)(?:: Missing lines (?P<missing>.+))?$")
-_SUMMARY_RE = re.compile(r"^- \*\*(?P<name>[^*]+)\*\*: (?P<value>.+)$")
+# The lines diff-cover's markdown_coverage_report.md template writes before
+# its per-file snippets: each file as `- <path> (<pct>%)`, then
+# `: Missing lines <lines>` if any are (the path's dots escaped as `&#46;` so
+# GitHub doesn't link it), and the summary as `- **<name>**: <value>`. Anything
+# else there fails the script, so a diff-cover upgrade that changes the format
+# fails the tests (PatchCoverageRealDiffCoverTests) rather than going unnoticed.
+NO_LINES = "No lines with coverage information in this diff."
+_FILE_RE = re.compile(r"^- (?P<path>.+) \((?P<percent>[0-9.]+%)\)(?:: Missing lines (?P<missing>[0-9,-]+))?$")
+_SUMMARY_RE = re.compile(r"^- \*\*(?P<name>Total|Missing|Coverage)\*\*: (?P<value>.+)$")
+
+
+class UnexpectedReport(ValueError):
+    pass
 
 
 def _file_table(matches: list[re.Match]) -> list[str]:
@@ -42,49 +49,80 @@ def _summary_table(matches: list[re.Match]) -> list[str]:
     ]
 
 
-def _reformat(lines: list[str]) -> list[str]:
-    """lines with each ATX heading outside a code block one level deeper, so
-    diff-cover's sections nest under the comment's title, and its lists of
-    files and summary figures turned into tables. A line in neither shape (if
-    a diff-cover upgrade changes them) is left as it is."""
-    out = []
-    run: list[re.Match] = []
-    run_table = None
-
-    def flush():
-        nonlocal run, run_table
-        if run:
-            out.extend(run_table(run))
-            run, run_table = [], None
-
+def _demote_headings(lines: list[str]) -> list[str]:
+    """lines with each ATX heading outside a code block one level deeper."""
+    demoted = []
     in_code = False
     for line in lines:
         if line.startswith("```"):
             in_code = not in_code
-        elif not in_code:
-            for regex, table in ((_SUMMARY_RE, _summary_table), (_FILE_RE, _file_table)):
-                if m := regex.match(line):
-                    if run_table is not table:
-                        flush()
-                        run_table = table
-                    run.append(m)
-                    break
-            else:
-                flush()
-                if line.startswith("#"):
-                    line = "#" + line
-            if run:
-                continue
-        out.append(line)
-    flush()
-    return out
+        elif not in_code and line.startswith("#"):
+            line = "#" + line
+        demoted.append(line)
+    return demoted
+
+
+def _reformat(report: str) -> tuple[str, list[str]]:
+    """diff-cover's report as its title and the lines after it, with its file
+    list and summary as tables and its headings one level deeper, so its
+    sections nest under the comment's title. Raises UnexpectedReport if it
+    isn't in the shape diff-cover's template writes."""
+    lines = report.rstrip("\n").split("\n")
+    pos = 0
+
+    def expect(ok: bool, what: str):
+        if not ok:
+            found = repr(lines[pos]) if pos < len(lines) else "the end of the report"
+            raise UnexpectedReport(f"diff-cover report line {pos + 1}: expected {what}, found {found}")
+
+    def at(regex: re.Pattern) -> re.Match | None:
+        return regex.match(lines[pos]) if pos < len(lines) else None
+
+    def skip_blank():
+        nonlocal pos
+        while pos < len(lines) and not lines[pos]:
+            pos += 1
+
+    expect(lines[0] == "# Diff Coverage", "'# Diff Coverage'")
+    title = lines[0]
+    pos = 1
+    expect(pos < len(lines) and lines[pos].startswith("## Diff: "), "'## Diff: ...'")
+    out = ["#" + lines[pos], ""]
+    pos += 1
+    skip_blank()
+    if pos < len(lines) and lines[pos] == NO_LINES:
+        out.append(NO_LINES)
+        pos += 1
+        skip_blank()
+        expect(pos == len(lines), "nothing more")
+        return title, out
+    files = []
+    while m := at(_FILE_RE):
+        files.append(m)
+        pos += 1
+    expect(bool(files), "a file's coverage or " + repr(NO_LINES))
+    out += _file_table(files) + [""]
+    skip_blank()
+    expect(pos < len(lines) and lines[pos] == "## Summary", "'## Summary'")
+    out += ["### Summary", ""]
+    pos += 1
+    skip_blank()
+    summary = []
+    for name in ("Total", "Missing", "Coverage"):
+        m = at(_SUMMARY_RE)
+        expect(m is not None and m["name"] == name, f"'- **{name}**: ...'")
+        summary.append(m)
+        pos += 1
+    out += _summary_table(summary)
+    # The rest is each file's snippets of missing lines, kept as they are.
+    return title, out + _demote_headings(lines[pos:])
 
 
 def _build_body(report: str, commit: str | None, run_url: str | None) -> str:
-    """The comment body: diff-cover's Markdown report, with a line saying what
-    it was measured for after its title, cut to fit a comment if need be."""
-    lines = report.rstrip("\n").split("\n")
-    title, rest = (lines[0], lines[1:]) if lines[0].startswith("# ") else ("# Diff Coverage", lines)
+    """The comment body: diff-cover's Markdown report reformatted, with a
+    line saying what it was measured for after its title, cut to fit a comment
+    if need be. Raises UnexpectedReport for a report it can't reformat."""
+    title, rest = _reformat(report)
     head = [MARKER, "#" + title, ""]
     if commit or run_url:
         measured = "Patch coverage"
@@ -93,7 +131,7 @@ def _build_body(report: str, commit: str | None, run_url: str | None) -> str:
         if run_url:
             measured += f", from [this workflow run]({run_url})"
         head += [f"{measured}.", ""]
-    body = "\n".join(head + _reformat(rest))
+    body = "\n".join(head + rest)
     if len(body) <= MAX_BODY_CHARS:
         return body
     # The head always has a newline, so this never finds none.
@@ -131,8 +169,8 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     try:
-        report = args.report.read_text()
-    except OSError as e:
+        body = _build_body(args.report.read_text(), args.commit, args.run_url)
+    except (OSError, UnexpectedReport) as e:
         print(e, file=sys.stderr)
         return 1
 
@@ -149,7 +187,6 @@ def main(argv: list[str]) -> int:
             if not head.startswith(args.commit):
                 print(f"Not posting: the report is for {args.commit}, but PR #{args.pr}'s head is now {head}.")
                 return 0
-        body = _build_body(report, args.commit, args.run_url)
         github_comments.upsert_comment(repo, args.pr, author, MARKER, body, token)
     except subprocess.CalledProcessError as e:
         print(f"{' '.join(e.cmd)} failed:\n{e.stderr}", file=sys.stderr)
