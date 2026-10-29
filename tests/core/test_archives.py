@@ -15,7 +15,15 @@ def _zip(entries):
 
 
 def test_extract_pdfs_from_zip():
-    zip_bytes = _zip([("folder/statement.PDF", PDF_MAGIC + b"a"), ("notes.txt", b"text"), ("fake.pdf", b"text")])
+    zip_bytes = _zip(
+        [
+            ("folder/", b""),
+            ("\\", b""),
+            ("folder/statement.PDF", PDF_MAGIC + b"a"),
+            ("notes.txt", b"text"),
+            ("fake.pdf", b"text"),
+        ]
+    )
     assert extract_pdfs_from_zip(zip_bytes) == ([("statement.pdf", PDF_MAGIC + b"a")], ["notes.txt", "fake.pdf"])
 
 
