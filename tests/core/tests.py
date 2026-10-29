@@ -1908,7 +1908,6 @@ class DockerEntrypointTests(TestCase):
     """Tests for the Docker entrypoint startup sequence."""
 
     STARTUP = [
-        "python manage.py upgrade_legacy_db",
         "python manage.py migrate",
         "python manage.py ensure_superuser",
     ]

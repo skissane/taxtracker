@@ -18,7 +18,7 @@ from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
 
-from lifetracker.core.archives import filter_duplicate_filenames
+from lifetracker.core.archives import select_importable_files
 from lifetracker.core.attachments import extract_date_from_filename
 from lifetracker.core.models import DBStoredFile
 from lifetracker.core.trees import CYCLE_MARKER
@@ -103,21 +103,62 @@ def _find_equivalent_item(path_signature, target_fy):
     return current
 
 
+def _existing_attachment_names(**filters):
+    """Return the basename of every stored file name matching *filters*."""
+    return {
+        Path(file_name).name
+        for file_name in Attachment.objects.filter(**filters).values_list("file", flat=True)
+        if file_name
+    }
+
+
+def _save_imported_attachment(attachment, filename, file_bytes):
+    """Store *file_bytes* as *attachment*'s file under *filename*, then save the row."""
+    # save=False: store the file in the storage backend now but don't yet
+    # write the Attachment row; attachment.save() below will auto-extract
+    # the title, date, and file_type from the filename before persisting.
+    attachment.file.save(filename, io.BytesIO(file_bytes), save=False)
+    attachment.save()
+
+
+def _extract_archive(request, file_bytes, filename):
+    """Extract an uploaded archive, reporting an unsupported one as an error message.
+
+    Returns ``(extracted, archive_skipped_names, had_error)``.
+    """
+    try:
+        extracted, archive_skipped_names = extract_from_archive_with_skips(file_bytes, filename)
+    except UnsupportedArchiveError as exc:
+        messages.error(request, str(exc))
+        return [], [], True
+    return extracted, archive_skipped_names, False
+
+
+def _warn_skipped(request, names, reason):
+    """Add a warning listing the distinct *names* skipped for *reason*, if there are any."""
+    if names:
+        unique_names = list(dict.fromkeys(names))
+        messages.warning(request, f"Skipped {len(unique_names)} {reason}: {', '.join(unique_names)}.")
+
+
 # ---------------------------------------------------------------------------
 # Inlines
 # ---------------------------------------------------------------------------
 
 
-class AttachmentInline(admin.TabularInline):
+class AttachmentInlineBase(admin.TabularInline):
+    """Shared attachment inline; subclasses set ``select_related_path`` (and ``fk_name`` if needed)."""
+
     model = Attachment
     form = AttachmentForm
     extra = 1
     fields = ("title", "date", "date_warning", "file_type", "file", "change_link")
     readonly_fields = ("date_warning", "change_link")
     autocomplete_fields = ("file_type",)
+    select_related_path: str
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related("item__year")
+        return super().get_queryset(request).select_related(self.select_related_path)
 
     @admin.display(description="")
     def date_warning(self, obj):
@@ -131,28 +172,13 @@ class AttachmentInline(admin.TabularInline):
         return format_html('<a href="{}">Edit</a>', url)
 
 
-class ReceivedAttachmentInline(admin.TabularInline):
-    model = Attachment
+class AttachmentInline(AttachmentInlineBase):
+    select_related_path = "item__year"
+
+
+class ReceivedAttachmentInline(AttachmentInlineBase):
     fk_name = "received_document"
-    form = AttachmentForm
-    extra = 1
-    fields = ("title", "date", "date_warning", "file_type", "file", "change_link")
-    readonly_fields = ("date_warning", "change_link")
-    autocomplete_fields = ("file_type",)
-
-    def get_queryset(self, request):
-        return super().get_queryset(request).select_related("received_document__year")
-
-    @admin.display(description="")
-    def date_warning(self, obj):
-        return _attachment_date_warning(obj)
-
-    @admin.display(description="Edit")
-    def change_link(self, obj):
-        if not obj.pk:
-            return "—"
-        url = reverse("admin:taxtracker_attachment_change", args=[obj.pk])
-        return format_html('<a href="{}">Edit</a>', url)
+    select_related_path = "received_document__year"
 
 
 class ChildItemInline(admin.TabularInline):
@@ -275,58 +301,25 @@ class ItemAdmin(admin.ModelAdmin):
             file_bytes = uploaded.read()
             filename = uploaded.name
 
-            had_error = False
-            try:
-                extracted, archive_skipped_names = extract_from_archive_with_skips(file_bytes, filename)
-            except UnsupportedArchiveError as exc:
-                messages.error(request, str(exc))
-                extracted = []
-                archive_skipped_names = []
-                had_error = True
+            extracted, archive_skipped_names, had_error = _extract_archive(request, file_bytes, filename)
 
             duplicate_names: list[str] = []
             if extracted:
-                existing_names = {
-                    Path(file_name).name
-                    for file_name in Attachment.objects.filter(item=item).values_list("file", flat=True)
-                    if file_name
-                }
-                importable, duplicate_names = filter_duplicate_filenames(extracted, existing_names)
-                importable = [(Path(pdf_filename).name, pdf_bytes) for pdf_filename, pdf_bytes in importable]
+                existing_names = _existing_attachment_names(item=item)
+                importable = select_importable_files(extracted, existing_names, duplicate_names)
 
                 with transaction.atomic():
                     for pdf_filename, pdf_bytes in importable:
-                        att = Attachment(item=item)
-                        # save=False: store the file in the storage backend now
-                        # but don't yet write the Attachment row; att.save()
-                        # below will auto-extract the title, date, and file_type
-                        # from the filename before persisting to the DB.
-                        att.file.save(
-                            pdf_filename,
-                            io.BytesIO(pdf_bytes),
-                            save=False,
-                        )
-                        att.save()
+                        _save_imported_attachment(Attachment(item=item), pdf_filename, pdf_bytes)
                 if importable:
                     messages.success(
                         request,
                         f"Imported {len(importable)} attachment(s) from '{filename}'.",
                     )
 
-            if archive_skipped_names:
-                unique_skipped = list(dict.fromkeys(archive_skipped_names))
-                messages.warning(
-                    request,
-                    f"Skipped {len(unique_skipped)} non-PDF file(s): {', '.join(unique_skipped)}.",
-                )
-            if duplicate_names:
-                unique_duplicates = list(dict.fromkeys(duplicate_names))
-                messages.warning(
-                    request,
-                    f"Skipped {len(unique_duplicates)} file(s) already attached to "
-                    f"this item: {', '.join(unique_duplicates)}.",
-                )
-            elif not had_error and not extracted and not archive_skipped_names:
+            _warn_skipped(request, archive_skipped_names, "non-PDF, too large or unreadable file(s)")
+            _warn_skipped(request, duplicate_names, "file(s) already attached to this item")
+            if not had_error and not extracted and not archive_skipped_names:
                 messages.warning(
                     request,
                     f"No attachments could be extracted from '{filename}'.",
@@ -553,17 +546,10 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
             file_bytes = uploaded.read()
             filename = uploaded.name
 
-            had_error = False
             no_year_names: list[str] = []
             missing_fy_names: list[str] = []
             created_count = 0
-            try:
-                extracted, archive_skipped_names = extract_from_archive_with_skips(file_bytes, filename)
-            except UnsupportedArchiveError as exc:
-                messages.error(request, str(exc))
-                extracted = []
-                archive_skipped_names = []
-                had_error = True
+            extracted, archive_skipped_names, had_error = _extract_archive(request, file_bytes, filename)
 
             duplicate_names: list[str] = []
             if extracted:
@@ -586,17 +572,10 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
                             missing_fy_names.append(f"{base_name} (FY{year_num})")
                             continue
                         if year_num not in existing_names_by_year:
-                            existing_names_by_year[year_num] = {
-                                Path(file_name).name
-                                for file_name in Attachment.objects.filter(received_document__year=fy).values_list(
-                                    "file", flat=True
-                                )
-                                if file_name
-                            }
+                            existing_names_by_year[year_num] = _existing_attachment_names(received_document__year=fy)
                         existing_names = existing_names_by_year[year_num]
-                        filtered, year_duplicates = filter_duplicate_filenames([(base_name, pdf_bytes)], existing_names)
-                        if not filtered:
-                            duplicate_names.extend(year_duplicates)
+                        if base_name in existing_names:
+                            duplicate_names.append(base_name)
                             continue
 
                         doc = ReceivedDocument.objects.create(
@@ -604,13 +583,7 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
                             title=base_name,
                             date=extract_date_from_filename(base_name),
                         )
-                        att = Attachment(received_document=doc)
-                        # save=False: store the file in the storage backend now
-                        # but don't yet write the Attachment row; att.save()
-                        # below will auto-extract the title and file_type from
-                        # the filename before persisting to the DB.
-                        att.file.save(base_name, io.BytesIO(pdf_bytes), save=False)
-                        att.save()
+                        _save_imported_attachment(Attachment(received_document=doc), base_name, pdf_bytes)
                         existing_names.add(base_name)
                         created_count += 1
 
@@ -620,34 +593,11 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
                         f"Imported {created_count} received document(s) from '{filename}'.",
                     )
 
-            if archive_skipped_names:
-                unique_skipped = list(dict.fromkeys(archive_skipped_names))
-                messages.warning(
-                    request,
-                    f"Skipped {len(unique_skipped)} non-PDF file(s): {', '.join(unique_skipped)}.",
-                )
-            if duplicate_names:
-                unique_duplicates = list(dict.fromkeys(duplicate_names))
-                messages.warning(
-                    request,
-                    f"Skipped {len(unique_duplicates)} file(s) already imported "
-                    f"for that Financial Year: {', '.join(unique_duplicates)}.",
-                )
-            if no_year_names:
-                unique_no_year = list(dict.fromkeys(no_year_names))
-                messages.warning(
-                    request,
-                    f"Skipped {len(unique_no_year)} file(s) without a leading "
-                    f"4-digit year: {', '.join(unique_no_year)}.",
-                )
-            if missing_fy_names:
-                unique_missing_fy = list(dict.fromkeys(missing_fy_names))
-                messages.warning(
-                    request,
-                    f"Skipped {len(unique_missing_fy)} file(s) with no matching "
-                    f"Financial Year record: {', '.join(unique_missing_fy)}.",
-                )
-            if not had_error and not extracted and not archive_skipped_names and not duplicate_names:
+            _warn_skipped(request, archive_skipped_names, "non-PDF, too large or unreadable file(s)")
+            _warn_skipped(request, duplicate_names, "file(s) already imported for that Financial Year")
+            _warn_skipped(request, no_year_names, "file(s) without a leading 4-digit year")
+            _warn_skipped(request, missing_fy_names, "file(s) with no matching Financial Year record")
+            if not had_error and not extracted and not archive_skipped_names:
                 messages.warning(
                     request,
                     f"No attachments could be extracted from '{filename}'.",

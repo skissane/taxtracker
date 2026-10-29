@@ -66,8 +66,7 @@ Its `uv lock` runs can still build a dependency's sdist to read its metadata, ru
 `test` waits on it and runs only if it was skipped or pushed nothing; if it pushed, that run's `test` is skipped and the run the push triggers tests the fixed commit.
 
 ```bash
-# Start the app (sync deps, upgrade legacy DB schema if needed, migrate,
-# create superuser, runserver)
+# Start the app (sync deps, migrate, create superuser, runserver)
 ./run.sh
 
 # Run all tests (pytest-django + pytest-xdist, parallelised across CPU cores)
@@ -79,6 +78,9 @@ uv run pytest tests/taxtracker/tests.py::ItemModelTests::test_str_root
 
 # Run tests under coverage, print a report, and write coverage.xml and junit.xml (no minimum enforced)
 just coverage
+
+# Check patch coverage of coverage.xml against the PR target branch ($GITHUB_BASE_REF, else origin/master); run `just coverage` first, as it reads whatever coverage.xml is there, and it exits 0 even with lines missing, so read its report; run this before submitting a PR and try to cover all changed lines where the value of coverage is worth the extra test complexity
+just patch-coverage
 
 # Screenshot the admin login, index, backups, cloud backup list, idle watchdog, uptime, uptime day, client IPs and app icon pages, in light and dark mode, into screenshots/ (gitignored)
 just screenshots
@@ -106,7 +108,7 @@ No frontend framework.
 
 **Package layout:** `src/lifetracker/` is the Django project (settings, urls).
 It contains three apps:
-- `src/lifetracker/core/` (label `core`) — generic infrastructure any future module can reuse: the file-type registry (`FileType`/`MimeType`/`FileExtension`), DB-backed file storage (`DBStoredFile`/`DatabaseStorage`) and the file-serving admin view, shared attachment behaviour (`core/attachments.py`: filename date/file-type autofill and stored-file cleanup on delete) and `FlexibleDateField` (`core/forms.py`), shared tree behaviour for self-referential models (`core/trees.py`'s `TreeNodeMixin`: pending/done status choices and `is_done`, the `A > B > C` path for `__str__` and `get_folder_path()`, and parent cycle detection for `clean()`), whole-database backups (DB download and cloud backup, `core/backup.py`, with `CloudBackupStatus`), the idle watchdog (`core/idle_watchdog.py`) and the uptime log it writes (`core/uptime_log.py`; see Deployment for both), the client IP record (`core/client_ips.py`; see Client IPs), the JWT cookie for the authenticating front proxy and that proxy's config (`core/jwt_auth.py`, `core/auth_whitelist.py` and `core/envoy_config.py`; see Auth front layer), a client for the Fly Machines API over the Machine's `/.fly/api` socket (`core/fly_api.py`, no Django imports; see Deployment), and `core/admin_pages.css` for custom admin pages.
+- `src/lifetracker/core/` (label `core`) — generic infrastructure any future module can reuse: the file-type registry (`FileType`/`MimeType`/`FileExtension`), DB-backed file storage (`DBStoredFile`/`DatabaseStorage`) and the file-serving admin view, shared attachment behaviour (`core/attachments.py`: filename date/file-type autofill and stored-file cleanup on delete) and `FlexibleDateField` (`core/forms.py`), ZIP-of-PDFs archive import and duplicate-filename skipping (`core/archives.py`; see Archive import formats), shared tree behaviour for self-referential models (`core/trees.py`'s `TreeNodeMixin`: pending/done status choices and `is_done`, the `A > B > C` path for `__str__` and `get_folder_path()`, and parent cycle detection for `clean()`), whole-database backups (DB download and cloud backup, `core/backup.py`, with `CloudBackupStatus`), the idle watchdog (`core/idle_watchdog.py`) and the uptime log it writes (`core/uptime_log.py`; see Deployment for both), the client IP record (`core/client_ips.py`; see Client IPs), the JWT cookie for the authenticating front proxy and that proxy's config (`core/jwt_auth.py`, `core/auth_whitelist.py` and `core/envoy_config.py`; see Auth front layer), a client for the Fly Machines API over the Machine's `/.fly/api` socket (`core/fly_api.py`, no Django imports; see Deployment), and `core/admin_pages.css` for custom admin pages.
 - `src/lifetracker/taxtracker/` (label `taxtracker`) — the tax-tracking module: `FinancialYear`/`Item`/`Attachment`, archive import, and their admin views/templates.
   This was the original module; more modules (banking, portfolio, insurance, etc.) may be added as siblings of `taxtracker` under `lifetracker` in future.
 - `src/lifetracker/tasktracker/` (label `tasktracker`) — the task-tracking module: `TaskType`/`Task`/`TaskAttachment`, with plain admin views (no custom templates).
@@ -194,9 +196,6 @@ It waits for a request to get through to the upstream rather than just for the p
 It's skipped without Docker (no `docker` command, or `docker info` failing) unless `LIFETRACKER_REQUIRE_ENVOY` is set, as the `test` job's `just coverage` step sets it.
 `just docker-smoke` checks the built image's Envoy: `/healthz/` answers without a login, and a request for a page that doesn't exist gets Envoy's redirect (Django would 404).
 `tests/conftest.py` has an autouse fixture pointing both key file settings at a per-process temporary directory, so tests never write keys to the real config directory.
-
-**Legacy database upgrade:** databases created before the `lifetracker`/`core`/`taxtracker` split still have the old `tracker_*` tables and `django_migrations`/`django_content_type` rows under app label `tracker`.
-`taxtracker`'s `upgrade_legacy_db` management command renames those tables and re-labels the content types in place; it is idempotent (no-op on fresh or already-upgraded databases) and `run.sh` runs it unconditionally before `migrate`.
 
 **Client IPs:** issue #201 keeps a lasting record of where requests come from, as `fly logs` keeps only a short window; alerting on it (e.g. a logged-in request from a new ASN) is #213, after #212 builds a way to send alerts.
 Envoy sees every request, including those `jwt_authn` turns away, which never reach gunicorn, so a second access log in `envoy/envoy.yaml` (a file logger with `json_format`) writes one JSON line per request to `@REQUEST_LOG@`: start time, `Fly-Client-IP`, the direct peer, method, path, status, user agent, `jwt_failure` (`failed_status_in_metadata`) and `jwt_sub` (the `sub` from `payload_in_metadata: jwt_payload`), each missing value `null`.
@@ -353,9 +352,13 @@ Both ZIPs are built in a `SpooledTemporaryFile` (in memory up to `_ZIP_SPOOL_MAX
 
 ## Archive import formats
 
-`archives.py` dispatches on file extension:
+`taxtracker/archives.py` dispatches on file extension:
 - **`.har`** — Fidelity HAR: extracts PDFs embedded as base64 `fileContent` in JSON responses from `netbenefitsww.fidelity.com` activity URLs.
-- **`.zip`** — extracts `.pdf`/`.PDF` files only; non-PDF entries are reported as skipped.
+  This one is taxtracker's own.
+- **`.zip`** — `core/archives.py`'s `extract_pdfs_from_zip`, generic so other modules can reuse it: extracts `.pdf`/`.PDF` files only; non-PDF entries, PDFs over `MAX_ZIP_PDF_MEMBER_BYTES` (20 MiB) or past `MAX_ZIP_PDF_TOTAL_BYTES` (100 MiB in all) and ones neither stored nor deflated are reported as skipped.
+  It raises `zipfile.BadZipFile`, which taxtracker turns into its `UnsupportedArchiveError`.
+
+`core/archives.py`'s `select_importable_files` drops extracted files whose basename is already attached (or earlier in the same archive); `ItemAdmin`'s import uses it, while `ReceivedDocumentAdmin`'s checks names per FY itself.
 
 ## Secret key
 
@@ -448,6 +451,7 @@ Other non-secret settings are in `fly.toml`'s `[env]`; the `LIFETRACKER_BACKUP_S
 A volume attaches to one Machine, so the app must never be scaled past one; CI's deploy passes `--ha=false` so that if the app has no Machine yet (e.g. first deploy) it creates one, not two, and manual `fly deploy`s should too.
 `.env` is in `.dockerignore` so it's never baked into an image.
 On every push to `master`, once tests pass, CI deploys the exact image the `test` job built rather than rebuilding it: `test` saves it (`docker save`) as a workflow artifact, `publish` (the only job with `packages: write`, and it runs no repo code) loads it and pushes it to GHCR (public) as `ghcr.io/skissane/taxtracker:<sha>` and `:latest`, and `deploy` runs `flyctl deploy --ha=false --image ghcr.io/skissane/taxtracker@<digest>`, so Fly pulls it by digest.
+`publish` gets the digest from the registry (`docker buildx imagetools inspect`), not the local `RepoDigests`, as with Docker's containerd image store (the `ubuntu-26.04` runner's) those list the local `lifetracker@<digest>` first, which Fly can't pull.
 `deploy` uses the `FLY_API_TOKEN` repo secret (a deploy token scoped to the app); deploys queue rather than cancel each other.
 `flyctl deploy` restarts a running Machine on the new image, smoke-checking it, but only updates a stopped one, leaving it stopped (flyctl's `shouldSkipLaunch`), which with the idle watchdog is usual; nothing would then boot the new image, and run its migrations, until the next visit.
 So `deploy` then runs `scripts/check_deploy.py` (stdlib-only, `uv run --no-project`), which polls `https://$FLY_APP.fly.dev/healthz/` (Fly Proxy starts the Machine on the first request) every 5 seconds for up to 5 minutes until it answers 200 with `"status": "ok"` and `"commit"` equal to `GITHUB_SHA`, and otherwise fails the job; it never prints the URL, which holds the app's name.
@@ -506,7 +510,7 @@ Do not flag comma-separated exception types (without parentheses) as "Python 2-s
 This is valid in Python 3, and ruff format will restore it if you remove it.
 
 **Legacy-upgraded databases keep old `tracker_`-prefixed index names.**
-SQLite's `ALTER TABLE ... RENAME TO` (used by `upgrade_legacy_db`) has no equivalent for indexes, so a database that went through the upgrade keeps index names like `tracker_item_parent_id_d6e76dee` on the renamed `taxtracker_item` table, instead of matching what a fresh install would generate.
+Databases created before the `lifetracker`/`core`/`taxtracker` split were upgraded in place by renaming their `tracker_*` tables (with a since-removed `upgrade_legacy_db` command), and SQLite's `ALTER TABLE ... RENAME TO` has no equivalent for indexes, so such a database keeps index names like `tracker_item_parent_id_d6e76dee` on the renamed `taxtracker_item` table, instead of matching what a fresh install would generate.
 This is cosmetic only — Django never looks up indexes by name at runtime — do not "fix" it.
 
 **Always use `uv run python` for ad-hoc scripts.**

@@ -1,7 +1,9 @@
 """Archive processing helpers for the import-archive admin view.
 
-Currently supports Fidelity HAR files.  The public API is intentionally
-generic so that additional archive formats (ZIP, etc.) can be added later
+The import flow supports both Fidelity HAR files and `.zip` bundles of PDFs.
+The Fidelity HAR extractor is taxtracker's own; the ZIP one is
+``lifetracker.core.archives.extract_pdfs_from_zip``, shared with other modules.
+The public API is intentionally generic so additional formats can be added
 without touching the view layer.
 
 Public interface
@@ -11,8 +13,12 @@ Public interface
     Returns a list of ``(output_filename, pdf_bytes)`` tuples.
     Raises ``UnsupportedArchiveError`` when no extractor matches.
 
+``extract_from_archive_with_skips(file_bytes, filename)``
+    Like ``extract_from_archive``, but also returns the names of skipped ZIP entries
+    (the HAR extractor skips entries silently, so reports none).
+
 ``UnsupportedArchiveError``
-    Raised by ``extract_from_archive`` for unrecognised archive types.
+    Raised when an uploaded file is not a recognised archive format.
 """
 
 import base64
@@ -20,7 +26,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from lifetracker.core.archives import extract_from_zip
+from lifetracker.core.archives import PDF_MAGIC, extract_pdfs_from_zip
 
 __all__ = [
     "UnsupportedArchiveError",
@@ -28,7 +34,6 @@ __all__ = [
     "extract_from_archive_with_skips",
 ]
 
-PDF_MAGIC = b"%PDF-"
 FIDELITY_URL_PREFIX = "https://netbenefitsww.fidelity.com/mybenefitsww/spshistoryservices/activities/record/c:"
 
 
@@ -163,7 +168,7 @@ def extract_from_archive_with_skips(file_bytes: bytes, filename: str) -> tuple[l
         return _extract_from_har(file_bytes), []
     if lower.endswith(".zip"):
         try:
-            return extract_from_zip(file_bytes)
+            return extract_pdfs_from_zip(file_bytes)
         except zipfile.BadZipFile as exc:
             raise UnsupportedArchiveError(f"Could not parse file as a ZIP archive: {exc}") from exc
     raise UnsupportedArchiveError(f"Unrecognised archive format for '{filename}'. Supported formats: .har, .zip")

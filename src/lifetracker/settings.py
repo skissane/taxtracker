@@ -373,12 +373,6 @@ STATIC_URL = "static/"
 # static directories while DEBUG is on.
 STATIC_ROOT = os.environ.get("LIFETRACKER_STATIC_ROOT")
 
-# Media files (uploads)
-# https://docs.djangoproject.com/en/6.0/topics/files/
-
-MEDIA_URL = "media/"
-MEDIA_ROOT = BASE_DIR / "media"
-
 # Logging
 # https://docs.djangoproject.com/en/6.0/topics/logging/
 #

@@ -1,100 +1,94 @@
-"""Generic helpers for archive import actions.
+"""Generic helpers for "Import archive" admin actions.
 
-The ZIP-specific bits are deliberately generic so other apps can reuse them for
-"Import Archive" actions without depending on taxtracker-specific models.
+``extract_pdfs_from_zip(file_bytes)``
+    Extract the PDFs from a ZIP archive, returning ``(extracted, skipped_names)``.
+    Raises ``zipfile.BadZipFile`` if the file isn't a ZIP archive.
+
+``select_importable_files(extracted, existing_names, duplicate_names)``
+    Drop extracted files whose names are already in *existing_names*.
+
+Module-specific formats (e.g. taxtracker's Fidelity HAR extractor) stay in
+their own module, which dispatches ``.zip`` uploads here.
 """
 
 import io
 import zipfile
 from pathlib import Path
-from typing import Iterable, Sequence
-
-PDF_MAGIC = b"%PDF-"
 
 __all__ = [
+    "MAX_ZIP_PDF_MEMBER_BYTES",
+    "MAX_ZIP_PDF_TOTAL_BYTES",
     "PDF_MAGIC",
-    "extract_from_zip",
     "extract_pdfs_from_zip",
-    "extract_pdf_files_from_zip",
-    "filter_duplicate_filenames",
-    "skip_duplicate_names",
+    "select_importable_files",
 ]
 
-
-def extract_from_zip(file_bytes: bytes) -> tuple[list[tuple[str, bytes]], list[str]]:
-    """Extract PDF files from a ZIP archive.
-
-    Returns ``(extracted, skipped_names)`` where each extracted entry is a
-    ``(filename, content_bytes)`` tuple and skipped names are non-PDF entries or
-    invalid PDFs.
-    """
-    try:
-        with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
-            results: list[tuple[str, bytes]] = []
-            skipped: list[str] = []
-            for info in archive.infolist():
-                if info.is_dir():
-                    continue
-                entry_name = Path(info.filename.replace("\\", "/")).name
-                if not entry_name:
-                    continue
-                if not (entry_name.endswith(".pdf") or entry_name.endswith(".PDF")):
-                    skipped.append(entry_name)
-                    continue
-                if entry_name.endswith(".PDF"):
-                    entry_name = entry_name[:-4] + ".pdf"
-                pdf_bytes = archive.read(info)
-                if not pdf_bytes.startswith(PDF_MAGIC):
-                    skipped.append(entry_name)
-                    continue
-                results.append((entry_name, pdf_bytes))
-            return results, skipped
-    except zipfile.BadZipFile:
-        raise
+PDF_MAGIC = b"%PDF-"
+MAX_ZIP_PDF_MEMBER_BYTES = 20 * 1024 * 1024
+MAX_ZIP_PDF_TOTAL_BYTES = 100 * 1024 * 1024
 
 
 def extract_pdfs_from_zip(file_bytes: bytes) -> tuple[list[tuple[str, bytes]], list[str]]:
-    """Compatibility alias for ``extract_from_zip``."""
-    return extract_from_zip(file_bytes)
+    """Extract PDF files from a ZIP archive.
 
-
-def extract_pdf_files_from_zip(file_bytes: bytes) -> tuple[list[tuple[str, bytes]], list[str]]:
-    """Compatibility alias for ``extract_from_zip``."""
-    return extract_from_zip(file_bytes)
-
-
-def filter_duplicate_filenames(
-    extracted: Sequence[tuple[str, bytes]] | Iterable[tuple[str, bytes]],
-    existing_names: set[str],
-) -> tuple[list[tuple[str, bytes]], list[str]]:
-    """Return ``(kept, duplicate_names)`` after skipping any filename already seen.
-
-    ``existing_names`` is treated as a mutable set of names already imported. Names
-    seen earlier in the same archive are also skipped, so the same file appearing
-    twice in the same upload won't be imported twice.
+    Only entries ending with ``.pdf`` or ``.PDF`` are imported. Directory
+    components are ignored and only the final path segment is used.
+    Non-PDF entries, PDFs exceeding uncompressed size limits and PDFs compressed
+    with anything but deflate are reported in the returned skipped list.
+    Raises ``zipfile.BadZipFile`` if *file_bytes* isn't a ZIP archive.
     """
-    kept: list[tuple[str, bytes]] = []
-    duplicate_names: list[str] = []
-    seen_in_batch: set[str] = set()
-    duplicate_reported: set[str] = set()
+    with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
+        results: list[tuple[str, bytes]] = []
+        skipped: list[str] = []
+        total_pdf_size = 0
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            entry_name = Path(info.filename.replace("\\", "/")).name
+            if not entry_name:
+                continue
+            if not (entry_name.endswith(".pdf") or entry_name.endswith(".PDF")):
+                skipped.append(entry_name)
+                continue
+            if entry_name.endswith(".PDF"):
+                entry_name = entry_name[:-4] + ".pdf"
+            # zipfile limits how much it decompresses at once only for deflate, so a bzip2 or LZMA entry could
+            # still expand far beyond file_size in one call; real ZIPs of PDFs are stored or deflated anyway.
+            if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                skipped.append(entry_name)
+                continue
+            if info.file_size > MAX_ZIP_PDF_MEMBER_BYTES:
+                skipped.append(entry_name)
+                continue
+            if total_pdf_size + info.file_size > MAX_ZIP_PDF_TOTAL_BYTES:
+                skipped.append(entry_name)
+                continue
+            # Not archive.read(): that asks the decompressor for up to 2 GiB at once and only then cuts the
+            # result to file_size, so an entry whose header understates its size could still exhaust memory.
+            with archive.open(info) as member:
+                pdf_bytes = member.read(info.file_size)
+            if not pdf_bytes.startswith(PDF_MAGIC):
+                skipped.append(entry_name)
+                continue
+            total_pdf_size += info.file_size
+            results.append((entry_name, pdf_bytes))
+        return results, skipped
 
+
+def select_importable_files(
+    extracted: list[tuple[str, bytes]], existing_names: set[str], duplicate_names: list[str]
+) -> list[tuple[str, bytes]]:
+    """Return archive files not already present, appending duplicates to *duplicate_names*.
+
+    Each kept file's basename is added to *existing_names*, so a name repeated
+    within the same archive is only imported once.
+    """
+    importable = []
     for filename, file_bytes in extracted:
         base_name = Path(filename).name
-        if base_name in existing_names or base_name in seen_in_batch:
-            if base_name not in duplicate_reported:
-                duplicate_names.append(base_name)
-                duplicate_reported.add(base_name)
+        if base_name in existing_names:
+            duplicate_names.append(base_name)
             continue
+        importable.append((base_name, file_bytes))
         existing_names.add(base_name)
-        seen_in_batch.add(base_name)
-        kept.append((filename, file_bytes))
-
-    return kept, duplicate_names
-
-
-def skip_duplicate_names(
-    extracted: Sequence[tuple[str, bytes]] | Iterable[tuple[str, bytes]],
-    existing_names: set[str],
-) -> tuple[list[tuple[str, bytes]], list[str]]:
-    """Compatibility alias for ``filter_duplicate_filenames``."""
-    return filter_duplicate_filenames(extracted, existing_names)
+    return importable
