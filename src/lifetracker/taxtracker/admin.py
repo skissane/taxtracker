@@ -18,6 +18,7 @@ from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
 
+from lifetracker.core.archives import filter_duplicate_filenames
 from lifetracker.core.attachments import extract_date_from_filename
 from lifetracker.core.models import DBStoredFile
 from lifetracker.core.trees import CYCLE_MARKER
@@ -290,14 +291,8 @@ class ItemAdmin(admin.ModelAdmin):
                     for file_name in Attachment.objects.filter(item=item).values_list("file", flat=True)
                     if file_name
                 }
-                importable: list[tuple[str, bytes]] = []
-                for pdf_filename, pdf_bytes in extracted:
-                    base_name = Path(pdf_filename).name
-                    if base_name in existing_names:
-                        duplicate_names.append(base_name)
-                        continue
-                    importable.append((base_name, pdf_bytes))
-                    existing_names.add(base_name)
+                importable, duplicate_names = filter_duplicate_filenames(extracted, existing_names)
+                importable = [(Path(pdf_filename).name, pdf_bytes) for pdf_filename, pdf_bytes in importable]
 
                 with transaction.atomic():
                     for pdf_filename, pdf_bytes in importable:
@@ -599,8 +594,9 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
                                 if file_name
                             }
                         existing_names = existing_names_by_year[year_num]
-                        if base_name in existing_names:
-                            duplicate_names.append(base_name)
+                        filtered, year_duplicates = filter_duplicate_filenames([(base_name, pdf_bytes)], existing_names)
+                        if not filtered:
+                            duplicate_names.extend(year_duplicates)
                             continue
 
                         doc = ReceivedDocument.objects.create(

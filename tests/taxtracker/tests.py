@@ -16,6 +16,7 @@ from django.test import Client, TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from lifetracker.core.archives import extract_from_zip, filter_duplicate_filenames
 from lifetracker.core.models import DBStoredFile, FileExtension, FileType
 from lifetracker.taxtracker.admin import (
     FinancialYearAdmin,

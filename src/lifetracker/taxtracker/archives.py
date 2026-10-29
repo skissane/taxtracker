@@ -16,10 +16,11 @@ Public interface
 """
 
 import base64
-import io
 import json
 import zipfile
 from pathlib import Path
+
+from lifetracker.core.archives import extract_from_zip
 
 __all__ = [
     "UnsupportedArchiveError",
@@ -141,43 +142,6 @@ def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
 
 
 # ---------------------------------------------------------------------------
-# ZIP extractor
-# ---------------------------------------------------------------------------
-
-
-def _extract_from_zip(file_bytes: bytes) -> tuple[list[tuple[str, bytes]], list[str]]:
-    """Extract PDF files from a ZIP archive.
-
-    Only entries ending with ``.pdf`` or ``.PDF`` are imported. Directory
-    components are ignored and only the final path segment is used.
-    Non-PDF entries are reported in the returned skipped list.
-    """
-    try:
-        with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
-            results: list[tuple[str, bytes]] = []
-            skipped: list[str] = []
-            for info in archive.infolist():
-                if info.is_dir():
-                    continue
-                entry_name = Path(info.filename.replace("\\", "/")).name
-                if not entry_name:
-                    continue
-                if not (entry_name.endswith(".pdf") or entry_name.endswith(".PDF")):
-                    skipped.append(entry_name)
-                    continue
-                if entry_name.endswith(".PDF"):
-                    entry_name = entry_name[:-4] + ".pdf"
-                pdf_bytes = archive.read(info)
-                if not pdf_bytes.startswith(PDF_MAGIC):
-                    skipped.append(entry_name)
-                    continue
-                results.append((entry_name, pdf_bytes))
-            return results, skipped
-    except zipfile.BadZipFile as exc:
-        raise UnsupportedArchiveError(f"Could not parse file as a ZIP archive: {exc}") from exc
-
-
-# ---------------------------------------------------------------------------
 # Public dispatcher
 # ---------------------------------------------------------------------------
 
@@ -198,5 +162,8 @@ def extract_from_archive_with_skips(file_bytes: bytes, filename: str) -> tuple[l
     if lower.endswith(".har"):
         return _extract_from_har(file_bytes), []
     if lower.endswith(".zip"):
-        return _extract_from_zip(file_bytes)
+        try:
+            return extract_from_zip(file_bytes)
+        except zipfile.BadZipFile as exc:
+            raise UnsupportedArchiveError(f"Could not parse file as a ZIP archive: {exc}") from exc
     raise UnsupportedArchiveError(f"Unrecognised archive format for '{filename}'. Supported formats: .har, .zip")
