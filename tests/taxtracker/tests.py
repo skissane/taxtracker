@@ -18,6 +18,7 @@ from lifetracker.taxtracker.admin import (
     FinancialYearAdmin,
     _adjust_notes_headings,
     _attachment_date_warning,
+    _select_importable_files,
 )
 from lifetracker.taxtracker.archives import (
     UnsupportedArchiveError,
@@ -395,6 +396,22 @@ class CopyItemsTests(TestCase):
             list(new_fy.items.order_by("order", "title").values_list("title", flat=True)),
             ["Child", "Root"],
         )
+
+
+class ArchiveImportHelperTests(TestCase):
+    def test_select_importable_files_skips_duplicates(self):
+        existing = {"invoice.pdf"}
+        duplicate_names = []
+
+        importable = _select_importable_files(
+            [("invoice.pdf", b"duplicate"), ("new.pdf", b"new")],
+            existing,
+            duplicate_names,
+        )
+
+        self.assertEqual(importable, [("new.pdf", b"new")])
+        self.assertEqual(duplicate_names, ["invoice.pdf"])
+        self.assertEqual(existing, {"invoice.pdf", "new.pdf"})
 
 
 class ReceivedDocumentAdminViewTests(TestCase):
