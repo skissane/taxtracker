@@ -1,5 +1,7 @@
 import base64
+import contextlib
 import datetime
+import io
 import json
 import tempfile
 import zipfile
@@ -19,7 +21,6 @@ from lifetracker.cli.extract_eml import (
     iter_parts_with_date_prefix,
 )
 from lifetracker.cli.extract_fidelity_pdfs import (
-    FIDELITY_URL_PREFIX,
     extract_fidelity_pdfs_command,
     extract_pdfs,
 )
@@ -38,6 +39,7 @@ from lifetracker.cli.zip_eml_to_txt import (
     convert_eml_zip_to_txt,
     zip_eml_to_txt_command,
 )
+from lifetracker.taxtracker.fidelity_har import FIDELITY_URL_PREFIX
 
 PDF_MAGIC = b"%PDF-1.4 fake"
 
@@ -411,6 +413,29 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertEqual(result.exit_code, 0, result.output)
             self.assertTrue((out_dir / "statement-2023-07-20.pdf").exists())
+
+    def test_warns_about_skipped_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            har_path = Path(tmp) / "export.har"
+            har_path.write_bytes(self._make_har(mime_type="text/html"))
+            stderr = io.StringIO()
+
+            with contextlib.redirect_stderr(stderr):
+                self.assertEqual(extract_pdfs(har_path, Path(tmp) / "out"), 0)
+
+            url = f"{FIDELITY_URL_PREFIX}statement-2023-07-20"
+            self.assertEqual(stderr.getvalue(), f"WARNING: unexpected content type 'text/html' for {url}; skipping\n")
+
+    def test_cli_invalid_har_exits_with_error(self):
+        runner = CliRunner()
+        with tempfile.TemporaryDirectory() as tmp:
+            har_path = Path(tmp) / "export.har"
+            har_path.write_bytes(b"not json")
+
+            result = runner.invoke(extract_fidelity_pdfs_command, [str(har_path), str(Path(tmp) / "out")])
+
+            self.assertEqual(result.exit_code, 1)
+            self.assertIn("ERROR: Could not parse file as a HAR archive", result.output)
 
     def test_cli_reports_when_no_entries_match(self):
         runner = CliRunner()
