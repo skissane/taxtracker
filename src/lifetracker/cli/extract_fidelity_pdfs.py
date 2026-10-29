@@ -10,9 +10,7 @@ from pathlib import Path
 
 import click
 
-from lifetracker.core.fidelity_har import (
-    extract_fidelity_pdfs_from_har,
-)
+from lifetracker.taxtracker.fidelity_har import UnsupportedArchiveError, extract_pdfs_from_har
 
 
 def extract_pdfs(har_path: Path, output_dir: Path) -> int:
@@ -22,10 +20,10 @@ def extract_pdfs(har_path: Path, output_dir: Path) -> int:
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if not har_path.is_file():
-        raise FileNotFoundError(har_path)
+    def warn(url: str, reason: str) -> None:
+        print(f"WARNING: {reason} for {url}; skipping", file=sys.stderr)
 
-    pdfs = extract_fidelity_pdfs_from_har(har_path.read_bytes())
+    pdfs = extract_pdfs_from_har(har_path.read_bytes(), on_skip=warn)
     written = 0
     for pdf_name, pdf_bytes in pdfs:
         out_path = output_dir / pdf_name
@@ -45,7 +43,11 @@ def extract_fidelity_pdfs_command(har_file: str, output_dir: str) -> None:
         print(f"ERROR: HAR file not found: {har_path}", file=sys.stderr)
         sys.exit(1)
 
-    count = extract_pdfs(har_path, Path(output_dir))
+    try:
+        count = extract_pdfs(har_path, Path(output_dir))
+    except UnsupportedArchiveError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
     if count == 0:
         print(
             "No matching Fidelity PDF entries found in the HAR file.",
