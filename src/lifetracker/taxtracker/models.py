@@ -54,8 +54,17 @@ class FinancialYear(models.Model):
     @classmethod
     def from_db(cls, db, field_names, values, *, fetch_mode=None):
         instance = super().from_db(db, field_names, values, fetch_mode=fetch_mode)
-        instance._loaded_status = instance.status
+        # Reading a deferred status would load it with a query of its own, so
+        # leave _loaded_status unset; save() then reads the previous status.
+        if "status" in field_names:
+            instance._loaded_status = instance.status
         return instance
+
+    def refresh_from_db(self, using=None, fields=None, from_queryset=None):
+        fields = None if fields is None else set(fields)
+        super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        if fields is None or "status" in fields:
+            self._loaded_status = self.status
 
     @property
     def start_date(self):

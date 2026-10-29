@@ -151,6 +151,51 @@ class FinancialYearModelTests(TestCase):
 
         self.assertEqual(self.fy.status_history.count(), 1)
 
+    def test_refresh_from_db_resets_loaded_status(self):
+        fy = FinancialYear.objects.get(pk=self.fy.pk)
+        FinancialYear.objects.filter(pk=fy.pk).update(status=FinancialYear.STATUS_SUBMITTED)
+
+        fy.refresh_from_db()
+        self.assertEqual(fy._loaded_status, FinancialYear.STATUS_SUBMITTED)
+        fy.save()
+
+        self.assertEqual(fy.status_history.count(), 1)
+
+    def test_refresh_from_db_of_status_only_resets_loaded_status(self):
+        fy = FinancialYear.objects.get(pk=self.fy.pk)
+        FinancialYear.objects.filter(pk=fy.pk).update(status=FinancialYear.STATUS_SUBMITTED)
+
+        # A generator, which Django's refresh_from_db() consumes.
+        fy.refresh_from_db(fields=(name for name in ["status"]))
+        self.assertEqual(fy._loaded_status, FinancialYear.STATUS_SUBMITTED)
+        fy.save()
+
+        self.assertEqual(fy.status_history.count(), 1)
+
+    def test_refresh_from_db_of_other_fields_keeps_loaded_status(self):
+        fy = FinancialYear.objects.get(pk=self.fy.pk)
+        fy.status = FinancialYear.STATUS_SUBMITTED
+
+        fy.refresh_from_db(fields=["lodgement_date_override"])
+        self.assertEqual(fy._loaded_status, FinancialYear.STATUS_PENDING_SUBMISSION)
+        fy.save()
+
+        latest = fy.status_history.order_by("-transitioned_at", "-pk").first()
+        self.assertEqual(latest.from_status, FinancialYear.STATUS_PENDING_SUBMISSION)
+        self.assertEqual(latest.to_status, FinancialYear.STATUS_SUBMITTED)
+
+    def test_deferred_status_is_not_loaded(self):
+        with self.assertNumQueries(1):
+            fy = FinancialYear.objects.only("year").get(pk=self.fy.pk)
+        self.assertIn("status", fy.get_deferred_fields())
+
+        fy.status = FinancialYear.STATUS_SUBMITTED
+        fy.save()
+
+        latest = fy.status_history.order_by("-transitioned_at", "-pk").first()
+        self.assertEqual(latest.from_status, FinancialYear.STATUS_PENDING_SUBMISSION)
+        self.assertEqual(latest.to_status, FinancialYear.STATUS_SUBMITTED)
+
     def test_ordering(self):
         fy2025 = FinancialYear.objects.create(year=2025)
         fy2023 = FinancialYear.objects.create(year=2023)
