@@ -322,7 +322,7 @@ class ItemAdmin(admin.ModelAdmin):
                 unique_skipped = list(dict.fromkeys(archive_skipped_names))
                 messages.warning(
                     request,
-                    f"Skipped {len(unique_skipped)} non-PDF file(s): {', '.join(unique_skipped)}.",
+                    f"Skipped {len(unique_skipped)} file(s): {', '.join(unique_skipped)}.",
                 )
             if duplicate_names:
                 unique_duplicates = list(dict.fromkeys(duplicate_names))
@@ -628,7 +628,7 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
                 unique_skipped = list(dict.fromkeys(archive_skipped_names))
                 messages.warning(
                     request,
-                    f"Skipped {len(unique_skipped)} non-PDF file(s): {', '.join(unique_skipped)}.",
+                    f"Skipped {len(unique_skipped)} file(s): {', '.join(unique_skipped)}.",
                 )
             if duplicate_names:
                 unique_duplicates = list(dict.fromkeys(duplicate_names))

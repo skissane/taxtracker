@@ -2001,6 +2001,27 @@ class ArchiveExtractorTests(TestCase):
         _, skipped = extract_from_archive_with_skips(zip_bytes, "export.zip")
         self.assertEqual(skipped, ["ignored.txt"])
 
+    def test_zip_skips_pdf_over_member_size_limit(self):
+        zip_bytes = _make_zip_archive([("too-big.pdf", PDF_MAGIC + b"x" * 20)])
+        with mock.patch("lifetracker.taxtracker.archives.MAX_ZIP_PDF_MEMBER_BYTES", 10):
+            extracted, skipped = extract_from_archive_with_skips(zip_bytes, "export.zip")
+        self.assertEqual(extracted, [])
+        self.assertEqual(skipped, ["too-big.pdf"])
+
+    def test_zip_skips_pdf_over_total_size_limit(self):
+        first_pdf = PDF_MAGIC + b"x" * 5
+        second_pdf = PDF_MAGIC + b"y" * 5
+        zip_bytes = _make_zip_archive(
+            [
+                ("first.pdf", first_pdf),
+                ("second.pdf", second_pdf),
+            ]
+        )
+        with mock.patch("lifetracker.taxtracker.archives.MAX_ZIP_PDF_TOTAL_BYTES", len(first_pdf)):
+            extracted, skipped = extract_from_archive_with_skips(zip_bytes, "export.zip")
+        self.assertEqual([name for name, _ in extracted], ["first.pdf"])
+        self.assertEqual(skipped, ["second.pdf"])
+
     def test_invalid_json_raises_unsupported(self):
         with self.assertRaises(UnsupportedArchiveError):
             extract_from_archive(b"not json at all", "export.har")
@@ -2191,7 +2212,7 @@ class ImportArchiveViewTests(TestCase):
             follow=True,
         )
         self.assertContains(response, "Imported 2 attachment(s)")
-        self.assertContains(response, "Skipped 1 non-PDF file(s): ignored.txt")
+        self.assertContains(response, "Skipped 1 file(s): ignored.txt")
         self.assertTrue(Attachment.objects.filter(item=self.item, file__endswith="/statement.pdf").exists())
         self.assertTrue(Attachment.objects.filter(item=self.item, file__endswith="/report.pdf").exists())
 
@@ -2342,7 +2363,7 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
         upload.name = "archive.zip"
         response = self.client.post(self._import_url(), {"archive": upload}, follow=True)
         self.assertContains(response, "Imported 1 received document(s)")
-        self.assertContains(response, "Skipped 1 non-PDF file(s): ignored.txt")
+        self.assertContains(response, "Skipped 1 file(s): ignored.txt")
 
     def test_post_zip_skips_pdf_without_year_prefix(self):
         zip_bytes = _make_zip_archive(
