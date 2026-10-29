@@ -14,7 +14,6 @@ if git_commit="$(git rev-parse HEAD 2>/dev/null)"; then
 fi
 
 uv sync
-uv run python manage.py upgrade_legacy_db
 uv run python manage.py migrate
 uv run python manage.py ensure_superuser
 uv run python manage.py ensure_jwt_key

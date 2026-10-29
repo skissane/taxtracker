@@ -30,7 +30,7 @@ Start the app with:
 ```
 
 and open <http://localhost:8000/admin/>.
-`run.sh` installs dependencies, upgrades a database created before the app was split into `core` and `taxtracker` (a no-op otherwise), applies migrations, creates an `admin` superuser if there isn't one, and starts Django's development server with `DEBUG` on.
+`run.sh` installs dependencies, applies migrations, creates an `admin` superuser if there isn't one, and starts Django's development server with `DEBUG` on.
 When it creates `admin`, it prints a random password, unless you've set one in the `LIFETRACKER_INITIAL_ADMIN_PASSWORD` environment variable or in `~/.config/lifetracker/initial_admin_password`.
 
 The database is `db.sqlite3` in the repo root (gitignored), and the generated secret key is `~/.config/lifetracker/secret_key`.
@@ -83,7 +83,7 @@ It also mounts your host config directory (`~/.config/lifetracker`, or `$LIFETRA
 Before starting the container it runs `manage.py check` and `manage.py ensure_jwt_key` on the host, which create the directory, the secret key and the JWT key pair as you if they don't exist yet; that way Docker never creates them as root.
 The database is still separate: the container's lives in the `lifetracker-data` volume, not in the repo.
 
-The container startup path runs `upgrade_legacy_db`, then `migrate`, then `ensure_superuser`, then `envoy_config` (which writes Envoy's config and creates the JWT key pair if it's missing; see [Front proxy JWT](#front-proxy-jwt)), then starts the Gunicorn WSGI server on `127.0.0.1:8001` behind an [Envoy](https://www.envoyproxy.io/) reverse proxy on `0.0.0.0:${PORT:-8000}`.
+The container startup path runs `migrate`, then `ensure_superuser`, then `envoy_config` (which writes Envoy's config and creates the JWT key pair if it's missing; see [Front proxy JWT](#front-proxy-jwt)), then starts the Gunicorn WSGI server on `127.0.0.1:8001` behind an [Envoy](https://www.envoyproxy.io/) reverse proxy on `0.0.0.0:${PORT:-8000}`.
 Envoy turns away requests without a valid login token (see [Front proxy JWT](#front-proxy-jwt)), and as Gunicorn listens only on the container's loopback interface, nothing outside the container can get to it without going through Envoy.
 If Envoy exits, it's restarted a second later; Gunicorn is the container's main process, so the container ends when Gunicorn does.
 If Envoy keeps failing (5 exits in a row, each within a minute of starting), the container stops Gunicorn and exits with status 1, so Fly records a failure and restarts the Machine.
