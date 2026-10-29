@@ -11,8 +11,6 @@ from pathlib import Path
 import click
 
 from lifetracker.core.fidelity_har import (
-    FIDELITY_URL_PREFIX,
-    PDF_MAGIC,
     extract_fidelity_pdfs_from_har,
 )
 
