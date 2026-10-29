@@ -397,8 +397,13 @@ jobs:
           docker tag lifetracker "$IMAGE:latest"
           docker push "$IMAGE:$GITHUB_SHA"
           docker push "$IMAGE:latest"
-          # RepoDigests holds <repo>@sha256:<digest> once pushed.
-          echo "image=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
+          # Ask the registry for the digest it stored, rather than reading the
+          # local RepoDigests: with Docker's containerd image store (as on
+          # ubuntu-26.04) those also list the local name, lifetracker@...,
+          # first, which Fly can't pull.
+          digest=$(docker buildx imagetools inspect "$IMAGE:$GITHUB_SHA" --format '{{.Manifest.Digest}}')
+          [[ "$digest" == sha256:* ]] || { echo "::error::unexpected digest '$digest'"; exit 1; }
+          echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
 
   # Deploy master to Fly.io once the image is published. The FLY_APP secret
   # holds the app's name (kept out of the public repo; see fly.toml) and

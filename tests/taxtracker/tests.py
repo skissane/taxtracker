@@ -8,11 +8,8 @@ from unittest import mock
 from django.contrib.auth.models import Permission, User
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
-from django.core.management import call_command
-from django.core.management.base import CommandError
-from django.db import IntegrityError, connection, transaction
-from django.db.migrations.recorder import MigrationRecorder
-from django.test import Client, TestCase, TransactionTestCase
+from django.db import IntegrityError, transaction
+from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -21,6 +18,7 @@ from lifetracker.taxtracker.admin import (
     FinancialYearAdmin,
     _adjust_notes_headings,
     _attachment_date_warning,
+    _select_importable_files,
 )
 from lifetracker.taxtracker.archives import (
     UnsupportedArchiveError,
@@ -398,6 +396,22 @@ class CopyItemsTests(TestCase):
             list(new_fy.items.order_by("order", "title").values_list("title", flat=True)),
             ["Child", "Root"],
         )
+
+
+class ArchiveImportHelperTests(TestCase):
+    def test_select_importable_files_skips_duplicates(self):
+        existing = {"invoice.pdf"}
+        duplicate_names = []
+
+        importable = _select_importable_files(
+            [("invoice.pdf", b"duplicate"), ("new.pdf", b"new")],
+            existing,
+            duplicate_names,
+        )
+
+        self.assertEqual(importable, [("new.pdf", b"new")])
+        self.assertEqual(duplicate_names, ["invoice.pdf"])
+        self.assertEqual(existing, {"invoice.pdf", "new.pdf"})
 
 
 class ReceivedDocumentAdminViewTests(TestCase):
@@ -2462,239 +2476,3 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
         client = self._limited_client("limited3", "add_receiveddocument", "add_attachment")
         response = client.get(self._import_url())
         self.assertEqual(response.status_code, 200)
-
-
-# ---------------------------------------------------------------------------
-# upgrade_legacy_db management command tests
-# ---------------------------------------------------------------------------
-
-
-class _LegacyUpgradeSchemaMixin:
-    """Shared setup for tests that invert the fresh core/taxtracker test
-    schema back into the pre-rename 'tracker' shape, mimicking a database
-    created before the lifetracker/core split."""
-
-    TABLE_RENAMES = {
-        "core_filetype": "tracker_filetype",
-        "core_mimetype": "tracker_mimetype",
-        "core_fileextension": "tracker_fileextension",
-        "core_dbstoredfile": "tracker_dbstoredfile",
-        "taxtracker_financialyear": "tracker_financialyear",
-        "taxtracker_financialyearstatushistory": ("tracker_financialyearstatushistory"),
-        "taxtracker_item": "tracker_item",
-        "taxtracker_attachment": "tracker_attachment",
-    }
-    CORE_MODELS = ["filetype", "mimetype", "fileextension", "dbstoredfile"]
-    TAXTRACKER_MODELS = [
-        "financialyear",
-        "financialyearstatushistory",
-        "item",
-        "attachment",
-    ]
-    LEGACY_MIGRATION_NAMES = [
-        "0001_initial",
-        "0002_filetype_model",
-        "0003_dbstoredfile_alter_attachment_file",
-        "0004_attachment_date",
-        "0005_financialyear_status_financialyearstatushistory",
-    ]
-
-    def _revert_to_legacy_schema(self):
-        with connection.cursor() as cursor:
-            for new_name, old_name in self.TABLE_RENAMES.items():
-                cursor.execute(
-                    f"ALTER TABLE {connection.ops.quote_name(new_name)} RENAME TO {connection.ops.quote_name(old_name)}"
-                )
-            core_placeholders = ", ".join(["%s"] * len(self.CORE_MODELS))
-            cursor.execute(
-                "UPDATE django_content_type SET app_label = 'tracker' "
-                f"WHERE app_label = 'core' AND model IN ({core_placeholders})",
-                self.CORE_MODELS,
-            )
-            taxtracker_placeholders = ", ".join(["%s"] * len(self.TAXTRACKER_MODELS))
-            cursor.execute(
-                "UPDATE django_content_type SET app_label = 'tracker' "
-                "WHERE app_label = 'taxtracker' AND model IN "
-                f"({taxtracker_placeholders})",
-                self.TAXTRACKER_MODELS,
-            )
-            # Models added after the legacy schema (e.g. ReceivedDocument,
-            # CloudBackupStatus) never existed under the 'tracker' label --
-            # delete their content types (and the auto-created permissions
-            # referencing them) rather than relabeling. The legacy rows were
-            # already moved to 'tracker' above, so anything still labeled
-            # 'core' or 'taxtracker' here postdates the legacy schema.
-            cursor.execute(
-                "DELETE FROM auth_permission WHERE content_type_id IN "
-                "(SELECT id FROM django_content_type "
-                "WHERE app_label IN ('core', 'taxtracker'))"
-            )
-            cursor.execute("DELETE FROM django_content_type WHERE app_label IN ('core', 'taxtracker')")
-            cursor.execute("DELETE FROM django_migrations WHERE app IN ('core', 'taxtracker')")
-        recorder = MigrationRecorder(connection)
-        for name in self.LEGACY_MIGRATION_NAMES:
-            recorder.record_applied("tracker", name)
-
-    def _call(self):
-        out = io.StringIO()
-        call_command("upgrade_legacy_db", stdout=out)
-        return out.getvalue()
-
-
-class LegacyUpgradeCommandTests(_LegacyUpgradeSchemaMixin, TestCase):
-    """Tests for the upgrade_legacy_db management command."""
-
-    def test_upgrade_renames_tables_and_data_survives(self):
-        fy = FinancialYear.objects.create(year=2024)
-        item = Item.objects.create(year=fy, title="Income", order=1)
-        self._revert_to_legacy_schema()
-
-        self._call()
-
-        tables = set(connection.introspection.table_names())
-        for new_name in self.TABLE_RENAMES:
-            self.assertIn(new_name, tables)
-        for old_name in self.TABLE_RENAMES.values():
-            self.assertNotIn(old_name, tables)
-
-        fy.refresh_from_db()
-        item.refresh_from_db()
-        self.assertEqual(fy.year, 2024)
-        self.assertEqual(item.title, "Income")
-
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) FROM django_content_type WHERE app_label = 'tracker'")
-            self.assertEqual(cursor.fetchone()[0], 0)
-            cursor.execute("SELECT app, name FROM django_migrations WHERE app IN ('core', 'taxtracker')")
-            rows = {(r[0], r[1]) for r in cursor.fetchall()}
-        self.assertEqual(rows, {("core", "0001_initial"), ("taxtracker", "0001_initial")})
-
-    def test_upgrade_preserves_content_type_primary_keys(self):
-        # Restrict to the models that actually existed under the legacy
-        # 'tracker' label -- models added later (e.g. ReceivedDocument) are
-        # dropped by _revert_to_legacy_schema() and are irrelevant here.
-        legacy_models = self.CORE_MODELS + self.TAXTRACKER_MODELS
-        placeholders = ", ".join(["%s"] * len(legacy_models))
-
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT id, app_label, model FROM django_content_type "
-                "WHERE app_label IN ('core', 'taxtracker') AND model IN "
-                f"({placeholders})",
-                legacy_models,
-            )
-            before = {(row[1], row[2]): row[0] for row in cursor.fetchall()}
-
-        self._revert_to_legacy_schema()
-        self._call()
-
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT id, app_label, model FROM django_content_type "
-                "WHERE app_label IN ('core', 'taxtracker') AND model IN "
-                f"({placeholders})",
-                legacy_models,
-            )
-            after = {(row[1], row[2]): row[0] for row in cursor.fetchall()}
-        self.assertEqual(before, after)
-
-    def test_second_run_is_a_no_op(self):
-        self._revert_to_legacy_schema()
-        self._call()
-        output = self._call()
-        self.assertIn("nothing to do", output)
-
-    def test_fresh_state_is_a_no_op(self):
-        output = self._call()
-        self.assertIn("nothing to do", output)
-
-    def test_partial_legacy_state_raises(self):
-        """A database with only some legacy tables renamed is refused."""
-        self._revert_to_legacy_schema()
-        with connection.cursor() as cursor:
-            cursor.execute("ALTER TABLE tracker_filetype RENAME TO core_filetype")
-        with self.assertRaises(CommandError):
-            self._call()
-
-    def test_mixed_state_raises(self):
-        """Legacy tables present alongside an already-existing target table."""
-        self._revert_to_legacy_schema()
-        with connection.cursor() as cursor:
-            cursor.execute("CREATE TABLE core_filetype (id integer primary key)")
-        with self.assertRaises(CommandError):
-            self._call()
-
-    def test_stray_migrations_row_for_new_app_raises(self):
-        """django_migrations already having a 'core'/'taxtracker' row alongside
-        legacy 'tracker' tables is refused, even with no target tables present."""
-        self._revert_to_legacy_schema()
-        recorder = MigrationRecorder(connection)
-        recorder.record_applied("core", "0001_initial")
-        with self.assertRaisesMessage(
-            CommandError,
-            "django_migrations already has rows for 'core' or 'taxtracker'",
-        ):
-            self._call()
-
-    def test_unexpected_legacy_migration_set_raises(self):
-        """A 'tracker' migration history that doesn't match the expected
-        legacy set is refused rather than guessed at."""
-        self._revert_to_legacy_schema()
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "DELETE FROM django_migrations "
-                "WHERE app = 'tracker' AND name = '0005_financialyear_status_financialyearstatushistory'"
-            )
-        with self.assertRaisesMessage(
-            CommandError,
-            "do not match the expected legacy migration set",
-        ):
-            self._call()
-
-    def test_stray_content_type_for_new_app_raises(self):
-        """django_content_type already having a 'core'/'taxtracker' row is
-        refused, even though django_migrations looks clean."""
-        self._revert_to_legacy_schema()
-        with connection.cursor() as cursor:
-            cursor.execute("INSERT INTO django_content_type (app_label, model) VALUES ('core', 'stray_model')")
-        with self.assertRaisesMessage(
-            CommandError,
-            "django_content_type already has rows for 'core' or 'taxtracker'",
-        ):
-            self._call()
-
-    def test_unrecognised_tracker_content_type_raises(self):
-        """A content_type row labelled 'tracker' for a model outside the
-        known core/taxtracker model lists is left behind by the relabeling
-        UPDATEs, and must be reported rather than silently ignored."""
-        self._revert_to_legacy_schema()
-        with connection.cursor() as cursor:
-            cursor.execute("INSERT INTO django_content_type (app_label, model) VALUES ('tracker', 'phantom_model')")
-        with self.assertRaisesMessage(
-            CommandError,
-            "still have app_label='tracker' after relabeling",
-        ):
-            self._call()
-
-
-class LegacyUpgradeCommandForeignKeyCheckTests(_LegacyUpgradeSchemaMixin, TransactionTestCase):
-    """Covers the post-rename PRAGMA foreign_key_check branch. Toggling the
-    foreign_keys pragma is a no-op inside a transaction, so this needs a real
-    (non-savepoint-wrapped) connection via TransactionTestCase."""
-
-    def test_foreign_key_violation_after_rename_raises(self):
-        fy = FinancialYear.objects.create(year=2024)
-        Item.objects.create(year=fy, title="Income", order=1)
-        self._revert_to_legacy_schema()
-
-        with connection.cursor() as cursor:
-            cursor.execute("PRAGMA foreign_keys = OFF")
-            cursor.execute(
-                "INSERT INTO tracker_item "
-                '(title, "order", status, notes, year_id, parent_id) '
-                "VALUES ('Orphan', 1, 'pending', '', 999999, NULL)"
-            )
-            cursor.execute("PRAGMA foreign_keys = ON")
-
-        with self.assertRaisesMessage(CommandError, "Foreign key check failed after upgrade"):
-            self._call()

@@ -66,8 +66,7 @@ Its `uv lock` runs can still build a dependency's sdist to read its metadata, ru
 `test` waits on it and runs only if it was skipped or pushed nothing; if it pushed, that run's `test` is skipped and the run the push triggers tests the fixed commit.
 
 ```bash
-# Start the app (sync deps, upgrade legacy DB schema if needed, migrate,
-# create superuser, runserver)
+# Start the app (sync deps, migrate, create superuser, runserver)
 ./run.sh
 
 # Run all tests (pytest-django + pytest-xdist, parallelised across CPU cores)
@@ -197,9 +196,6 @@ It waits for a request to get through to the upstream rather than just for the p
 It's skipped without Docker (no `docker` command, or `docker info` failing) unless `LIFETRACKER_REQUIRE_ENVOY` is set, as the `test` job's `just coverage` step sets it.
 `just docker-smoke` checks the built image's Envoy: `/healthz/` answers without a login, and a request for a page that doesn't exist gets Envoy's redirect (Django would 404).
 `tests/conftest.py` has an autouse fixture pointing both key file settings at a per-process temporary directory, so tests never write keys to the real config directory.
-
-**Legacy database upgrade:** databases created before the `lifetracker`/`core`/`taxtracker` split still have the old `tracker_*` tables and `django_migrations`/`django_content_type` rows under app label `tracker`.
-`taxtracker`'s `upgrade_legacy_db` management command renames those tables and re-labels the content types in place; it is idempotent (no-op on fresh or already-upgraded databases) and `run.sh` runs it unconditionally before `migrate`.
 
 **Client IPs:** issue #201 keeps a lasting record of where requests come from, as `fly logs` keeps only a short window; alerting on it (e.g. a logged-in request from a new ASN) is #213, after #212 builds a way to send alerts.
 Envoy sees every request, including those `jwt_authn` turns away, which never reach gunicorn, so a second access log in `envoy/envoy.yaml` (a file logger with `json_format`) writes one JSON line per request to `@REQUEST_LOG@`: start time, `Fly-Client-IP`, the direct peer, method, path, status, user agent, `jwt_failure` (`failed_status_in_metadata`) and `jwt_sub` (the `sub` from `payload_in_metadata: jwt_payload`), each missing value `null`.
@@ -451,6 +447,7 @@ Other non-secret settings are in `fly.toml`'s `[env]`; the `LIFETRACKER_BACKUP_S
 A volume attaches to one Machine, so the app must never be scaled past one; CI's deploy passes `--ha=false` so that if the app has no Machine yet (e.g. first deploy) it creates one, not two, and manual `fly deploy`s should too.
 `.env` is in `.dockerignore` so it's never baked into an image.
 On every push to `master`, once tests pass, CI deploys the exact image the `test` job built rather than rebuilding it: `test` saves it (`docker save`) as a workflow artifact, `publish` (the only job with `packages: write`, and it runs no repo code) loads it and pushes it to GHCR (public) as `ghcr.io/skissane/taxtracker:<sha>` and `:latest`, and `deploy` runs `flyctl deploy --ha=false --image ghcr.io/skissane/taxtracker@<digest>`, so Fly pulls it by digest.
+`publish` gets the digest from the registry (`docker buildx imagetools inspect`), not the local `RepoDigests`, as with Docker's containerd image store (the `ubuntu-26.04` runner's) those list the local `lifetracker@<digest>` first, which Fly can't pull.
 `deploy` uses the `FLY_API_TOKEN` repo secret (a deploy token scoped to the app); deploys queue rather than cancel each other.
 `flyctl deploy` restarts a running Machine on the new image, smoke-checking it, but only updates a stopped one, leaving it stopped (flyctl's `shouldSkipLaunch`), which with the idle watchdog is usual; nothing would then boot the new image, and run its migrations, until the next visit.
 So `deploy` then runs `scripts/check_deploy.py` (stdlib-only, `uv run --no-project`), which polls `https://$FLY_APP.fly.dev/healthz/` (Fly Proxy starts the Machine on the first request) every 5 seconds for up to 5 minutes until it answers 200 with `"status": "ok"` and `"commit"` equal to `GITHUB_SHA`, and otherwise fails the job; it never prints the URL, which holds the app's name.
@@ -509,7 +506,7 @@ Do not flag comma-separated exception types (without parentheses) as "Python 2-s
 This is valid in Python 3, and ruff format will restore it if you remove it.
 
 **Legacy-upgraded databases keep old `tracker_`-prefixed index names.**
-SQLite's `ALTER TABLE ... RENAME TO` (used by `upgrade_legacy_db`) has no equivalent for indexes, so a database that went through the upgrade keeps index names like `tracker_item_parent_id_d6e76dee` on the renamed `taxtracker_item` table, instead of matching what a fresh install would generate.
+Databases created before the `lifetracker`/`core`/`taxtracker` split were upgraded in place by renaming their `tracker_*` tables (with a since-removed `upgrade_legacy_db` command), and SQLite's `ALTER TABLE ... RENAME TO` has no equivalent for indexes, so such a database keeps index names like `tracker_item_parent_id_d6e76dee` on the renamed `taxtracker_item` table, instead of matching what a fresh install would generate.
 This is cosmetic only — Django never looks up indexes by name at runtime — do not "fix" it.
 
 **Always use `uv run python` for ad-hoc scripts.**
