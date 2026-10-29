@@ -156,8 +156,8 @@ def _extract_from_zip(file_bytes: bytes) -> tuple[list[tuple[str, bytes]], list[
 
     Only entries ending with ``.pdf`` or ``.PDF`` are imported. Directory
     components are ignored and only the final path segment is used.
-    Non-PDF entries and PDFs exceeding uncompressed size limits are reported in
-    the returned skipped list.
+    Non-PDF entries, PDFs exceeding uncompressed size limits and PDFs compressed
+    with anything but deflate are reported in the returned skipped list.
     """
     try:
         with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
@@ -175,6 +175,11 @@ def _extract_from_zip(file_bytes: bytes) -> tuple[list[tuple[str, bytes]], list[
                     continue
                 if entry_name.endswith(".PDF"):
                     entry_name = entry_name[:-4] + ".pdf"
+                # zipfile limits how much it decompresses at once only for deflate, so a bzip2 or LZMA entry could
+                # still expand far beyond file_size in one call; real ZIPs of PDFs are stored or deflated anyway.
+                if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                    skipped.append(entry_name)
+                    continue
                 if info.file_size > MAX_ZIP_PDF_MEMBER_BYTES:
                     skipped.append(entry_name)
                     continue

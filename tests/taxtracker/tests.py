@@ -2038,6 +2038,16 @@ class ArchiveExtractorTests(TestCase):
         self.assertEqual([name for name, _ in extracted], ["first.pdf"])
         self.assertEqual(skipped, ["second.pdf"])
 
+    def test_zip_skips_pdf_not_stored_or_deflated(self):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, mode="w") as zf:
+            zf.writestr("deflated.pdf", PDF_MAGIC + b"a", compress_type=zipfile.ZIP_DEFLATED)
+            zf.writestr("bzip2.pdf", PDF_MAGIC + b"b", compress_type=zipfile.ZIP_BZIP2)
+            zf.writestr("lzma.pdf", PDF_MAGIC + b"c", compress_type=zipfile.ZIP_LZMA)
+        extracted, skipped = extract_from_archive_with_skips(buf.getvalue(), "export.zip")
+        self.assertEqual([name for name, _ in extracted], ["deflated.pdf"])
+        self.assertEqual(skipped, ["bzip2.pdf", "lzma.pdf"])
+
     def test_zip_understated_member_size_does_not_exhaust_memory(self):
         # 32 MiB of zeros compresses to about 32 KiB; the headers then claim it's only 100 bytes.
         buf = io.BytesIO()
@@ -2248,7 +2258,7 @@ class ImportArchiveViewTests(TestCase):
             follow=True,
         )
         self.assertContains(response, "Imported 2 attachment(s)")
-        self.assertContains(response, "Skipped 1 non-PDF or too large file(s): ignored.txt")
+        self.assertContains(response, "Skipped 1 non-PDF, too large or unreadable file(s): ignored.txt")
         self.assertTrue(Attachment.objects.filter(item=self.item, file__endswith="/statement.pdf").exists())
         self.assertTrue(Attachment.objects.filter(item=self.item, file__endswith="/report.pdf").exists())
 
@@ -2399,7 +2409,7 @@ class ReceivedDocumentImportArchiveViewTests(TestCase):
         upload.name = "archive.zip"
         response = self.client.post(self._import_url(), {"archive": upload}, follow=True)
         self.assertContains(response, "Imported 1 received document(s)")
-        self.assertContains(response, "Skipped 1 non-PDF or too large file(s): ignored.txt")
+        self.assertContains(response, "Skipped 1 non-PDF, too large or unreadable file(s): ignored.txt")
 
     def test_post_zip_skips_pdf_without_year_prefix(self):
         zip_bytes = _make_zip_archive(
