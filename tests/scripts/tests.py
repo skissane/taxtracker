@@ -20,7 +20,11 @@ from scripts.check_screenshots_dir import main as screenshots_dir_main
 from scripts.check_whitespace import _problems
 from scripts.check_whitespace import main as whitespace_main
 from scripts.dependabot_relock import main as relock_main
-from scripts.post_screenshots import MARKER, _request
+from scripts.github_comments import request as github_request
+from scripts.post_patch_coverage import MARKER as PATCH_COVERAGE_MARKER
+from scripts.post_patch_coverage import MAX_BODY_CHARS
+from scripts.post_patch_coverage import main as post_patch_coverage_main
+from scripts.post_screenshots import MARKER
 from scripts.post_screenshots import main as post_screenshots_main
 from scripts.requirements_min_versions import main
 from scripts.validate_uv_lock_os_arch import (
@@ -344,7 +348,7 @@ class PostScreenshotsTests(SimpleTestCase):
                 contextlib.redirect_stdout(io.StringIO()),
                 contextlib.redirect_stderr(stderr),
                 mock.patch.dict("os.environ", env, clear=True),
-                mock.patch("scripts.post_screenshots._request", fake_request),
+                mock.patch("scripts.github_comments.request", fake_request),
             ):
                 code = post_screenshots_main(["7", *args])
         return code, stderr.getvalue(), requests
@@ -470,7 +474,7 @@ class PostScreenshotsTests(SimpleTestCase):
             out = "o/r" if cmd[1] == "repo" else "gho_local"
             return subprocess.CompletedProcess(cmd, 0, stdout=out + "\n")
 
-        with mock.patch("scripts.post_screenshots.subprocess.run", fake_gh):
+        with mock.patch("scripts.github_comments.subprocess.run", fake_gh):
             code, _, requests = self._run(["index.png"], env={})
         self.assertEqual(code, 0)
         self.assertEqual({r[2] for r in requests}, {"gho_local"})
@@ -481,7 +485,7 @@ class PostScreenshotsTests(SimpleTestCase):
 
         with (
             mock.patch.dict("os.environ", {}, clear=True),
-            mock.patch("scripts.post_screenshots.subprocess.run", fake_gh),
+            mock.patch("scripts.github_comments.subprocess.run", fake_gh),
             tempfile.TemporaryDirectory() as tmp,
             contextlib.chdir(tmp),
             contextlib.redirect_stderr(io.StringIO()) as stderr,
@@ -509,7 +513,137 @@ class PostScreenshotsTests(SimpleTestCase):
                 self.assertEqual(requests, [])
 
 
-class PostScreenshotsRequestTests(SimpleTestCase):
+class PostPatchCoverageTests(SimpleTestCase):
+    REPORT = "# Diff Coverage\n## Diff: origin/master...HEAD\n\n- a.py (50.0%): Missing lines 2\n"
+
+    def _run(self, *args, report=REPORT, comments=(), fail=None, head="abc1234def") -> tuple[int, str, list[tuple]]:
+        """Run main() on PR 7 in a temp dir holding patch-coverage.md (unless
+        report is None), with the API faked as in PostScreenshotsTests. Return
+        the exit code, stderr and each request as (method, url, token, json_body)."""
+        requests = []
+
+        def fake_request(method, url, token, *, json_body=None, **kw):
+            requests.append((method, url, token, json_body))
+            if fail and method == fail[0] and url.startswith(fail[1]):
+                raise urllib.error.HTTPError(url, 403, "Forbidden", {}, io.BytesIO(b"nope"))
+            if url == "https://api.github.com/user":
+                return {"login": "me"}
+            if url == "https://api.github.com/repos/o/r/pulls/7":
+                return {"head": {"sha": head}}
+            if method == "GET" and "/issues/7/comments" in url:
+                return list(comments)
+            return None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            if report is not None:
+                (Path(tmp) / "patch-coverage.md").write_text(report)
+            stderr = io.StringIO()
+            with (
+                contextlib.chdir(tmp),
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(stderr),
+                mock.patch.dict("os.environ", {"GITHUB_TOKEN": "ghs", "GITHUB_REPOSITORY": "o/r"}, clear=True),
+                mock.patch("scripts.github_comments.request", fake_request),
+            ):
+                code = post_patch_coverage_main(["7", *args])
+        return code, stderr.getvalue(), requests
+
+    def _writes(self, requests):
+        return [r for r in requests if r[0] in ("POST", "PATCH", "DELETE")]
+
+    def test_posts_report(self):
+        code, _, requests = self._run(
+            "--commit",
+            "abc1234",
+            "--run-url",
+            "https://example.com/run",
+            "--author",
+            "github-actions[bot]",
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual({r[2] for r in requests}, {"ghs"})
+        self.assertNotIn("https://api.github.com/user", [r[1] for r in requests])
+        (post,) = self._writes(requests)
+        self.assertEqual(post[:2], ("POST", "https://api.github.com/repos/o/r/issues/7/comments"))
+        self.assertEqual(
+            post[3]["body"],
+            f"{PATCH_COVERAGE_MARKER}\n## Diff Coverage\n\n"
+            "Patch coverage of abc1234, from [this workflow run](https://example.com/run).\n\n"
+            "## Diff: origin/master...HEAD\n\n- a.py (50.0%): Missing lines 2",
+        )
+
+    def test_report_without_title(self):
+        code, _, requests = self._run(report="No lines with coverage information in this diff.\n")
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            self._writes(requests)[0][3]["body"],
+            f"{PATCH_COVERAGE_MARKER}\n## Diff Coverage\n\nNo lines with coverage information in this diff.",
+        )
+
+    def test_stale_commit_posts_nothing(self):
+        code, _, requests = self._run("--commit", "0ld0ld0")
+        self.assertEqual(code, 0)
+        self.assertEqual(self._writes(requests), [])
+
+    def test_edits_previous_comment(self):
+        comments = [
+            {"id": 1, "user": {"login": "me"}, "body": MARKER + "\nscreenshots"},
+            {"id": 2, "user": {"login": "me"}, "body": PATCH_COVERAGE_MARKER + "\nold"},
+        ]
+        code, _, requests = self._run(comments=comments)
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            [r[:2] for r in self._writes(requests)],
+            [("PATCH", "https://api.github.com/repos/o/r/issues/comments/2")],
+        )
+
+    def test_long_report_truncated(self):
+        lines = "\n".join(f"  {n} x = {n}" for n in range(20_000))
+        report = f"# Diff Coverage\n\n## a.py\n\n```python\n{lines}\n```\n"
+        code, _, requests = self._run("--run-url", "https://example.com/run", report=report)
+        self.assertEqual(code, 0)
+        body = self._writes(requests)[0][3]["body"]
+        self.assertLess(len(body), 65_536)
+        before, note = body.rsplit("\n\n", 1)
+        self.assertLessEqual(len(before), MAX_BODY_CHARS + 4)
+        self.assertTrue(before.endswith("\n```"))
+        self.assertEqual(before.count("```"), 2)
+        self.assertEqual(
+            note,
+            "_Report truncated; the whole of it is in the `patch-coverage` artifact of "
+            "[this workflow run](https://example.com/run)._",
+        )
+
+    def test_missing_report(self):
+        code, stderr, requests = self._run(report=None)
+        self.assertEqual(code, 1)
+        self.assertIn("patch-coverage.md", stderr)
+        self.assertEqual(requests, [])
+
+    def test_http_error_reported(self):
+        code, stderr, _ = self._run(fail=("POST", "https://api.github.com/repos/o/r/issues/7/comments"))
+        self.assertEqual(code, 1)
+        self.assertIn("HTTP 403", stderr)
+        self.assertIn("nope", stderr)
+
+    def test_gh_failure_reported(self):
+        def fake_gh(cmd, **kwargs):
+            raise subprocess.CalledProcessError(1, cmd, stderr="not logged in")
+
+        with (
+            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch("scripts.github_comments.subprocess.run", fake_gh),
+            tempfile.TemporaryDirectory() as tmp,
+            contextlib.chdir(tmp),
+            contextlib.redirect_stderr(io.StringIO()) as stderr,
+        ):
+            Path("patch-coverage.md").write_text(self.REPORT)
+            code = post_patch_coverage_main(["7"])
+        self.assertEqual(code, 1)
+        self.assertIn("not logged in", stderr.getvalue())
+
+
+class GitHubCommentsRequestTests(SimpleTestCase):
     def _response(self, payload: bytes):
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = payload
@@ -520,7 +654,7 @@ class PostScreenshotsRequestTests(SimpleTestCase):
 
     def test_sends_json_with_token(self):
         with mock.patch("urllib.request.urlopen", return_value=self._response(b'{"a": 1}')) as urlopen:
-            result = _request("POST", "https://api.github.com/x", "tok", json_body={"b": 2})
+            result = github_request("POST", "https://api.github.com/x", "tok", json_body={"b": 2})
         self.assertEqual(result, {"a": 1})
         request = urlopen.call_args.args[0]
         self.assertEqual(urlopen.call_args.kwargs, {"timeout": 60})
@@ -531,7 +665,7 @@ class PostScreenshotsRequestTests(SimpleTestCase):
 
     def test_empty_response_is_none(self):
         with mock.patch("urllib.request.urlopen", return_value=self._response(b"")):
-            self.assertIsNone(_request("DELETE", "https://api.github.com/x", "tok"))
+            self.assertIsNone(github_request("DELETE", "https://api.github.com/x", "tok"))
 
     def test_follows_redirects_dropping_token_off_host(self):
         responses = [
@@ -540,7 +674,7 @@ class PostScreenshotsRequestTests(SimpleTestCase):
             self._response(b'{"url": "u"}'),
         ]
         with mock.patch("urllib.request.urlopen", side_effect=responses) as urlopen:
-            result = _request("POST", "https://uploads.github.com/a", "tok", data=b"png")
+            result = github_request("POST", "https://uploads.github.com/a", "tok", data=b"png")
         self.assertEqual(result, {"url": "u"})
         sent = [c.args[0] for c in urlopen.call_args_list]
         self.assertEqual(
@@ -563,7 +697,7 @@ class PostScreenshotsRequestTests(SimpleTestCase):
             mock.patch("urllib.request.urlopen", side_effect=[redirect] * 5),
             self.assertRaisesRegex(RuntimeError, "too many redirects"),
         ):
-            _request("GET", "https://api.github.com/x", "tok")
+            github_request("GET", "https://api.github.com/x", "tok")
 
     def test_other_errors_raised(self):
         error = urllib.error.HTTPError("https://api.github.com/x", 404, "Not Found", {}, None)
@@ -572,7 +706,7 @@ class PostScreenshotsRequestTests(SimpleTestCase):
             mock.patch("urllib.request.urlopen", side_effect=error),
             self.assertRaises(urllib.error.HTTPError),
         ):
-            _request("GET", "https://api.github.com/x", "tok")
+            github_request("GET", "https://api.github.com/x", "tok")
 
 
 class CheckWhitespaceTests(SimpleTestCase):

@@ -6,6 +6,7 @@
 __pycache__
 .coverage
 coverage.xml
+patch-coverage.md
 junit.xml
 db.sqlite3
 db.sqlite3-wal
