@@ -1,10 +1,8 @@
 set minimum-version := '1.58.0'
 # Dummy assignment, so every recipe run sets up the repo's local Git config
-# (see scripts/git-config-setup.sh). It relies on just evaluating every
-# top-level assignment eagerly: under `set lazy := true` the unused `_` would
-# never be evaluated, and the script would never run. `justfile-check` fails if
-# `set lazy` is turned on.
-_ := shell('./scripts/git-config-setup.sh')
+# (see scripts/git-config-setup.sh). `eager` makes just evaluate it even though
+# nothing uses it, whether or not `set lazy` is on (casey/just#3759).
+eager _ := shell('./scripts/git-config-setup.sh')
 
 # List available recipes
 default:
@@ -231,17 +229,12 @@ docker-shell *args:
 fly-setup *args:
     ./fly-setup.sh "$@"
 
-# Ensures that 'set lazy' is disabled in the justfile
-justfile-check:
-    test "$({{quote(just_executable())}} --json --justfile {{quote(justfile())}} | jq .settings.lazy)" = "false" || \
-        (echo "ERROR: 'set lazy' is incompatible with this justfile" >&2; exit 1)
-
 # Lint the GitHub Actions workflows with jactionlint
 lint-workflows:
     uv run --group dev jactionlint --profile correctness
 
-# Run every whitespace, screenshots/, blame-ignore-revs, ruff, djlint, jactionlint and justfile check (no fixes, no tests)
-check: whitespace-check screenshots-dir-check blame-ignore-revs-check lint fmt-check lint-templates fmt-check-templates lint-workflows justfile-check
+# Run every whitespace, screenshots/, blame-ignore-revs, ruff, djlint and jactionlint check (no fixes, no tests)
+check: whitespace-check screenshots-dir-check blame-ignore-revs-check lint fmt-check lint-templates fmt-check-templates lint-workflows
 
 # Autofix lint issues and reformat code/templates
 fix: lint-fix fmt fmt-templates
