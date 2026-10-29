@@ -196,7 +196,7 @@ It's skipped without Docker (no `docker` command, or `docker info` failing) unle
 `tests/conftest.py` has an autouse fixture pointing both key file settings at a per-process temporary directory, so tests never write keys to the real config directory.
 
 **Legacy database upgrade:** databases created before the `lifetracker`/`core`/`taxtracker` split still have the old `tracker_*` tables and `django_migrations`/`django_content_type` rows under app label `tracker`.
-`taxtracker`'s `upgrade_legacy_db` management command renames those tables and re-labels the content types in place; it is idempotent (no-op on fresh or already-upgraded databases) and `run.sh` runs it unconditionally before `migrate`.
+`taxtracker`'s `upgrade_legacy_db` management command renames those tables and re-labels the content types in place; it is idempotent (no-op on fresh or already-upgraded databases), and is kept for one-off legacy recovery rather than being run automatically on normal startup.
 
 **Client IPs:** issue #201 keeps a lasting record of where requests come from, as `fly logs` keeps only a short window; alerting on it (e.g. a logged-in request from a new ASN) is #213, after #212 builds a way to send alerts.
 Envoy sees every request, including those `jwt_authn` turns away, which never reach gunicorn, so a second access log in `envoy/envoy.yaml` (a file logger with `json_format`) writes one JSON line per request to `@REQUEST_LOG@`: start time, `Fly-Client-IP`, the direct peer, method, path, status, user agent, `jwt_failure` (`failed_status_in_metadata`) and `jwt_sub` (the `sub` from `payload_in_metadata: jwt_payload`), each missing value `null`.

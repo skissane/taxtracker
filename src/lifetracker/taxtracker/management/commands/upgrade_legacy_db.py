@@ -1,27 +1,28 @@
-"""One-time, idempotent fixup for databases created under the pre-rename
+"""Legacy, one-off fixup for databases created under the pre-rename
 "tracker" app label.
 
-Before the lifetracker/core split, all tables lived under a single app
-label "tracker" (project package taxtracker.tracker). This command
-renames the 8 legacy tracker_* tables to their new core_*/taxtracker_*
-names, relabels the corresponding django_content_type rows (preserving
-their primary keys, so auth_permission and django_admin_log rows -- which
-reference content types by FK -- keep working), and replaces the 5
-legacy tracker migration records with the two new squashed initial
+This command is kept only for recovery from old databases; normal startup no
+longer calls it automatically. Before the lifetracker/core split, all tables
+lived under a single app label "tracker" (project package
+taxtracker.tracker). This command renames the 8 legacy tracker_* tables to
+their new core_*/taxtracker_* names, relabels the corresponding
+`django_content_type` rows (preserving their primary keys so
+`auth_permission` and `django_admin_log` rows keep working), and replaces the
+5 legacy tracker migration records with the two new squashed initial
 migrations.
 
 Safe to run unconditionally before `migrate`: it is a no-op on a fresh
 database (no legacy tables) and a no-op on an already-upgraded database
-(same reason -- no legacy tables). It aborts without making any changes
-if it finds a partially-upgraded or otherwise unrecognised state; in that
-case, restore db.sqlite3 from a backup and investigate before retrying.
+(same reason -- no legacy tables). It aborts without making any changes if it
+finds a partially-upgraded or otherwise unrecognised state; in that case,
+restore `db.sqlite3` from a backup and investigate before retrying.
 
-Note: SQLite's ALTER TABLE ... RENAME TO has no equivalent for indexes,
-so the renamed tables keep their old tracker_-prefixed index names (e.g.
-tracker_item_parent_id_d6e76dee) instead of matching what a fresh install
-would generate. This is purely cosmetic -- Django never looks up indexes
-by name at runtime -- so it is left as-is rather than trying to recreate
-the indexes with hash-matched names.
+Note: SQLite's `ALTER TABLE ... RENAME TO` has no equivalent for indexes, so
+renamed tables keep their old `tracker_`-prefixed index names (for example,
+`tracker_item_parent_id_d6e76dee`) instead of matching what a fresh install
+would generate. This is purely cosmetic -- Django never looks up indexes by
+name at runtime -- so it is left as-is rather than trying to recreate the
+indexes with hash-matched names.
 """
 
 from django.core.management.base import BaseCommand, CommandError

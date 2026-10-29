@@ -1,7 +1,7 @@
 """Archive processing helpers for the import-archive admin view.
 
-Currently supports Fidelity HAR files.  The public API is intentionally
-generic so that additional archive formats (ZIP, etc.) can be added later
+The import flow supports both Fidelity HAR files and `.zip` bundles of PDFs.
+The public API is intentionally generic so additional formats can be added
 without touching the view layer.
 
 Public interface
@@ -11,8 +11,11 @@ Public interface
     Returns a list of ``(output_filename, pdf_bytes)`` tuples.
     Raises ``UnsupportedArchiveError`` when no extractor matches.
 
+``extract_from_archive_with_skips(file_bytes, filename)``
+    Like ``extract_from_archive``, but also returns the names of skipped entries.
+
 ``UnsupportedArchiveError``
-    Raised by ``extract_from_archive`` for unrecognised archive types.
+    Raised when an uploaded file is not a recognised archive format.
 """
 
 import base64
