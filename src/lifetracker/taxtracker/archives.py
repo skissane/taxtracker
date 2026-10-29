@@ -15,11 +15,15 @@ Public interface
     Raised by ``extract_from_archive`` for unrecognised archive types.
 """
 
-import base64
 import io
-import json
 import zipfile
 from pathlib import Path
+
+from lifetracker.core.fidelity_har import (
+    PDF_MAGIC,
+    UnsupportedArchiveError,
+    extract_fidelity_pdfs_from_har,
+)
 
 __all__ = [
     "UnsupportedArchiveError",
@@ -27,117 +31,15 @@ __all__ = [
     "extract_from_archive_with_skips",
 ]
 
-PDF_MAGIC = b"%PDF-"
-FIDELITY_URL_PREFIX = "https://netbenefitsww.fidelity.com/mybenefitsww/spshistoryservices/activities/record/c:"
-
-
-class UnsupportedArchiveError(Exception):
-    """Raised when the uploaded file is not a recognised archive format."""
-
 
 # ---------------------------------------------------------------------------
 # Fidelity HAR extractor
 # ---------------------------------------------------------------------------
 
 
-def _field[T](mapping: dict, key: str, kind: type[T]) -> T:
-    """Return ``mapping[key]`` if it's a *kind*, else an empty *kind* (``kind()``)."""
-    value = mapping.get(key)
-    return value if isinstance(value, kind) else kind()
-
-
 def _extract_from_har(file_bytes: bytes) -> list[tuple[str, bytes]]:
-    """Extract PDFs from a Fidelity HAR file.
-
-    Returns a list of ``(filename, pdf_bytes)`` tuples, one per PDF found.
-    Raises ``UnsupportedArchiveError`` if the file isn't JSON, or its top level,
-    ``log`` or ``log.entries`` has the wrong type.
-    Entries are silently skipped when any of the following conditions apply
-    (a field of the wrong JSON type counts as missing):
-    - The request method is not GET.
-    - The request URL does not match the Fidelity spshistoryservices prefix.
-    - The response MIME type is not ``application/json``.
-    - The response body is empty or cannot be decoded, or isn't a JSON object.
-    - The ``fileContent`` key is absent from the JSON payload.
-    - The ``fileContent`` value is not valid base64.
-    - The decoded bytes do not start with the PDF magic bytes (``%PDF-``).
-    """
-    try:
-        har = json.loads(file_bytes.decode("utf-8"))
-    except ValueError as exc:  # UnicodeDecodeError, JSONDecodeError, or an int over Python's digit limit
-        raise UnsupportedArchiveError(f"Could not parse file as a HAR archive: {exc}") from exc
-    if not isinstance(har, dict):
-        raise UnsupportedArchiveError("Could not parse file as a HAR archive: top-level JSON value must be an object")
-    log = har.get("log", {})
-    if not isinstance(log, dict):
-        raise UnsupportedArchiveError("Could not parse file as a HAR archive: 'log' must be an object")
-    entries = log.get("entries", [])
-    if not isinstance(entries, list):
-        raise UnsupportedArchiveError("Could not parse file as a HAR archive: 'entries' must be a list")
-
-    results: list[tuple[str, bytes]] = []
-
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        request = _field(entry, "request", dict)
-        response = _field(entry, "response", dict)
-
-        if _field(request, "method", str).upper() != "GET":
-            continue
-
-        url = _field(request, "url", str)
-        if not url.startswith(FIDELITY_URL_PREFIX):
-            continue
-
-        # Derive filename from the URL suffix after "/c:".
-        pdf_name = url[len(FIDELITY_URL_PREFIX) :].split("?")[0].split("#")[0]
-        # Sanitize: take only the basename to prevent path-traversal attacks.
-        pdf_name = Path(pdf_name).name
-        if not pdf_name:
-            continue
-        pdf_filename = pdf_name + ".pdf"
-
-        # Require JSON content type.
-        content = _field(response, "content", dict)
-        if "application/json" not in _field(content, "mimeType", str):
-            continue
-
-        # Decode the response body (may itself be Base64-encoded in the HAR).
-        body_text = _field(content, "text", str)
-        if _field(content, "encoding", str).lower() == "base64":
-            try:
-                body_str = base64.b64decode(body_text).decode("utf-8")
-            except Exception:
-                continue
-        else:
-            body_str = body_text
-
-        if not body_str:
-            continue
-
-        try:
-            payload = json.loads(body_str)
-        except ValueError:
-            continue
-        if not isinstance(payload, dict):
-            continue
-
-        file_content_b64 = _field(payload, "fileContent", str)
-        if not file_content_b64:
-            continue
-
-        try:
-            pdf_bytes = base64.b64decode(file_content_b64)
-        except ValueError:  # binascii.Error, or a non-ASCII string
-            continue
-
-        if not pdf_bytes.startswith(PDF_MAGIC):
-            continue
-
-        results.append((pdf_filename, pdf_bytes))
-
-    return results
+    """Extract PDFs from a Fidelity HAR file."""
+    return extract_fidelity_pdfs_from_har(file_bytes)
 
 
 # ---------------------------------------------------------------------------

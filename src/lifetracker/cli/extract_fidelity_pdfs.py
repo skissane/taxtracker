@@ -5,16 +5,16 @@ endpoint, decodes the Base64-encoded PDF from each JSON response body, and
 writes the resulting PDF files to the given output directory.
 """
 
-import base64
-import binascii
-import json
 import sys
 from pathlib import Path
 
 import click
 
-FIDELITY_URL_PREFIX = "https://netbenefitsww.fidelity.com/mybenefitsww/spshistoryservices/activities/record/c:"
-PDF_MAGIC = b"%PDF-"
+from lifetracker.core.fidelity_har import (
+    FIDELITY_URL_PREFIX,
+    PDF_MAGIC,
+    extract_fidelity_pdfs_from_har,
+)
 
 
 def extract_pdfs(har_path: Path, output_dir: Path) -> int:
@@ -24,110 +24,16 @@ def extract_pdfs(har_path: Path, output_dir: Path) -> int:
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    with har_path.open(encoding="utf-8") as fh:
-        har = json.load(fh)
+    if not har_path.is_file():
+        raise FileNotFoundError(har_path)
 
-    entries = har.get("log", {}).get("entries", [])
+    pdfs = extract_fidelity_pdfs_from_har(har_path.read_bytes())
     written = 0
-
-    for entry in entries:
-        request = entry.get("request", {})
-        response = entry.get("response", {})
-
-        # Only process GET requests.
-        if request.get("method", "").upper() != "GET":
-            continue
-
-        url: str = request.get("url", "")
-        if not url.startswith(FIDELITY_URL_PREFIX):
-            continue
-
-        # The filename is the portion after "/c:".
-        pdf_name = url[len(FIDELITY_URL_PREFIX) :]
-        # Strip any query string or fragment.
-        pdf_name = pdf_name.split("?")[0].split("#")[0]
-        # Sanitize: take only the basename to prevent path-traversal attacks
-        # (e.g. a crafted URL suffix of "../../../etc/passwd" must not escape
-        # the output directory).
-        pdf_name = Path(pdf_name).name
-        if not pdf_name:
-            print(
-                f"WARNING: could not determine filename from URL: {url}",
-                file=sys.stderr,
-            )
-            continue
-        pdf_filename = pdf_name + ".pdf"
-
-        # Validate response content type.
-        mime_type = response.get("content", {}).get("mimeType", "")
-        if "application/json" not in mime_type:
-            print(
-                f"WARNING: unexpected content type '{mime_type}' for {url}; skipping",
-                file=sys.stderr,
-            )
-            continue
-
-        # Decode the response body text.
-        content = response.get("content", {})
-        body_text = content.get("text", "")
-        body_encoding = content.get("encoding", "")
-
-        if body_encoding.lower() == "base64":
-            # HAR stores the body itself as Base64; decode it first.
-            try:
-                raw_body = base64.b64decode(body_text)
-                body_str = raw_body.decode("utf-8")
-            except (binascii.Error, UnicodeDecodeError) as exc:
-                print(
-                    f"WARNING: could not decode Base64-encoded body for {url}: {exc}; skipping",
-                    file=sys.stderr,
-                )
-                continue
-        else:
-            body_str = body_text
-
-        if not body_str:
-            print(f"WARNING: empty response body for {url}; skipping", file=sys.stderr)
-            continue
-
-        try:
-            payload = json.loads(body_str)
-        except json.JSONDecodeError as exc:
-            print(
-                f"WARNING: could not parse JSON response body for {url}: {exc}; skipping",
-                file=sys.stderr,
-            )
-            continue
-
-        file_content_b64 = payload.get("fileContent")
-        if file_content_b64 is None:
-            print(
-                f"WARNING: 'fileContent' key missing in response for {url}; skipping",
-                file=sys.stderr,
-            )
-            continue
-
-        try:
-            pdf_bytes = base64.b64decode(file_content_b64)
-        except binascii.Error as exc:
-            print(
-                f"WARNING: could not Base64-decode fileContent for {url}: {exc}; skipping",
-                file=sys.stderr,
-            )
-            continue
-
-        if not pdf_bytes.startswith(PDF_MAGIC):
-            print(
-                f"WARNING: decoded data for {url} does not look like a PDF (starts with {pdf_bytes[:8]!r}); skipping",
-                file=sys.stderr,
-            )
-            continue
-
-        out_path = output_dir / pdf_filename
+    for pdf_name, pdf_bytes in pdfs:
+        out_path = output_dir / pdf_name
         out_path.write_bytes(pdf_bytes)
         print(f"Wrote {out_path} ({len(pdf_bytes)} bytes)")
         written += 1
-
     return written
 
 
