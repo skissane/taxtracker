@@ -35,9 +35,10 @@ def extract_pdfs_from_zip(file_bytes: bytes) -> tuple[list[tuple[str, bytes]], l
     Only entries ending with ``.pdf`` or ``.PDF`` are imported. Directory
     components are ignored and only the final path segment is used.
     Non-PDF entries, PDFs exceeding uncompressed size limits and PDFs compressed
-    with anything but deflate or whose data can't be decompressed are reported
-    in the returned skipped list.
-    Raises ``zipfile.BadZipFile`` if *file_bytes* isn't a ZIP archive.
+    with anything but deflate or whose data is corrupt are reported in the
+    returned skipped list.
+    Raises ``zipfile.BadZipFile`` if *file_bytes* isn't a ZIP archive (or its
+    central directory is unreadable).
     """
     with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
         results: list[tuple[str, bytes]] = []
@@ -67,10 +68,11 @@ def extract_pdfs_from_zip(file_bytes: bytes) -> tuple[list[tuple[str, bytes]], l
                 continue
             # Not archive.read(): that asks the decompressor for up to 2 GiB at once and only then cuts the
             # result to file_size, so an entry whose header understates its size could still exhaust memory.
+            # A bad CRC or local header raises BadZipFile; a corrupt or cut-off deflate stream, zlib.error or EOFError.
             try:
                 with archive.open(info) as member:
                     pdf_bytes = member.read(info.file_size)
-            except zlib.error, EOFError:  # a corrupt or cut-off deflate stream
+            except zipfile.BadZipFile, zlib.error, EOFError:
                 skipped.append(entry_name)
                 continue
             if not pdf_bytes.startswith(PDF_MAGIC):

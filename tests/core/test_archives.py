@@ -38,6 +38,12 @@ def test_extract_pdfs_from_zip_skips_corrupt_deflate_data():
     assert extract_pdfs_from_zip(bytes(zip_bytes)) == ([("good.pdf", PDF_MAGIC + b"a")], ["corrupt.pdf"])
 
 
+def test_extract_pdfs_from_zip_skips_bad_crc():
+    zip_bytes = bytearray(_zip([("corrupt.pdf", PDF_MAGIC + b"original"), ("good.pdf", PDF_MAGIC + b"a")]))
+    zip_bytes[zip_bytes.find(b"original")] ^= 0xFF
+    assert extract_pdfs_from_zip(bytes(zip_bytes)) == ([("good.pdf", PDF_MAGIC + b"a")], ["corrupt.pdf"])
+
+
 def test_extract_pdfs_from_zip_raises_bad_zip_file():
     with pytest.raises(zipfile.BadZipFile):
         extract_pdfs_from_zip(b"not a zip")

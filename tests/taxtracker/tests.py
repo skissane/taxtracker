@@ -2089,11 +2089,12 @@ class ArchiveExtractorTests(TestCase):
         struct.pack_into("<I", zip_bytes, zip_bytes.find(b"PK\x01\x02") + 24, 100)
         tracemalloc.start()
         try:
-            with self.assertRaises(UnsupportedArchiveError):
-                extract_from_archive_with_skips(bytes(zip_bytes), "export.zip")
+            # Reading only the claimed 100 bytes fails the CRC check, so the entry is skipped.
+            result = extract_from_archive_with_skips(bytes(zip_bytes), "export.zip")
             _, peak = tracemalloc.get_traced_memory()
         finally:
             tracemalloc.stop()
+        self.assertEqual(result, ([], ["bomb.pdf"]))
         self.assertLess(peak, 4 * 1024 * 1024)
 
     def test_invalid_json_raises_unsupported(self):
