@@ -329,7 +329,7 @@ class ItemAdmin(admin.ModelAdmin):
                         f"Imported {len(importable)} attachment(s) from '{filename}'.",
                     )
 
-            _warn_skipped(request, archive_skipped_names, "file(s)")
+            _warn_skipped(request, archive_skipped_names, "non-PDF or too large file(s)")
             _warn_skipped(request, duplicate_names, "file(s) already attached to this item")
             if not had_error and not extracted and not archive_skipped_names:
                 messages.warning(
@@ -605,7 +605,7 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
                         f"Imported {created_count} received document(s) from '{filename}'.",
                     )
 
-            _warn_skipped(request, archive_skipped_names, "file(s)")
+            _warn_skipped(request, archive_skipped_names, "non-PDF or too large file(s)")
             _warn_skipped(request, duplicate_names, "file(s) already imported for that Financial Year")
             _warn_skipped(request, no_year_names, "file(s) without a leading 4-digit year")
             _warn_skipped(request, missing_fy_names, "file(s) with no matching Financial Year record")

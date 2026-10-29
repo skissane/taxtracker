@@ -181,7 +181,10 @@ def _extract_from_zip(file_bytes: bytes) -> tuple[list[tuple[str, bytes]], list[
                 if total_pdf_size + info.file_size > MAX_ZIP_PDF_TOTAL_BYTES:
                     skipped.append(entry_name)
                     continue
-                pdf_bytes = archive.read(info)
+                # Not archive.read(): that asks the decompressor for up to 2 GiB at once and only then cuts the
+                # result to file_size, so an entry whose header understates its size could still exhaust memory.
+                with archive.open(info) as member:
+                    pdf_bytes = member.read(info.file_size)
                 if not pdf_bytes.startswith(PDF_MAGIC):
                     skipped.append(entry_name)
                     continue
