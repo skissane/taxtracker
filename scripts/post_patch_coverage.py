@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import subprocess
 import sys
 import urllib.error
@@ -15,18 +16,68 @@ MARKER = "<!-- lifetracker-patch-coverage -->"
 MAX_BODY_CHARS = 65_000
 
 
-def _demote_headings(lines: list[str]) -> list[str]:
+# diff-cover's Markdown lists each file as `- <path> (<pct>%)`, then
+# `: Missing lines <lines>` if any are, and its summary as `- **<name>**: <value>`
+# (markdown_coverage_report.md); the path's dots are escaped as `&#46;` so
+# GitHub doesn't turn it into a link.
+_FILE_RE = re.compile(r"^- (?P<path>.+) \((?P<percent>[0-9.]+%)\)(?:: Missing lines (?P<missing>.+))?$")
+_SUMMARY_RE = re.compile(r"^- \*\*(?P<name>[^*]+)\*\*: (?P<value>.+)$")
+
+
+def _file_table(matches: list[re.Match]) -> list[str]:
+    rows = ["| File | Coverage | Missing lines |", "| --- | ---: | --- |"]
+    for m in matches:
+        path = m["path"].replace("&#46;", ".")
+        # A space after each comma, so a long list can wrap.
+        missing = ", ".join((m["missing"] or "").split(","))
+        rows.append(f"| `{path}` | {m['percent']} | {missing} |")
+    return rows
+
+
+def _summary_table(matches: list[re.Match]) -> list[str]:
+    return [
+        "| " + " | ".join(m["name"] for m in matches) + " |",
+        "|" + " ---: |" * len(matches),
+        "| " + " | ".join(m["value"] for m in matches) + " |",
+    ]
+
+
+def _reformat(lines: list[str]) -> list[str]:
     """lines with each ATX heading outside a code block one level deeper, so
-    diff-cover's sections nest under the comment's title."""
-    demoted = []
+    diff-cover's sections nest under the comment's title, and its lists of
+    files and summary figures turned into tables. A line in neither shape (if
+    a diff-cover upgrade changes them) is left as it is."""
+    out = []
+    run: list[re.Match] = []
+    run_table = None
+
+    def flush():
+        nonlocal run, run_table
+        if run:
+            out.extend(run_table(run))
+            run, run_table = [], None
+
     in_code = False
     for line in lines:
         if line.startswith("```"):
             in_code = not in_code
-        elif not in_code and line.startswith("#"):
-            line = "#" + line
-        demoted.append(line)
-    return demoted
+        elif not in_code:
+            for regex, table in ((_SUMMARY_RE, _summary_table), (_FILE_RE, _file_table)):
+                if m := regex.match(line):
+                    if run_table is not table:
+                        flush()
+                        run_table = table
+                    run.append(m)
+                    break
+            else:
+                flush()
+                if line.startswith("#"):
+                    line = "#" + line
+            if run:
+                continue
+        out.append(line)
+    flush()
+    return out
 
 
 def _build_body(report: str, commit: str | None, run_url: str | None) -> str:
@@ -42,7 +93,7 @@ def _build_body(report: str, commit: str | None, run_url: str | None) -> str:
         if run_url:
             measured += f", from [this workflow run]({run_url})"
         head += [f"{measured}.", ""]
-    body = "\n".join(head + _demote_headings(rest))
+    body = "\n".join(head + _reformat(rest))
     if len(body) <= MAX_BODY_CHARS:
         return body
     # The head always has a newline, so this never finds none.

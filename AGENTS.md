@@ -135,6 +135,7 @@ On a PR, the `test` job runs it after the tests, as `just patch-coverage "origin
 Then `post-patch-coverage` (once `test` has finished, whether it succeeded or failed, but only if the artifact is there) runs `just patch-coverage-post` (`scripts/post_patch_coverage.py`, run like `post_screenshots.py`), which posts the report as a `github-actions[bot]` PR comment, so it can be read without Codecov (whose comment arrives late, says little and links to a site agents may not reach).
 It works like the screenshot comment: found by a hidden `<!-- lifetracker-patch-coverage -->` marker and edited in place, nothing posted unless `--commit` is still the PR's head, a per-PR `concurrency` group, and skipped for fork PRs and Dependabot.
 It needs only `GITHUB_TOKEN` (`pull-requests: write`), no secret, and installs nothing.
+The script moves diff-cover's headings down a level to nest under the comment's title, and turns its per-file and summary lists into tables (matching the lines its `markdown_coverage_report.md` template writes; a line in any other shape is left as it is).
 A report too long for a comment (65,536 characters) is cut at `MAX_BODY_CHARS`, closing any code block the cut leaves open, with a note pointing at the artifact.
 
 **Screenshots:** `screenshot_tests/` holds Playwright tests that drive a headless Chromium against pytest-django's `live_server` (empty test DB) and save full-page PNGs to the gitignored `screenshots/` directory (each screen as `<name>-light.png` and `<name>-dark.png`), for eyeballing UI changes.

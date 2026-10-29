@@ -571,7 +571,8 @@ class PostPatchCoverageTests(SimpleTestCase):
             post[3]["body"],
             f"{PATCH_COVERAGE_MARKER}\n## Diff Coverage\n\n"
             "Patch coverage of abc1234, from [this workflow run](https://example.com/run).\n\n"
-            "### Diff: origin/master...HEAD\n\n- a.py (50.0%): Missing lines 2",
+            "### Diff: origin/master...HEAD\n\n"
+            "| File | Coverage | Missing lines |\n| --- | ---: | --- |\n| `a.py` | 50.0% | 2 |",
         )
 
     def test_report_without_title(self):
@@ -597,6 +598,40 @@ class PostPatchCoverageTests(SimpleTestCase):
         self.assertEqual(
             [r[:2] for r in self._writes(requests)],
             [("PATCH", "https://api.github.com/repos/o/r/issues/comments/2")],
+        )
+
+    def test_lists_become_tables(self):
+        report = (
+            "# Diff Coverage\n## Diff: origin/master...HEAD\n\n"
+            "- scripts/a&#46;py (100%)\n- b&#46;py (40.0%): Missing lines 3,5-9,12\n\n"
+            "## Summary\n\n- **Total**: 10 lines\n- **Missing**: 6 lines\n- **Coverage**: 40%\n\n"
+            "## b&#46;py\n\n```python\n- **Total**: not a summary\n```\n- something else\n"
+        )
+        code, _, requests = self._run(report=report)
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            self._writes(requests)[0][3]["body"].split("\n")[3:],
+            [
+                "### Diff: origin/master...HEAD",
+                "",
+                "| File | Coverage | Missing lines |",
+                "| --- | ---: | --- |",
+                "| `scripts/a.py` | 100% |  |",
+                "| `b.py` | 40.0% | 3, 5-9, 12 |",
+                "",
+                "### Summary",
+                "",
+                "| Total | Missing | Coverage |",
+                "| ---: | ---: | ---: |",
+                "| 10 lines | 6 lines | 40% |",
+                "",
+                "### b&#46;py",
+                "",
+                "```python",
+                "- **Total**: not a summary",
+                "```",
+                "- something else",
+            ],
         )
 
     def test_headings_in_code_blocks_kept(self):
