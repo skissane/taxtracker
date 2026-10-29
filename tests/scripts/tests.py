@@ -571,7 +571,7 @@ class PostPatchCoverageTests(SimpleTestCase):
             post[3]["body"],
             f"{PATCH_COVERAGE_MARKER}\n## Diff Coverage\n\n"
             "Patch coverage of abc1234, from [this workflow run](https://example.com/run).\n\n"
-            "## Diff: origin/master...HEAD\n\n- a.py (50.0%): Missing lines 2",
+            "### Diff: origin/master...HEAD\n\n- a.py (50.0%): Missing lines 2",
         )
 
     def test_report_without_title(self):
@@ -597,6 +597,14 @@ class PostPatchCoverageTests(SimpleTestCase):
         self.assertEqual(
             [r[:2] for r in self._writes(requests)],
             [("PATCH", "https://api.github.com/repos/o/r/issues/comments/2")],
+        )
+
+    def test_headings_in_code_blocks_kept(self):
+        report = "# Diff Coverage\n## a.py\n\n```python\n# not a heading\n```\n"
+        code, _, requests = self._run(report=report)
+        self.assertEqual(code, 0)
+        self.assertTrue(
+            self._writes(requests)[0][3]["body"].endswith("### a.py\n\n```python\n# not a heading\n```"),
         )
 
     def test_long_report_truncated(self):

@@ -15,12 +15,26 @@ MARKER = "<!-- lifetracker-patch-coverage -->"
 MAX_BODY_CHARS = 65_000
 
 
+def _demote_headings(lines: list[str]) -> list[str]:
+    """lines with each ATX heading outside a code block one level deeper, so
+    diff-cover's sections nest under the comment's title."""
+    demoted = []
+    in_code = False
+    for line in lines:
+        if line.startswith("```"):
+            in_code = not in_code
+        elif not in_code and line.startswith("#"):
+            line = "#" + line
+        demoted.append(line)
+    return demoted
+
+
 def _build_body(report: str, commit: str | None, run_url: str | None) -> str:
     """The comment body: diff-cover's Markdown report, with a line saying what
     it was measured for after its title, cut to fit a comment if need be."""
     lines = report.rstrip("\n").split("\n")
     title, rest = (lines[0], lines[1:]) if lines[0].startswith("# ") else ("# Diff Coverage", lines)
-    head = [MARKER, title.replace("# ", "## ", 1), ""]
+    head = [MARKER, "#" + title, ""]
     if commit or run_url:
         measured = "Patch coverage"
         if commit:
@@ -28,9 +42,10 @@ def _build_body(report: str, commit: str | None, run_url: str | None) -> str:
         if run_url:
             measured += f", from [this workflow run]({run_url})"
         head += [f"{measured}.", ""]
-    body = "\n".join(head + rest)
+    body = "\n".join(head + _demote_headings(rest))
     if len(body) <= MAX_BODY_CHARS:
         return body
+    # The head always has a newline, so this never finds none.
     cut = body[: body.rfind("\n", 0, MAX_BODY_CHARS)]
     # Close a code block left open by the cut, so the note isn't inside it.
     if cut.count("\n```") % 2:
