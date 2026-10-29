@@ -12,7 +12,8 @@ Public interface
     Raises ``UnsupportedArchiveError`` when no extractor matches.
 
 ``extract_from_archive_with_skips(file_bytes, filename)``
-    Like ``extract_from_archive``, but also returns the names of skipped entries.
+    Like ``extract_from_archive``, but also returns the names of skipped ZIP entries
+    (the HAR extractor skips entries silently, so reports none).
 
 ``UnsupportedArchiveError``
     Raised when an uploaded file is not a recognised archive format.
