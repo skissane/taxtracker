@@ -525,6 +525,8 @@ class PostPatchCoverageTests(SimpleTestCase):
         def fake_request(method, url, token, *, json_body=None, **kw):
             requests.append((method, url, token, json_body))
             if fail and method == fail[0] and url.startswith(fail[1]):
+                if len(fail) > 2:
+                    raise fail[2]
                 raise urllib.error.HTTPError(url, 403, "Forbidden", {}, io.BytesIO(b"nope"))
             if url == "https://api.github.com/user":
                 return {"login": "me"}
@@ -619,6 +621,11 @@ class PostPatchCoverageTests(SimpleTestCase):
         self.assertEqual(code, 1)
         self.assertIn("patch-coverage.md", stderr)
         self.assertEqual(requests, [])
+
+    def test_network_error_reported(self):
+        code, stderr, _ = self._run(fail=("GET", "https://api.github.com/user", urllib.error.URLError("unreachable")))
+        self.assertEqual(code, 1)
+        self.assertIn("unreachable", stderr)
 
     def test_http_error_reported(self):
         code, stderr, _ = self._run(fail=("POST", "https://api.github.com/repos/o/r/issues/7/comments"))
