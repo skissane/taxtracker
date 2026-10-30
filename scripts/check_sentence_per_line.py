@@ -58,11 +58,9 @@ def _has_boundary(line: str) -> bool:
 
 def _line_ignored(line: str) -> bool:
     stripped = line.strip()
-    if not stripped:
-        return True
     if stripped.startswith("#"):
         return True
-    if "|" in line:
+    if stripped.startswith("|"):
         return True
     if stripped.startswith("<") and stripped.endswith(">"):
         return True

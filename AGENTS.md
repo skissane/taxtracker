@@ -37,7 +37,7 @@ It checks the working tree copy, so it also catches unstaged edits.
 For a Markdown hard line break, end the line with a backslash rather than two trailing spaces.
 
 **One sentence per line:** `just sentence-per-line-check` (part of `just check`, `just ci` and the `test` job; `scripts/check_sentence_per_line.py`, stdlib-only) checks that `AGENTS.md` and `README.md` keep one sentence per line.
-Outside fenced code blocks, tables, headings and HTML, it fails on sentence boundaries in the middle of a line (`.`, `!` or `?`, optionally followed by closing `)`, `"`, `*` or `_`, then a space and a likely sentence start), excluding abbreviations such as `e.g.`, `i.e.` and `etc.`.
+Outside fenced code blocks, table rows, headings, HTML lines and inline code, it fails on sentence boundaries in the middle of a line (`.`, `!` or `?`, optionally followed by closing `)`, `"`, `*` or `_`, then a space and a likely sentence start), excluding abbreviations such as `e.g.`, `i.e.` and `etc.`.
 
 **Workflow lint:** `just lint-workflows` (part of `just check`, `just ci` and the `test` job) runs `jactionlint --profile correctness` over the workflows, composite actions and Dependabot config.
 It uses the `correctness` profile (what actionlint checks); jactionlint's default profile also enables security rules (`unpinned-uses`, `artipacked`, `missing-timeout`, etc.) that the existing workflows don't yet satisfy.

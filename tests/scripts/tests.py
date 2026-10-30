@@ -928,8 +928,19 @@ class CheckSentencePerLineTests(SimpleTestCase):
             ```python
             print("Sentence. Another")
             ```
+
+            ~~~
+            Tilde fence. Another sentence.
+            ~~~
+            Prose with `a | b` in code. Another sentence.
             """)
-        self.assertEqual(sentence_per_line_problems(text), [(2, "This line has two sentences. Another starts here.")])
+        self.assertEqual(
+            sentence_per_line_problems(text),
+            [
+                (2, "This line has two sentences. Another starts here."),
+                (17, "Prose with `a | b` in code. Another sentence."),
+            ],
+        )
 
     def _run(self, files: dict[str, str]) -> tuple[int, str]:
         with tempfile.TemporaryDirectory() as tmp:
