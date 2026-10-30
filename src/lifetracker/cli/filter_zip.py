@@ -1,7 +1,7 @@
 """Filter a ZIP file by skipping members whose names contain a specific substring."""
 
-from pathlib import Path
 import zipfile
+from pathlib import Path
 
 import click
 
@@ -11,9 +11,7 @@ def filter_zip(input_path, output_path, reject_substring):
     input_file = Path(input_path).resolve(strict=False)
     output_file = Path(output_path).resolve(strict=False)
     if input_file == output_file:
-        raise click.ClickException(
-            f"Input and output ZIP paths resolve to the same file: {input_file}"
-        )
+        raise click.ClickException(f"Input and output ZIP paths resolve to the same file: {input_file}")
 
     try:
         # Open the input zip for reading and the output zip for writing
