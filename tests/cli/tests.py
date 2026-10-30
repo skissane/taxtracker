@@ -436,7 +436,7 @@ class ExtractFidelityPdfsTests(TestCase):
             result = runner.invoke(extract_fidelity_pdfs_command, [str(har_path), str(Path(tmp) / "out")])
 
             self.assertEqual(result.exit_code, 1)
-            self.assertIn("ERROR: Could not parse file as a HAR archive", result.output)
+            self.assertIn("Error: Could not parse file as a HAR archive", result.output)
 
     def test_cli_reports_when_no_entries_match(self):
         runner = CliRunner()
@@ -463,6 +463,45 @@ class ExtractFidelityPdfsTests(TestCase):
 
             with self.assertRaises(click.ClickException):
                 extract_pdfs(har_path, out_dir)
+
+    def _make_multi_har(self, *pdfs) -> bytes:
+        entries = []
+        for filename, pdf_bytes in pdfs:
+            entries += json.loads(self._make_har(filename=filename, pdf_bytes=pdf_bytes))["log"]["entries"]
+        return self._make_har(entries=entries)
+
+    def test_refuses_before_writing_anything(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            har_path = Path(tmp) / "export.har"
+            har_path.write_bytes(self._make_multi_har(("a", PDF_MAGIC), ("b", PDF_MAGIC)))
+            out_dir = Path(tmp) / "out"
+            out_dir.mkdir()
+            (out_dir / "b.pdf").write_bytes(b"existing")
+
+            with self.assertRaises(click.ClickException):
+                extract_pdfs(har_path, out_dir)
+
+            self.assertFalse((out_dir / "a.pdf").exists())
+
+    def test_writes_one_copy_of_identical_duplicates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            har_path = Path(tmp) / "export.har"
+            har_path.write_bytes(self._make_multi_har(("a", PDF_MAGIC), ("a", PDF_MAGIC)))
+            out_dir = Path(tmp) / "out"
+
+            self.assertEqual(extract_pdfs(har_path, out_dir), 1)
+            self.assertEqual((out_dir / "a.pdf").read_bytes(), PDF_MAGIC)
+
+    def test_refuses_different_pdfs_with_the_same_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            har_path = Path(tmp) / "export.har"
+            har_path.write_bytes(self._make_multi_har(("a", PDF_MAGIC), ("a", PDF_MAGIC + b"2")))
+            out_dir = Path(tmp) / "out"
+
+            with self.assertRaisesRegex(click.ClickException, "different PDFs named a.pdf"):
+                extract_pdfs(har_path, out_dir)
+
+            self.assertFalse((out_dir / "a.pdf").exists())
 
 
 class FilterZipTests(TestCase):

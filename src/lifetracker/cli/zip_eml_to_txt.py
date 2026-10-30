@@ -71,5 +71,5 @@ def zip_eml_to_txt_command(input_zip: str, output_zip: str) -> None:
     click.echo(f"Reading from: {input_zip}")
     click.echo(f"Writing to: {output_zip}")
 
-    extracted = convert_eml_zip_to_txt(input_zip, output_zip)
+    convert_eml_zip_to_txt(input_zip, output_zip)
     click.echo(f"\nBatch complete! Your extracted files are saved in {output_zip!r}")

@@ -22,16 +22,21 @@ def extract_pdfs(har_path: Path, output_dir: Path) -> int:
     def warn(url: str, reason: str) -> None:
         click.echo(f"WARNING: {reason} for {url}; skipping", err=True)
 
-    pdfs = extract_pdfs_from_har(har_path.read_bytes(), on_skip=warn)
-    written = 0
-    for pdf_name, pdf_bytes in pdfs:
+    pdfs: dict[str, bytes] = {}
+    for pdf_name, pdf_bytes in extract_pdfs_from_har(har_path.read_bytes(), on_skip=warn):
+        # A HAR can hold the same download more than once; write one copy.
+        if pdfs.setdefault(pdf_name, pdf_bytes) != pdf_bytes:
+            raise click.ClickException(f"The HAR file has different PDFs named {pdf_name}")
+    # Check every name before writing anything, so a refusal leaves no partial output.
+    for pdf_name in pdfs:
         out_path = output_dir / pdf_name
         if out_path.exists():
             raise click.ClickException(f"Refusing to overwrite existing file: {out_path}")
+    for pdf_name, pdf_bytes in pdfs.items():
+        out_path = output_dir / pdf_name
         out_path.write_bytes(pdf_bytes)
         click.echo(f"Wrote {out_path} ({len(pdf_bytes)} bytes)")
-        written += 1
-    return written
+    return len(pdfs)
 
 
 @click.command("extract-fidelity-pdfs")
