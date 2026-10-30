@@ -703,6 +703,25 @@ class ZipEmlToPdfTests(TestCase):
             self.assertIn("Body plain text", html)
             self.assertNotIn("Attached HTML", html)
 
+    def test_message_without_text_body_gets_empty_body(self):
+        msg = EmailMessage()
+        msg["Subject"] = "Only an attachment"
+        msg.set_content(b"%PDF-1.4", maintype="application", subtype="pdf")
+        with tempfile.TemporaryDirectory() as tmp:
+            input_zip = Path(tmp) / "in.zip"
+            with zipfile.ZipFile(input_zip, "w") as zf:
+                zf.writestr("mail.eml", msg.as_bytes())
+            output_zip = Path(tmp) / "out.zip"
+
+            with patch(
+                "lifetracker.cli.zip_eml_to_pdf.pdfkit.from_string",
+                return_value=b"%PDF-FAKE",
+            ) as mock_from_string:
+                count = convert_eml_zip_to_pdf(str(input_zip), str(output_zip))
+
+            self.assertEqual(count, 1)
+            self.assertIn("<pre></pre>", mock_from_string.call_args.args[0])
+
     def test_cli_end_to_end(self):
         runner = CliRunner()
         with tempfile.TemporaryDirectory() as tmp:

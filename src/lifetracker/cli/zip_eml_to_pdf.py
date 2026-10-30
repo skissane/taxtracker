@@ -48,8 +48,9 @@ def convert_eml_zip_to_pdf(input_zip_path: str, output_zip_path: str) -> int:
             # Extract the email body while preferring body parts over attachments.
             body_part = msg.get_body(preferencelist=("html", "plain"))
             if body_part is None:
-                body = msg.get_content() if not msg.is_multipart() else ""
-                body_is_html = msg.get_content_type() == "text/html"
+                # No text body, e.g. a message that is only an attachment.
+                body = ""
+                body_is_html = False
             else:
                 body = body_part.get_content()
                 body_is_html = body_part.get_content_type() == "text/html"
