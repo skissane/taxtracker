@@ -1,6 +1,6 @@
 """Filter a ZIP file by skipping members whose names contain a specific substring."""
 
-import sys
+from pathlib import Path
 import zipfile
 
 import click
@@ -8,6 +8,13 @@ import click
 
 def filter_zip(input_path, output_path, reject_substring):
     """Reads an input zip and writes to an output zip, skipping specific files."""
+    input_file = Path(input_path).resolve(strict=False)
+    output_file = Path(output_path).resolve(strict=False)
+    if input_file == output_file:
+        raise click.ClickException(
+            f"Input and output ZIP paths resolve to the same file: {input_file}"
+        )
+
     try:
         # Open the input zip for reading and the output zip for writing
         with zipfile.ZipFile(input_path, "r") as zin:
@@ -27,15 +34,13 @@ def filter_zip(input_path, output_path, reject_substring):
                     zout.writestr(item, content)
                     kept_count += 1
 
-        print(f"SUCCESS: Created {output_path!r}")
-        print(f"Files kept: {kept_count} | Files skipped: {skipped_count}")
+        click.echo(f"SUCCESS: Created {output_path!r}")
+        click.echo(f"Files kept: {kept_count} | Files skipped: {skipped_count}")
 
     except FileNotFoundError:
-        print(f"ERROR: The input file {input_path!r} was not found.")
-        sys.exit(1)
+        raise click.ClickException(f"The input file {input_path!r} was not found.")
     except zipfile.BadZipFile:
-        print(f"ERROR: {input_path!r} is not a valid ZIP file.")
-        sys.exit(1)
+        raise click.ClickException(f"{input_path!r} is not a valid ZIP file.")
 
 
 @click.command("filter-zip")

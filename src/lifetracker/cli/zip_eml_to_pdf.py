@@ -31,8 +31,7 @@ def convert_eml_zip_to_pdf(input_zip_path: str, output_zip_path: str) -> int:
         eml_files = [f for f in in_zip.namelist() if f.lower().endswith(".eml")]
 
         if not eml_files:
-            click.echo("No .eml files found in the input ZIP.")
-            return converted
+            raise click.ClickException("No .eml files found in the input ZIP.")
 
         click.echo("Starting conversion...")
         for filename in eml_files:
@@ -46,23 +45,14 @@ def convert_eml_zip_to_pdf(input_zip_path: str, output_zip_path: str) -> int:
             recipient = msg.get("To", "Unknown Recipient")
             date = msg.get("Date", "Unknown Date")
 
-            # Extract the email body (Targeting HTML)
-            body = ""
-            body_is_html = False
-            if msg.is_multipart():
-                for part in msg.walk():
-                    content_type = part.get_content_type()
-                    # Grab HTML if available
-                    if content_type == "text/html":
-                        body = part.get_content()
-                        body_is_html = True
-                        break
-                    # Fallback to plain text if no HTML exists
-                    elif content_type == "text/plain" and not body:
-                        body = part.get_content()
-            else:
-                body = msg.get_content()
+            # Extract the email body while preferring body parts over attachments.
+            body_part = msg.get_body(preferencelist=("html", "plain"))
+            if body_part is None:
+                body = msg.get_content() if not msg.is_multipart() else ""
                 body_is_html = msg.get_content_type() == "text/html"
+            else:
+                body = body_part.get_content()
+                body_is_html = body_part.get_content_type() == "text/html"
 
             # Build a clean HTML structure combining headers and body
             html_content = Template(html_template).substitute(

@@ -7,12 +7,11 @@ from email import policy
 import click
 
 
-def convert_eml_zip_to_txt(input_zip_path: str, output_zip_path: str) -> int | None:
+def convert_eml_zip_to_txt(input_zip_path: str, output_zip_path: str) -> int:
     """Extract the plain-text body of every .eml member of *input_zip_path*
     into a .txt file in *output_zip_path*.
 
-    Returns the number of .txt files written, or None if the input ZIP
-    contained no .eml members at all.
+    Returns the number of .txt files written.
     """
     extracted = 0
     with (
@@ -23,8 +22,7 @@ def convert_eml_zip_to_txt(input_zip_path: str, output_zip_path: str) -> int | N
         eml_files = [f for f in in_zip.namelist() if f.lower().endswith(".eml")]
 
         if not eml_files:
-            click.echo("No .eml files found in the input ZIP")
-            return None
+            raise click.ClickException("No .eml files found in the input ZIP.")
 
         click.echo("Starting extraction...")
         for filename in eml_files:
@@ -74,5 +72,4 @@ def zip_eml_to_txt_command(input_zip: str, output_zip: str) -> None:
     click.echo(f"Writing to: {output_zip}")
 
     extracted = convert_eml_zip_to_txt(input_zip, output_zip)
-    if extracted is not None:
-        click.echo(f"\nBatch complete! Your extracted files are saved in {output_zip!r}")
+    click.echo(f"\nBatch complete! Your extracted files are saved in {output_zip!r}")

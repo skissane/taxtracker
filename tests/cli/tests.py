@@ -9,6 +9,7 @@ from email.message import EmailMessage
 from pathlib import Path
 from unittest.mock import patch
 
+import click
 from click.testing import CliRunner
 from django.test import TestCase
 
@@ -449,8 +450,19 @@ class ExtractFidelityPdfsTests(TestCase):
                 [str(har_path), str(out_dir)],
             )
 
-            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertEqual(result.exit_code, 1, result.output)
             self.assertIn("No matching Fidelity PDF entries", result.output)
+
+    def test_refuses_to_overwrite_existing_output_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            har_path = Path(tmp) / "export.har"
+            har_path.write_bytes(self._make_har())
+            out_dir = Path(tmp) / "out"
+            out_dir.mkdir()
+            (out_dir / "statement-2023-07-20.pdf").write_bytes(b"existing")
+
+            with self.assertRaises(click.ClickException):
+                extract_pdfs(har_path, out_dir)
 
 
 class FilterZipTests(TestCase):
@@ -470,17 +482,28 @@ class FilterZipTests(TestCase):
 
     def test_missing_input_file_exits(self):
         with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(SystemExit) as ctx:
+            with self.assertRaises(click.ClickException) as ctx:
                 filter_zip(str(Path(tmp) / "missing.zip"), str(Path(tmp) / "out.zip"), "x")
-            self.assertEqual(ctx.exception.code, 1)
+            self.assertIn("was not found", str(ctx.exception))
 
     def test_bad_zip_file_exits(self):
         with tempfile.TemporaryDirectory() as tmp:
             bad_zip = Path(tmp) / "bad.zip"
             bad_zip.write_bytes(b"not a zip")
-            with self.assertRaises(SystemExit) as ctx:
+            with self.assertRaises(click.ClickException) as ctx:
                 filter_zip(str(bad_zip), str(Path(tmp) / "out.zip"), "x")
-            self.assertEqual(ctx.exception.code, 1)
+            self.assertIn("is not a valid ZIP file", str(ctx.exception))
+
+    def test_same_input_and_output_path_exits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "same.zip"
+            with zipfile.ZipFile(path, "w") as zf:
+                zf.writestr("keep.txt", b"keep")
+
+            with self.assertRaises(click.ClickException) as ctx:
+                filter_zip(str(path), str(path), "x")
+
+            self.assertIn("resolve to the same file", str(ctx.exception))
 
     def test_cli_end_to_end(self):
         runner = CliRunner()
@@ -573,6 +596,17 @@ def _build_plain_eml() -> bytes:
     return bytes(msg)
 
 
+def _build_eml_with_html_attachment() -> bytes:
+    msg = EmailMessage()
+    msg["Subject"] = "Body plus attachment"
+    msg["From"] = "sender@example.com"
+    msg["To"] = "recipient@example.com"
+    msg["Date"] = "Mon, 01 Jul 2024 10:00:00 +0000"
+    msg.set_content("Body plain text")
+    msg.add_attachment(b"<p>Attached HTML</p>", maintype="text", subtype="html", filename="attached.html")
+    return bytes(msg)
+
+
 class ZipEmlToPdfTests(TestCase):
     def test_converts_eml_members_to_pdf(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -599,7 +633,7 @@ class ZipEmlToPdfTests(TestCase):
             plain_html = mock_from_string.call_args_list[1].args[0]
             self.assertIn("<pre>", plain_html)
 
-    def test_no_eml_members_produces_no_output(self):
+    def test_no_eml_members_raises_click_exception(self):
         with tempfile.TemporaryDirectory() as tmp:
             input_zip = Path(tmp) / "in.zip"
             with zipfile.ZipFile(input_zip, "w") as zf:
@@ -607,10 +641,28 @@ class ZipEmlToPdfTests(TestCase):
             output_zip = Path(tmp) / "out.zip"
 
             with patch("lifetracker.cli.zip_eml_to_pdf.pdfkit.from_string") as mock_fs:
+                with self.assertRaises(click.ClickException):
+                    convert_eml_zip_to_pdf(str(input_zip), str(output_zip))
+
+            mock_fs.assert_not_called()
+
+    def test_uses_message_body_not_html_attachment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            input_zip = Path(tmp) / "in.zip"
+            with zipfile.ZipFile(input_zip, "w") as zf:
+                zf.writestr("mail.eml", _build_eml_with_html_attachment())
+            output_zip = Path(tmp) / "out.zip"
+
+            with patch(
+                "lifetracker.cli.zip_eml_to_pdf.pdfkit.from_string",
+                return_value=b"%PDF-FAKE",
+            ) as mock_from_string:
                 count = convert_eml_zip_to_pdf(str(input_zip), str(output_zip))
 
-            self.assertEqual(count, 0)
-            mock_fs.assert_not_called()
+            self.assertEqual(count, 1)
+            html = mock_from_string.call_args.args[0]
+            self.assertIn("Body plain text", html)
+            self.assertNotIn("Attached HTML", html)
 
     def test_cli_end_to_end(self):
         runner = CliRunner()
@@ -628,6 +680,19 @@ class ZipEmlToPdfTests(TestCase):
 
             self.assertEqual(result.exit_code, 0, result.output)
             self.assertIn("Batch complete!", result.output)
+
+    def test_cli_exits_non_zero_when_no_eml(self):
+        runner = CliRunner()
+        with tempfile.TemporaryDirectory() as tmp:
+            input_zip = Path(tmp) / "in.zip"
+            with zipfile.ZipFile(input_zip, "w") as zf:
+                zf.writestr("ignored.txt", b"not an eml")
+            output_zip = Path(tmp) / "out.zip"
+
+            result = runner.invoke(zip_eml_to_pdf_command, [str(input_zip), str(output_zip)])
+
+            self.assertEqual(result.exit_code, 1)
+            self.assertIn("No .eml files found in the input ZIP.", result.output)
 
 
 class ZipEmlToTxtTests(TestCase):
@@ -668,14 +733,15 @@ class ZipEmlToTxtTests(TestCase):
             with zipfile.ZipFile(output_zip) as zf:
                 self.assertEqual(zf.namelist(), [])
 
-    def test_no_eml_members_returns_none(self):
+    def test_no_eml_members_raises_click_exception(self):
         with tempfile.TemporaryDirectory() as tmp:
             input_zip = Path(tmp) / "in.zip"
             with zipfile.ZipFile(input_zip, "w") as zf:
                 zf.writestr("ignored.txt", b"not an eml")
             output_zip = Path(tmp) / "out.zip"
 
-            self.assertIsNone(convert_eml_zip_to_txt(str(input_zip), str(output_zip)))
+            with self.assertRaises(click.ClickException):
+                convert_eml_zip_to_txt(str(input_zip), str(output_zip))
 
     def test_cli_end_to_end(self):
         runner = CliRunner()
@@ -689,3 +755,16 @@ class ZipEmlToTxtTests(TestCase):
 
             self.assertEqual(result.exit_code, 0, result.output)
             self.assertIn("Batch complete!", result.output)
+
+    def test_cli_exits_non_zero_when_no_eml(self):
+        runner = CliRunner()
+        with tempfile.TemporaryDirectory() as tmp:
+            input_zip = Path(tmp) / "in.zip"
+            with zipfile.ZipFile(input_zip, "w") as zf:
+                zf.writestr("ignored.txt", b"not an eml")
+            output_zip = Path(tmp) / "out.zip"
+
+            result = runner.invoke(zip_eml_to_txt_command, [str(input_zip), str(output_zip)])
+
+            self.assertEqual(result.exit_code, 1)
+            self.assertIn("No .eml files found in the input ZIP.", result.output)
