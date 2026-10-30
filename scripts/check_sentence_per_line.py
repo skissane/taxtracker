@@ -9,7 +9,9 @@ from pathlib import Path
 
 FILES = ("AGENTS.md", "README.md")
 ABBREVIATIONS = ("e.g.", "i.e.", "etc.")
-BOUNDARY_RE = re.compile(r'[.!?][)"*_]* [A-Z`\[\(\*]')
+BOUNDARY_RE = re.compile(r'[.!?][)"*_]*[ \t]+[A-Z`\[\(\*]')
+# A code span: a run of backticks, then the shortest text up to a run of the same length; an unmatched run is literal.
+INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
 
 
 def _fence_marker(line: str) -> tuple[str, int] | None:
@@ -22,24 +24,8 @@ def _fence_marker(line: str) -> tuple[str, int] | None:
 
 
 def _mask_inline_code(line: str) -> str:
-    result: list[str] = []
-    i = 0
-    code_run: int | None = None
-    while i < len(line):
-        if line[i] != "`":
-            result.append(" " if code_run else line[i])
-            i += 1
-            continue
-        run_start = i
-        while i < len(line) and line[i] == "`":
-            i += 1
-        run = i - run_start
-        result.extend(" " * run)
-        if code_run is None:
-            code_run = run
-        elif code_run == run:
-            code_run = None
-    return "".join(result)
+    # Blank out code spans' contents but keep their backticks, so a sentence starting with code is still seen.
+    return INLINE_CODE_RE.sub(lambda m: m[1] + " " * len(m[2]) + m[1], line)
 
 
 def _has_boundary(line: str) -> bool:
@@ -75,7 +61,7 @@ def _problems(text: str) -> list[tuple[int, str]]:
         if marker is not None:
             if fence is None:
                 fence = marker
-            elif marker[0] == fence[0] and marker[1] >= fence[1]:
+            elif marker[0] == fence[0] and marker[1] >= fence[1] and not line.strip().strip(fence[0]):
                 fence = None
             continue
         if fence is not None or _line_ignored(line):

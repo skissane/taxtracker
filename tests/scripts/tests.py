@@ -933,12 +933,23 @@ class CheckSentencePerLineTests(SimpleTestCase):
             Tilde fence. Another sentence.
             ~~~
             Prose with `a | b` in code. Another sentence.
+            Two spaces.  Another sentence.
+            Done. `Code` starts this one.
+            A stray ` backtick. Another sentence.
+            ```
+            ```text
+            Still code. Not prose.
+            ```
+            ``Code with ` inside. Still code`` is one sentence.
             """)
         self.assertEqual(
             sentence_per_line_problems(text),
             [
                 (2, "This line has two sentences. Another starts here."),
                 (17, "Prose with `a | b` in code. Another sentence."),
+                (18, "Two spaces.  Another sentence."),
+                (19, "Done. `Code` starts this one."),
+                (20, "A stray ` backtick. Another sentence."),
             ],
         )
 
