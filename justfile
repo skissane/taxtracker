@@ -36,6 +36,10 @@ lock-os-arch-check:
 whitespace-check:
     uv run --no-project python scripts/check_whitespace.py
 
+# Check AGENTS.md and README.md stay one sentence per line
+sentence-per-line-check:
+    uv run --no-project python scripts/check_sentence_per_line.py
+
 # Check that screenshots/ has nothing tracked but its unchanged .gitignore
 screenshots-dir-check:
     uv run --no-project python scripts/check_screenshots_dir.py
@@ -233,8 +237,8 @@ fly-setup *args:
 lint-workflows:
     uv run --group dev jactionlint --profile correctness
 
-# Run every whitespace, screenshots/, blame-ignore-revs, ruff, djlint and jactionlint check (no fixes, no tests)
-check: whitespace-check screenshots-dir-check blame-ignore-revs-check lint fmt-check lint-templates fmt-check-templates lint-workflows
+# Run every whitespace, sentence-per-line, screenshots/, blame-ignore-revs, ruff, djlint and jactionlint check (no fixes, no tests)
+check: whitespace-check sentence-per-line-check screenshots-dir-check blame-ignore-revs-check lint fmt-check lint-templates fmt-check-templates lint-workflows
 
 # Autofix lint issues and reformat code/templates
 fix: lint-fix fmt fmt-templates
