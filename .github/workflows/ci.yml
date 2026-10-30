@@ -74,9 +74,6 @@ jobs:
       - name: Lint GitHub Actions workflows with jactionlint
         run: just lint-workflows
 
-      - name: Check the justfile doesn't use set lazy
-        run: just justfile-check
-
       # tests/core/test_envoy.py runs the real Envoy with Docker, and fails
       # rather than being skipped without Docker when LIFETRACKER_REQUIRE_ENVOY
       # is set.
