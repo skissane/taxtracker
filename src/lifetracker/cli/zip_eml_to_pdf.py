@@ -23,67 +23,57 @@ def convert_eml_zip_to_pdf(input_zip_path: str, output_zip_path: str) -> int:
     html_template = TEMPLATE_PATH.read_text()
 
     converted = 0
-    with (
-        zipfile.ZipFile(input_zip_path, "r") as in_zip,
-        zipfile.ZipFile(output_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zip,
-    ):
+    with zipfile.ZipFile(input_zip_path, "r") as in_zip:
         # Filter for .eml files in the archive
         eml_files = [f for f in in_zip.namelist() if f.lower().endswith(".eml")]
 
         if not eml_files:
-            click.echo("No .eml files found in the input ZIP.")
-            return converted
+            raise click.ClickException("No .eml files found in the input ZIP.")
 
-        click.echo("Starting conversion...")
-        for filename in eml_files:
-            # Read the .eml file directly from the ZIP into memory
-            with in_zip.open(filename, "r") as f:
-                msg = email.message_from_binary_file(f, policy=policy.default)
+        # Open the output only once there are .eml files, so a ZIP without any leaves no output.
+        with zipfile.ZipFile(output_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zip:
+            click.echo("Starting conversion...")
+            for filename in eml_files:
+                # Read the .eml file directly from the ZIP into memory
+                with in_zip.open(filename, "r") as f:
+                    msg = email.message_from_binary_file(f, policy=policy.default)
 
-            # Extract the clean, high-level headers
-            subject = msg.get("Subject", "No Subject")
-            sender = msg.get("From", "Unknown Sender")
-            recipient = msg.get("To", "Unknown Recipient")
-            date = msg.get("Date", "Unknown Date")
+                # Extract the clean, high-level headers
+                subject = msg.get("Subject", "No Subject")
+                sender = msg.get("From", "Unknown Sender")
+                recipient = msg.get("To", "Unknown Recipient")
+                date = msg.get("Date", "Unknown Date")
 
-            # Extract the email body (Targeting HTML)
-            body = ""
-            body_is_html = False
-            if msg.is_multipart():
-                for part in msg.walk():
-                    content_type = part.get_content_type()
-                    # Grab HTML if available
-                    if content_type == "text/html":
-                        body = part.get_content()
-                        body_is_html = True
-                        break
-                    # Fallback to plain text if no HTML exists
-                    elif content_type == "text/plain" and not body:
-                        body = part.get_content()
-            else:
-                body = msg.get_content()
-                body_is_html = msg.get_content_type() == "text/html"
+                # Extract the email body while preferring body parts over attachments.
+                body_part = msg.get_body(preferencelist=("html", "plain"))
+                if body_part is None:
+                    # No text body, e.g. a message that is only an attachment.
+                    body = ""
+                    body_is_html = False
+                else:
+                    body = body_part.get_content()
+                    body_is_html = body_part.get_content_type() == "text/html"
 
-            # Build a clean HTML structure combining headers and body
-            html_content = Template(html_template).substitute(
-                subject=escape(subject),
-                sender=escape(sender),
-                recipient=escape(recipient),
-                date=escape(date),
-                body=body if body_is_html else f"<pre>{escape(body)}</pre>",
-            )
+                # Build a clean HTML structure combining headers and body
+                html_content = Template(html_template).substitute(
+                    subject=escape(subject),
+                    sender=escape(sender),
+                    recipient=escape(recipient),
+                    date=escape(date),
+                    body=body if body_is_html else f"<pre>{escape(body)}</pre>",
+                )
 
-            # Convert the combined HTML into PDF bytes.
-            # Passing 'False' instead of a file path forces pdfkit to return bytes
-            pdf_bytes = pdfkit.from_string(html_content, False, options=options)
+                # Convert the combined HTML into PDF bytes.
+                # Passing 'False' instead of a file path forces pdfkit to return bytes
+                pdf_bytes = pdfkit.from_string(html_content, False, options=options)
 
-            # Write the generated PDF bytes directly into the output ZIP.
-            # Strip the .eml extension and add .pdf
-            pdf_filename = filename[:-4] + ".pdf"
-            out_zip.writestr(pdf_filename, pdf_bytes)
-            converted += 1
+                # Write the generated PDF bytes directly into the output ZIP.
+                # Strip the .eml extension and add .pdf
+                pdf_filename = filename[:-4] + ".pdf"
+                out_zip.writestr(pdf_filename, pdf_bytes)
+                converted += 1
 
-            click.echo(f"Success: {pdf_filename}")
+                click.echo(f"Success: {pdf_filename}")
 
     return converted
 
