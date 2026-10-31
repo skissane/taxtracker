@@ -517,7 +517,7 @@ class ExtractFidelityPdfsTests(TestCase):
             with self.assertRaisesRegex(click.ClickException, "different PDFs named a.pdf"):
                 extract_pdfs(har_path, out_dir)
 
-            self.assertFalse((out_dir / "a.pdf").exists())
+            self.assertFalse(out_dir.exists())
 
 
 class FilterZipTests(TestCase):
@@ -539,7 +539,18 @@ class FilterZipTests(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(click.ClickException) as ctx:
                 filter_zip(str(Path(tmp) / "missing.zip"), str(Path(tmp) / "out.zip"), "x")
-            self.assertIn("was not found", str(ctx.exception))
+            self.assertIn("missing.zip' was not found", str(ctx.exception))
+
+    def test_missing_output_directory_exits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            input_zip = Path(tmp) / "in.zip"
+            with zipfile.ZipFile(input_zip, "w") as zf:
+                zf.writestr("keep.txt", b"keep")
+            output_zip = Path(tmp) / "missing" / "out.zip"
+
+            with self.assertRaises(click.ClickException) as ctx:
+                filter_zip(str(input_zip), str(output_zip), "x")
+            self.assertIn("out.zip' was not found", str(ctx.exception))
 
     def test_bad_zip_file_exits(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -714,6 +725,7 @@ class ZipEmlToPdfTests(TestCase):
                     convert_eml_zip_to_pdf(str(input_zip), str(output_zip))
 
             mock_fs.assert_not_called()
+            self.assertFalse(output_zip.exists())
 
     def test_uses_message_body_not_html_attachment(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -830,6 +842,8 @@ class ZipEmlToTxtTests(TestCase):
 
             with self.assertRaises(click.ClickException):
                 convert_eml_zip_to_txt(str(input_zip), str(output_zip))
+
+            self.assertFalse(output_zip.exists())
 
     def test_cli_end_to_end(self):
         runner = CliRunner()

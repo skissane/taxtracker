@@ -35,8 +35,9 @@ def filter_zip(input_path, output_path, reject_substring):
         click.echo(f"SUCCESS: Created {output_path!r}")
         click.echo(f"Files kept: {kept_count} | Files skipped: {skipped_count}")
 
-    except FileNotFoundError:
-        raise click.ClickException(f"The input file {input_path!r} was not found.")
+    except FileNotFoundError as exc:
+        # The output's directory can be missing too, so name whichever file it was.
+        raise click.ClickException(f"{exc.filename!r} was not found.")
     except zipfile.BadZipFile:
         raise click.ClickException(f"{input_path!r} is not a valid ZIP file.")
 

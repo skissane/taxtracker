@@ -17,7 +17,6 @@ def extract_pdfs(har_path: Path, output_dir: Path) -> int:
 
     Returns the number of PDF files written.
     """
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     def warn(url: str, reason: str) -> None:
         click.echo(f"WARNING: {reason} for {url}; skipping", err=True)
@@ -32,6 +31,7 @@ def extract_pdfs(har_path: Path, output_dir: Path) -> int:
         out_path = output_dir / pdf_name
         if out_path.exists():
             raise click.ClickException(f"Refusing to overwrite existing file: {out_path}")
+    output_dir.mkdir(parents=True, exist_ok=True)
     for pdf_name, pdf_bytes in pdfs.items():
         out_path = output_dir / pdf_name
         # "x" also refuses a file created since the check, or a dangling symlink.
