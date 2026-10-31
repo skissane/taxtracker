@@ -34,7 +34,12 @@ def extract_pdfs(har_path: Path, output_dir: Path) -> int:
             raise click.ClickException(f"Refusing to overwrite existing file: {out_path}")
     for pdf_name, pdf_bytes in pdfs.items():
         out_path = output_dir / pdf_name
-        out_path.write_bytes(pdf_bytes)
+        # "x" also refuses a file created since the check, or a dangling symlink.
+        try:
+            with out_path.open("xb") as f:
+                f.write(pdf_bytes)
+        except FileExistsError:
+            raise click.ClickException(f"Refusing to overwrite existing file: {out_path}")
         click.echo(f"Wrote {out_path} ({len(pdf_bytes)} bytes)")
     return len(pdfs)
 

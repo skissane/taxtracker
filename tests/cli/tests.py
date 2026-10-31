@@ -464,6 +464,22 @@ class ExtractFidelityPdfsTests(TestCase):
             with self.assertRaises(click.ClickException):
                 extract_pdfs(har_path, out_dir)
 
+            self.assertEqual((out_dir / "statement-2023-07-20.pdf").read_bytes(), b"existing")
+
+    def test_refuses_dangling_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            har_path = Path(tmp) / "export.har"
+            har_path.write_bytes(self._make_har())
+            out_dir = Path(tmp) / "out"
+            out_dir.mkdir()
+            target = Path(tmp) / "elsewhere.pdf"
+            (out_dir / "statement-2023-07-20.pdf").symlink_to(target)
+
+            with self.assertRaises(click.ClickException):
+                extract_pdfs(har_path, out_dir)
+
+            self.assertFalse(target.exists())
+
     def _make_multi_har(self, *pdfs) -> bytes:
         entries = []
         for filename, pdf_bytes in pdfs:
@@ -542,7 +558,21 @@ class FilterZipTests(TestCase):
             with self.assertRaises(click.ClickException) as ctx:
                 filter_zip(str(path), str(path), "x")
 
-            self.assertIn("resolve to the same file", str(ctx.exception))
+            self.assertIn("are the same file", str(ctx.exception))
+
+    def test_hard_linked_input_and_output_exits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "in.zip"
+            with zipfile.ZipFile(path, "w") as zf:
+                zf.writestr("keep.txt", b"keep")
+            link = Path(tmp) / "out.zip"
+            link.hardlink_to(path)
+
+            with self.assertRaises(click.ClickException):
+                filter_zip(str(path), str(link), "x")
+
+            with zipfile.ZipFile(path) as zf:
+                self.assertEqual(zf.namelist(), ["keep.txt"])
 
     def test_cli_end_to_end(self):
         runner = CliRunner()

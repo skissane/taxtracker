@@ -8,10 +8,10 @@ import click
 
 def filter_zip(input_path, output_path, reject_substring):
     """Reads an input zip and writes to an output zip, skipping specific files."""
-    input_file = Path(input_path).resolve(strict=False)
-    output_file = Path(output_path).resolve(strict=False)
-    if input_file == output_file:
-        raise click.ClickException(f"Input and output ZIP paths resolve to the same file: {input_file}")
+    # samefile() also catches symlinks and hard links; a missing file can't be the other.
+    input_file, output_file = Path(input_path), Path(output_path)
+    if input_file.exists() and output_file.exists() and input_file.samefile(output_file):
+        raise click.ClickException(f"Input and output ZIP paths are the same file: {input_path!r}")
 
     try:
         # Open the input zip for reading and the output zip for writing
