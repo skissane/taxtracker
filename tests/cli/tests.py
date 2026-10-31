@@ -452,6 +452,7 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertEqual(result.exit_code, 1, result.output)
             self.assertIn("No matching Fidelity PDF entries", result.output)
+            self.assertFalse(out_dir.exists())
 
     def test_refuses_to_overwrite_existing_output_file(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -719,13 +720,14 @@ class ZipEmlToPdfTests(TestCase):
             with zipfile.ZipFile(input_zip, "w") as zf:
                 zf.writestr("ignored.txt", b"not an eml")
             output_zip = Path(tmp) / "out.zip"
+            output_zip.write_bytes(b"existing")
 
             with patch("lifetracker.cli.zip_eml_to_pdf.pdfkit.from_string") as mock_fs:
                 with self.assertRaises(click.ClickException):
                     convert_eml_zip_to_pdf(str(input_zip), str(output_zip))
 
             mock_fs.assert_not_called()
-            self.assertFalse(output_zip.exists())
+            self.assertEqual(output_zip.read_bytes(), b"existing")
 
     def test_uses_message_body_not_html_attachment(self):
         with tempfile.TemporaryDirectory() as tmp:
