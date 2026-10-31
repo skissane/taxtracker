@@ -24,6 +24,11 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 _opener = urllib.request.build_opener(_NoRedirectHandler)
 
 
+def _origin(url: str) -> tuple[str, str]:
+    parts = urllib.parse.urlsplit(url)
+    return parts.scheme, parts.netloc
+
+
 def request(
     method: str,
     url: str,
@@ -35,17 +40,18 @@ def request(
 ):
     """Send an API request and return its decoded JSON response (None if empty).
     A 301/302/307/308 redirect is followed with the same method and body,
-    keeping the token only if the host is unchanged."""
+    keeping the token only while the scheme, host and port are unchanged (so
+    not on a downgrade to http)."""
     if json_body is not None:
         data = json.dumps(json_body).encode()
         content_type = "application/json"
-    host = urllib.parse.urlsplit(url).hostname
+    origin = _origin(url)
     for _ in range(5):
         req = urllib.request.Request(url, data=data, method=method)
         req.add_header("Accept", "application/vnd.github+json")
         if content_type:
             req.add_header("Content-Type", content_type)
-        if urllib.parse.urlsplit(url).hostname == host:
+        if _origin(url) == origin:
             req.add_header("Authorization", f"Bearer {token}")
         try:
             with _opener.open(req, timeout=60) as response:

@@ -829,10 +829,23 @@ class GitHubCommentsRequestTests(SimpleTestCase):
                 "https://elsewhere.example/c",
             ],
         )
+        self.assertEqual([r.get_method() for r in sent], ["POST"] * 3)
         self.assertEqual([r.data for r in sent], [b"png"] * 3)
         self.assertEqual(
             [r.get_header("Authorization") for r in sent],
             ["Bearer tok", "Bearer tok", None],
+        )
+
+    def test_redirect_to_http_drops_token(self):
+        responses = [
+            self._redirect("https://api.github.com/a", "http://api.github.com/b", 301),
+            self._response(b"{}"),
+        ]
+        with mock.patch("scripts.github_comments._opener.open", side_effect=responses) as urlopen:
+            github_request("GET", "https://api.github.com/a", "tok")
+        self.assertEqual(
+            [c.args[0].get_header("Authorization") for c in urlopen.call_args_list],
+            ["Bearer tok", None],
         )
 
     def test_too_many_redirects(self):
