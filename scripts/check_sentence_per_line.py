@@ -9,6 +9,10 @@ from pathlib import Path
 
 FILES = ("AGENTS.md", "README.md")
 ABBREVIATIONS = ("e.g.", "i.e.", "etc.")
+# An abbreviation as a whole word, at the end of the text before a boundary.
+ABBREVIATION_RE = re.compile(r"(?<![\w.])(?:" + "|".join(map(re.escape, ABBREVIATIONS)) + r")$", re.IGNORECASE)
+# An ordered-list marker, optionally after bullet or blockquote markers (e.g. "- 1." or "> 1.").
+LIST_MARKER_RE = re.compile(r"\s*(?:[-*+>]\s*)*\d+\.")
 BOUNDARY_RE = re.compile(r'[.!?][)"*_]*[ \t]+[A-Z`\[\(\*]')
 # A code span: a run of backticks, then the shortest text up to a run of the same length; an unmatched run is literal.
 INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
@@ -34,9 +38,9 @@ def _has_boundary(line: str) -> bool:
         boundary = match.start()
         if line[boundary] == "." and boundary > 0 and line[boundary - 1] == ".":
             continue
-        if line[boundary] == "." and re.fullmatch(r"\s*\d+\.", line[: boundary + 1]):
+        if line[boundary] == "." and LIST_MARKER_RE.fullmatch(line[: boundary + 1]):
             continue
-        if line[boundary] == "." and any(line[: boundary + 1].lower().endswith(abbrev) for abbrev in ABBREVIATIONS):
+        if line[boundary] == "." and ABBREVIATION_RE.search(line[: boundary + 1]):
             continue
         return True
     return False

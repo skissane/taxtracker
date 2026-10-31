@@ -941,6 +941,10 @@ class CheckSentencePerLineTests(SimpleTestCase):
             Still code. Not prose.
             ```
             ``Code with ` inside. Still code`` is one sentence.
+            - 1. Bulleted ordered marker is ignored.
+            > 1. Quoted ordered marker is ignored.
+            A word like fetc. Is not an abbreviation.
+            Capitalised E.g. Still an abbreviation.
             """)
         self.assertEqual(
             sentence_per_line_problems(text),
@@ -950,6 +954,7 @@ class CheckSentencePerLineTests(SimpleTestCase):
                 (18, "Two spaces.  Another sentence."),
                 (19, "Done. `Code` starts this one."),
                 (20, "A stray ` backtick. Another sentence."),
+                (28, "A word like fetc. Is not an abbreviation."),
             ],
         )
 
