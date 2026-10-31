@@ -12,6 +12,23 @@ import urllib.request
 API_URL = "https://api.github.com"
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Raise every redirect as an HTTPError, for request() to follow itself.
+    urllib's own handler follows GET redirects keeping every header, the
+    token included, even to another host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_opener = urllib.request.build_opener(_NoRedirectHandler)
+
+
+def _origin(url: str) -> tuple[str, str]:
+    parts = urllib.parse.urlsplit(url)
+    return parts.scheme, parts.netloc
+
+
 def request(
     method: str,
     url: str,
@@ -22,26 +39,27 @@ def request(
     content_type: str | None = None,
 ):
     """Send an API request and return its decoded JSON response (None if empty).
-    A 307/308 redirect is followed with the same method and body, keeping the
-    token only if the host is unchanged."""
+    A 301/302/307/308 redirect is followed with the same method and body,
+    keeping the token only while the scheme, host and port are unchanged (so
+    not on a downgrade to http)."""
     if json_body is not None:
         data = json.dumps(json_body).encode()
         content_type = "application/json"
-    host = urllib.parse.urlsplit(url).hostname
+    origin = _origin(url)
     for _ in range(5):
         req = urllib.request.Request(url, data=data, method=method)
         req.add_header("Accept", "application/vnd.github+json")
         if content_type:
             req.add_header("Content-Type", content_type)
-        if urllib.parse.urlsplit(url).hostname == host:
+        if _origin(url) == origin:
             req.add_header("Authorization", f"Bearer {token}")
         try:
-            with urllib.request.urlopen(req, timeout=60) as response:
+            with _opener.open(req, timeout=60) as response:
                 payload = response.read()
             return json.loads(payload) if payload else None
         except urllib.error.HTTPError as e:
             location = e.headers.get("Location")
-            if e.code not in (307, 308) or not location:
+            if e.code not in (301, 302, 307, 308) or not location:
                 raise
             e.close()
             url = urllib.parse.urljoin(url, location)
