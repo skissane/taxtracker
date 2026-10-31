@@ -49,6 +49,9 @@ jobs:
       - name: Check whitespace in text files
         run: just whitespace-check
 
+      - name: Check AGENTS.md and README.md sentence-per-line formatting
+        run: just sentence-per-line-check
+
       - name: Check nothing is committed under screenshots/
         run: just screenshots-dir-check
 
