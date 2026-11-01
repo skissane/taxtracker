@@ -32,6 +32,10 @@ It fails unless the branch has an open PR from this repo (`gh pr list --head`), 
 Like `dependabot-fix`, it checks out with `persist-credentials: false`, as `just fix` runs the branch's own `justfile` and dependencies, and only the push step sees its token, the `AUTOFIX_TOKEN` Actions secret (a fine-grained PAT with Contents: read and write; the job fails if it's unset), not `GITHUB_TOKEN`, whose pushes wouldn't trigger CI.
 If the branch moves after checkout, the push isn't a fast-forward and fails.
 
+**Recreate PR:** `scripts/recreate_pr.py <PR URL>` (stdlib-only, run with `uv run --no-project python -m scripts.recreate_pr`) closes an open same-repo PR and opens a draft PR from the same branch with its title, body, labels and milestone, then comments "Superseded by #N" on the original.
+It isn't specific to this repo; it lives here until there's a better place for general utility scripts.
+It never copies assignees or reviewers, as GitHub rejects assigning a bot, and it reopens the original if creating the new PR fails.
+
 **Whitespace:** `just whitespace-check` (part of `just check`, `just ci` and the `test` job; `scripts/check_whitespace.py`, stdlib-only) checks every file `git ls-files` lists, except ones Git's own detection calls binary (`git ls-files --eol` shows `w/-text`) and symlinks: no trailing whitespace on any line, no leading blank line, and exactly one newline at the end of a non-empty file (none in an empty one).
 It checks the working tree copy, so it also catches unstaged edits.
 For a Markdown hard line break, end the line with a backslash rather than two trailing spaces.
