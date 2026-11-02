@@ -311,7 +311,8 @@ class TaskAttachmentModelTests(TestCase):
         attachment = TaskAttachment(task=self.task, file=self._make_file("delete.pdf"))
         attachment.save()
         file_name = attachment.file.name
-        pk = attachment.file.storage._name_to_pk(file_name)
+        assert file_name is not None
+        pk = database_storage._name_to_pk(file_name)
         self.assertTrue(DBStoredFile.objects.filter(pk=pk).exists())
         self.assertTrue(database_storage.exists(file_name))
         attachment.delete()
@@ -325,6 +326,7 @@ class TaskAttachmentModelTests(TestCase):
         for task in (self.task, child):
             attachment = TaskAttachment(task=task, file=self._make_file())
             attachment.save()
+            assert attachment.file.name is not None
             names.append(attachment.file.name)
         self.task.delete()
         for name in names:
@@ -333,8 +335,10 @@ class TaskAttachmentModelTests(TestCase):
     def test_queryset_delete_removes_stored_files(self):
         attachment = TaskAttachment(task=self.task, file=self._make_file())
         attachment.save()
+        file_name = attachment.file.name
+        assert file_name is not None
         TaskAttachment.objects.all().delete()
-        self.assertFalse(database_storage.exists(attachment.file.name))
+        self.assertFalse(database_storage.exists(file_name))
 
     def test_task_fk_required(self):
         with self.assertRaises(IntegrityError), transaction.atomic():
@@ -393,15 +397,15 @@ class TaskTypeAdminGenericProtectionTests(TestCase):
         self.assertTrue(self.admin.has_delete_permission(self.request, None))
 
     def test_readonly_fields_locked_for_generic(self):
-        readonly_fields = self.admin.get_readonly_fields(None, self.generic)
+        readonly_fields = self.admin.get_readonly_fields(self.request, self.generic)
         self.assertIn("name", readonly_fields)
         self.assertIn("content_type", readonly_fields)
 
     def test_readonly_fields_unlocked_for_other(self):
-        readonly_fields = self.admin.get_readonly_fields(None, self.other)
+        readonly_fields = self.admin.get_readonly_fields(self.request, self.other)
         self.assertNotIn("name", readonly_fields)
         self.assertNotIn("content_type", readonly_fields)
 
     def test_readonly_fields_unlocked_for_new_object(self):
-        readonly_fields = self.admin.get_readonly_fields(None, None)
+        readonly_fields = self.admin.get_readonly_fields(self.request, None)
         self.assertNotIn("name", readonly_fields)

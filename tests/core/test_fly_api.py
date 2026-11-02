@@ -15,6 +15,7 @@ from lifetracker.core import fly_api
 class _Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         server = self.server
+        assert isinstance(server, _UnixHTTPServer)
         server.requests.append((self.command, self.path, self.headers["Host"]))
         if self.command == "POST":
             length = self.headers["Content-Length"]
@@ -39,9 +40,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
 class _UnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
+    requests: list[tuple[str, str, str | None]]
+    posts: list[tuple[str | None, str | None, bytes | None]]
+    response: tuple[int, str, bytes]
 
 
-class FakeFlyApiMixin:
+class FakeFlyApiMixin(SimpleTestCase):
     """Serves ``self.response`` on a Unix socket at ``self.socket_path``,
     recording each request's method, path and Host in ``self.requests``, and
     each POST's Content-Length, Content-Type and body in ``self.posts``."""

@@ -52,9 +52,9 @@ blame-ignore-revs-check target="HEAD":
 lint:
     uv run --group dev ruff check .
 
-# Type-check src with mypy
+# Type-check src, scripts, tests and screenshot_tests with mypy (strict; see pyproject.toml's [tool.mypy])
 mypy:
-    uv run --group dev mypy src
+    uv run --group dev --group screenshots mypy
 
 # Autofix Python lint issues with ruff
 lint-fix:

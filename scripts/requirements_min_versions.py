@@ -10,7 +10,7 @@ def _normalize_package_name(name: str) -> str:
 
 def _parse_locked_versions() -> dict[str, set[str]]:
     lock = tomllib.loads(Path("uv.lock").read_text(encoding="utf-8"))
-    locked = {}
+    locked: dict[str, set[str]] = {}
     for package in lock.get("package", []):
         name = _normalize_package_name(package["name"])
         version = package.get("version")

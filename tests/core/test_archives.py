@@ -51,7 +51,7 @@ def test_extract_pdfs_from_zip_raises_bad_zip_file():
 
 def test_select_importable_files_skips_duplicates():
     existing = {"invoice.pdf"}
-    duplicate_names = []
+    duplicate_names: list[str] = []
 
     importable = select_importable_files(
         [("invoice.pdf", b"duplicate"), ("dir/new.pdf", b"new"), ("new.pdf", b"again")],

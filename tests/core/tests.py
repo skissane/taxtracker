@@ -29,6 +29,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.models import Permission, User
+from django.contrib.sessions.backends.base import SessionBase
 from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.staticfiles import finders
 from django.core.exceptions import ImproperlyConfigured, SuspiciousFileOperation, ValidationError
@@ -101,6 +102,7 @@ from lifetracker.core.models import (
     FileExtension,
     FileType,
     MimeType,
+    database_storage,
 )
 from lifetracker.core.timing import REQUEST_START_ATTR
 from lifetracker.settings import fly_machine_url
@@ -199,8 +201,9 @@ class GoogleSSOSettingsTests(TestCase):
         """
 
         def routes(module_name):
-            origin = importlib.util.find_spec(module_name).origin
-            tree = ast.parse(Path(origin).read_text())
+            spec = importlib.util.find_spec(module_name)
+            assert spec is not None and spec.origin is not None
+            tree = ast.parse(Path(spec.origin).read_text())
             found = set()
             for node in ast.walk(tree):
                 if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "path"):
@@ -209,7 +212,10 @@ class GoogleSSOSettingsTests(TestCase):
                 # Unwrap our wrappers, e.g. _require_sso_enabled(views.x), to views.x.
                 while isinstance(view, ast.Call):
                     (view,) = view.args
-                (name,) = (kw.value.value for kw in node.keywords if kw.arg == "name")
+                assert isinstance(route, ast.Constant)
+                (name,) = (
+                    kw.value.value for kw in node.keywords if kw.arg == "name" and isinstance(kw.value, ast.Constant)
+                )
                 found.add((route.value, ast.unparse(view), name))
             return found
 
@@ -223,7 +229,9 @@ class GoogleSSOCallbackTests(TestCase):
     """Tests for the lifetracker.google_sso callbacks django_google_sso invokes."""
 
     def _validate(self, email, verified_email=True):
-        return google_sso.pre_validate_user({"email": email, "verified_email": verified_email}, request=None)
+        return google_sso.pre_validate_user(
+            {"email": email, "verified_email": verified_email}, request=RequestFactory().get("/")
+        )
 
     def test_rejects_unverified_email(self):
         with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@x.com"]):
@@ -233,7 +241,7 @@ class GoogleSSOCallbackTests(TestCase):
 
     def test_rejects_missing_or_blank_email(self):
         with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@x.com"]):
-            self.assertFalse(google_sso.pre_validate_user({}, request=None))
+            self.assertFalse(google_sso.pre_validate_user({}, request=RequestFactory().get("/")))
             self.assertFalse(self._validate("   "))
 
     def test_rejects_everyone_when_allowlist_empty(self):
@@ -294,7 +302,7 @@ class GoogleSSOLoginFlowTests(TestCase):
         claims = _decode_jwt(token)
         self.assertEqual(claims["sub"], str(self.user.pk))
         session = self.client.session
-        self.assertEqual(claims["sid"], jwt_auth.session_id_claim(session.session_key))
+        self.assertEqual(claims["sid"], jwt_auth.session_id_claim(_session_key(session)))
         self.assertEqual(session[jwt_auth.SESSION_KEY], {"sub": str(self.user.pk)})
 
     @override_settings(SESSION_COOKIE_AGE=12345)
@@ -623,7 +631,7 @@ class ServeFileViewTests(TestCase):
             title=filename,
             file=ContentFile(content, name=filename),
         )
-        stored_file_pk = int(attachment.file.name.split("/", 2)[1])
+        stored_file_pk = database_storage._name_to_pk(attachment.file.name)
         return DBStoredFile.objects.get(pk=stored_file_pk)
 
     def _staff_client(self, username, *permission_codenames):
@@ -766,7 +774,7 @@ class ServeFileViewTests(TestCase):
             title="assessment.pdf",
             file=ContentFile(b"assessment", name="assessment.pdf"),
         )
-        pk = int(attachment.file.name.split("/", 2)[1])
+        pk = database_storage._name_to_pk(attachment.file.name)
         url = reverse("admin:core_dbstoredfile_serve_file", args=[pk])
         denied = self._staff_client("staff-doc-no-view", "view_receiveddocument")
         self.assertEqual(denied.get(url).status_code, 403)
@@ -908,7 +916,7 @@ class AtLeastOnePrimaryFormSetTests(TestCase):
         """When a subclass leaves _nonempty_error unset, clean() is a no-op for
         an empty formset instead of raising."""
 
-        class _NoNonemptyErrorFormSet(_AtLeastOnePrimaryFormSet):
+        class _NoNonemptyErrorFormSet(_AtLeastOnePrimaryFormSet[MimeType]):
             pass
 
         FormSet = inlineformset_factory(
@@ -962,9 +970,10 @@ class DBStoredFileAdminPermissionTests(TestCase):
         self.admin = DBStoredFileAdmin(DBStoredFile, admin.site)
 
     def test_permissions_all_denied(self):
-        self.assertFalse(self.admin.has_add_permission(None))
-        self.assertFalse(self.admin.has_change_permission(None))
-        self.assertFalse(self.admin.has_delete_permission(None))
+        request = RequestFactory().get("/")
+        self.assertFalse(self.admin.has_add_permission(request))
+        self.assertFalse(self.admin.has_change_permission(request))
+        self.assertFalse(self.admin.has_delete_permission(request))
 
 
 class ServeFileViewMimeTypeFallbackTests(TestCase):
@@ -1683,7 +1692,7 @@ class LoggingTests(TestCase):
         # Both loggers share the one handler, which writes to stderr.
         (handler,) = logging.getLogger("django").handlers
         self.assertEqual(logging.getLogger("lifetracker").handlers, [handler])
-        self.assertIs(type(handler), logging.StreamHandler)
+        assert type(handler) is logging.StreamHandler
         self.stream = io.StringIO()
         self.addCleanup(handler.setStream, handler.setStream(self.stream))
 
@@ -2156,6 +2165,13 @@ class CloudBackupStatusModelTests(TestCase):
         CloudBackupStatus.objects.create(pk=CLOUD_BACKUP_STATUS_PK)
         with self.assertRaises(IntegrityError), transaction.atomic():
             CloudBackupStatus.objects.create(pk=CLOUD_BACKUP_STATUS_PK + 1)
+
+
+def _session_key(session: SessionBase) -> str:
+    """The session's key, which a saved session always has."""
+    key = session.session_key
+    assert key is not None
+    return key
 
 
 def _record_uploads(mock_client):
@@ -2736,6 +2752,7 @@ class CloudBackupCommandTests(TransactionTestCase):
             str(cm.exception),
             f"Cloud backup uploaded successfully as {key}, but failed to record backup status.",
         )
+        assert cm.exception.__cause__ is not None
         self.assertIsInstance(cm.exception.__cause__.__cause__, IntegrityError)
 
     @mock.patch("lifetracker.core.backup.boto3.client")
@@ -3031,14 +3048,14 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
         self.mock_client = client_patcher.start()
         self.addCleanup(client_patcher.stop)
         self.uploads = _record_uploads(self.mock_client)
-        self.downloads = []
+        self.downloads: list[tuple[str, str]] = []
 
         def download_fileobj(bucket, key, fileobj):
             self.downloads.append((bucket, key))
             fileobj.write(self.backup_bytes)
 
         self.mock_client.return_value.download_fileobj.side_effect = download_fileobj
-        self.restored = []
+        self.restored: list[bytes] = []
 
         def fake_restore(path):
             self.restored.append(Path(path).read_bytes())
@@ -3091,7 +3108,8 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
         self.assertEqual(len(self.restored), 1)
 
     def test_cancelled(self):
-        for kwargs in [{"return_value": "no"}, {"side_effect": EOFError}]:
+        cases: list[dict[str, typing.Any]] = [{"return_value": "no"}, {"side_effect": EOFError}]
+        for kwargs in cases:
             with self.subTest(**kwargs):
                 with mock.patch("builtins.input", **kwargs):
                     with self.assertRaisesMessage(CommandError, "Restore cancelled."):
@@ -3333,7 +3351,7 @@ class PurgeOrphanedFilesTests(TestCase):
         return out.getvalue()
 
     def referenced_pks(self):
-        return {att.file.storage._name_to_pk(att.file.name) for att in (self.attachment, self.task_attachment)}
+        return {database_storage._name_to_pk(att.file.name) for att in (self.attachment, self.task_attachment)}
 
     def test_finds_only_unreferenced_files(self):
         self.assertEqual(orphaned_stored_file_pks(), self.orphan_pks)
@@ -3749,7 +3767,7 @@ class AutoBackupTests(SimpleTestCase):
     START = 1_800_000_000
 
     def _backup(self, *processes, environ=None):
-        self.messages = []
+        self.messages: list[str] = []
         self.popen = mock.Mock(side_effect=list(processes))
         return auto_backup.AutoBackup(
             3600,
@@ -4099,11 +4117,13 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
 
             idle_watchdog.record_request(path)
             first = idle_watchdog.last_request_time(path)
+            assert first is not None
             os.utime(path, (first - 100, first - 100))
             idle_watchdog.record_request(path)
 
-            self.assertIsNotNone(first)
-            self.assertGreaterEqual(idle_watchdog.last_request_time(path), first)
+            later = idle_watchdog.last_request_time(path)
+            assert later is not None
+            self.assertGreaterEqual(later, first)
 
     def test_record_request_never_raises(self):
         idle_watchdog.record_request(None)
@@ -4154,7 +4174,7 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
             path = Path(tempdir) / "envoy-failed"
             env = {"LIFETRACKER_ENVOY_FAILED_FILE": str(path)}
             with mock.patch.dict(os.environ, env):
-                self.assertIsNone(gunicorn_conf.on_exit(server))
+                gunicorn_conf.on_exit(server)
                 path.touch()
                 with self.assertRaises(SystemExit) as cm:
                     gunicorn_conf.on_exit(server)
@@ -4165,7 +4185,7 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
     def test_gunicorn_on_exit_without_envoy_failed_file_setting(self):
         with mock.patch.dict(os.environ):
             os.environ.pop("LIFETRACKER_ENVOY_FAILED_FILE", None)
-            self.assertIsNone(gunicorn_conf.on_exit(mock.Mock()))
+            gunicorn_conf.on_exit(mock.Mock())
 
     def test_gunicorn_when_ready_spawns_for_master(self):
         server = mock.Mock(pid=1234)
@@ -4286,6 +4306,7 @@ class IdleWatchdogUptimeRunTests(SimpleTestCase):
 
     def _up_seconds(self, uptime_dir):
         data = uptime_log.read_day(uptime_dir, uptime_log.day_of(self.START))
+        assert data is not None
         bits = int.from_bytes(data, "big")
         return [
             second
@@ -4435,6 +4456,7 @@ class UptimeLogTests(SimpleTestCase):
             uptime_log.UptimeLog(Path(tempdir)).record(self.MIDNIGHT + 2)
             data = uptime_log.read_day(Path(tempdir), self.DAY)
 
+        assert data is not None
         self.assertEqual(data[0], 0x60)
 
     def test_range_across_midnight(self):
@@ -4446,6 +4468,7 @@ class UptimeLogTests(SimpleTestCase):
             after = uptime_log.read_day(Path(tempdir), self.DAY)
             first = uptime_log.first_recorded_day(Path(tempdir))
 
+        assert before is not None and after is not None
         self.assertEqual(before[-1], 0x03)
         self.assertEqual(after[0], 0xC0)
         self.assertEqual(first, self.DAY - 1)
@@ -4459,6 +4482,7 @@ class UptimeLogTests(SimpleTestCase):
             data = uptime_log.read_day(Path(tempdir), self.DAY)
             first = uptime_log.first_recorded_day(Path(tempdir))
 
+        assert data is not None
         self.assertEqual(len(data), 10_800)
         self.assertEqual(uptime_log.active_seconds(data), 8)
         self.assertEqual(first, self.DAY)
@@ -4506,6 +4530,7 @@ class UptimeLogTests(SimpleTestCase):
             empty_after = uptime_log.day_periods(Path(tempdir), self.DAY + 2, now)
 
         self.assertEqual(result.date, uptime_log.day_date(self.DAY))
+        assert result.periods is not None
         self.assertEqual(
             [(p.start, p.end) for p in result.periods],
             [(0, 3599), (7200, 86_399)],
@@ -4525,6 +4550,7 @@ class UptimeLogTests(SimpleTestCase):
             uptime_log.UptimeLog(Path(tempdir)).record(self.MIDNIGHT + 86_399, since=self.MIDNIGHT)
             result = uptime_log.day_periods(Path(tempdir), self.DAY, self.MIDNIGHT + 2 * 86_400)
 
+        assert result.periods is not None
         self.assertEqual([(p.start, p.end) for p in result.periods], [(0, 86_399)])
         self.assertFalse(result.from_previous_day)
         self.assertFalse(result.into_next_day)
@@ -4538,6 +4564,7 @@ class UptimeLogTests(SimpleTestCase):
             ongoing = uptime_log.day_periods(Path(tempdir), self.DAY, now)
             stopped = uptime_log.day_periods(Path(tempdir), self.DAY, now + 10)
 
+        assert ongoing.periods is not None
         self.assertEqual(len(ongoing.periods), 2)
         self.assertTrue(ongoing.today)
         self.assertTrue(ongoing.ongoing)
@@ -4595,6 +4622,18 @@ class UptimeReportCommandTests(SimpleTestCase):
             self._report({"LIFETRACKER_UPTIME_DIR": "/nonexistent"}, days=0)
 
 
+def _table_rows(response: HttpResponse) -> list[list[str]]:
+    """The cells of each row of the page's table body."""
+    return [
+        [cell.strip() for cell in re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)]
+        for row in re.findall(
+            r"<tr>(.*?)</tr>",
+            response.content.decode().split("<tbody>")[1],
+            re.S,
+        )
+    ]
+
+
 class UptimeReportAdminViewTests(TestCase):
     URL = "/admin/uptime/"
     NOW = UptimeReportCommandTests.NOW
@@ -4613,14 +4652,7 @@ class UptimeReportAdminViewTests(TestCase):
             self.addCleanup(patcher.stop)
 
     def _rows(self, response):
-        return [
-            [cell.strip() for cell in re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)]
-            for row in re.findall(
-                r"<tr>(.*?)</tr>",
-                response.content.decode().split("<tbody>")[1],
-                re.S,
-            )
-        ]
+        return _table_rows(response)
 
     def test_url(self):
         self.assertEqual(reverse("admin:uptime_report"), self.URL)
@@ -4728,8 +4760,7 @@ class UptimeDayAdminViewTests(TestCase):
         times' ``<time>`` elements hold the UTC time until ``local_times.js``
         replaces it."""
         return [
-            [re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", cell)).strip() for cell in row]
-            for row in UptimeReportAdminViewTests._rows(self, response)
+            [re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", cell)).strip() for cell in row] for row in _table_rows(response)
         ]
 
     def _record(self):
@@ -5369,13 +5400,13 @@ class JWTKeyTests(SimpleTestCase):
         # `just docker-run`'s /config.
         _, kid = jwt_auth.signing_key()
         self._forget_cached_key()
-        with mock.patch.object(jwt_auth.tempfile, "mkstemp", side_effect=AssertionError("wrote")):
+        with mock.patch.object(tempfile, "mkstemp", side_effect=AssertionError("wrote")):
             self.assertEqual(jwt_auth.signing_key()[1], kid)
 
     def test_failed_jwks_write_leaves_no_temporary_file(self):
         self.dir.mkdir()
         with (
-            mock.patch.object(jwt_auth.os, "replace", side_effect=OSError("full")),
+            mock.patch.object(os, "replace", side_effect=OSError("full")),
             self.assertRaisesRegex(OSError, "full"),
         ):
             jwt_auth._write_jwks({"kty": "OKP"}, self.jwks_path)
@@ -5505,7 +5536,7 @@ class WebManifestTests(TestCase):
 
     def test_icon_is_a_static_file(self):
         icon = finders.find("core/app_icon.png")
-        self.assertIsNotNone(icon)
+        assert isinstance(icon, str)
         with open(icon, "rb") as f:
             header = f.read(24)
         self.assertEqual(header[:8], b"\x89PNG\r\n\x1a\n")
@@ -5646,7 +5677,7 @@ class JWTCookieMiddlewareTests(TestCase):
         self.assertAlmostEqual(claims["exp"], session.get_expiry_date().timestamp(), delta=5)
         self.assertAlmostEqual(claims["iat"], time.time(), delta=5)
         self.assertTrue(claims["jti"])
-        self.assertEqual(claims["sid"], jwt_auth.session_id_claim(session.session_key))
+        self.assertEqual(claims["sid"], jwt_auth.session_id_claim(_session_key(session)))
         self.assertNotIn(session.session_key, cookie.value)
         self.assertEqual(self._stored(), {"sub": str(self.user.pk)})
 
@@ -5722,7 +5753,7 @@ class JWTCookieMiddlewareTests(TestCase):
         # browser keeps, the session (which records neither) accepts it.
         self._login()
         session = self.client.session
-        tokens = [jwt_auth.issue_token(self.user, session.session_key, session.get_expiry_date()) for _ in range(2)]
+        tokens = [jwt_auth.issue_token(self.user, _session_key(session), session.get_expiry_date()) for _ in range(2)]
         self.assertNotEqual(*tokens)
         for token in tokens:
             with self.subTest(token=token):
@@ -5785,7 +5816,7 @@ class JWTCookieMiddlewareTests(TestCase):
         self._login()
         token = jwt_auth.issue_token(
             self.user,
-            self.client.session.session_key,
+            _session_key(self.client.session),
             timezone.now() - datetime.timedelta(seconds=1),
         )
         self._assert_rejected(token, "expired")
@@ -5795,7 +5826,7 @@ class JWTCookieMiddlewareTests(TestCase):
         self._login()
         token = jwt_auth.issue_token(
             other,
-            self.client.session.session_key,
+            _session_key(self.client.session),
             timezone.now() + datetime.timedelta(hours=1),
         )
         self._assert_rejected(token, "another user")

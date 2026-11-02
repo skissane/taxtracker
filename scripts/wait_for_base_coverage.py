@@ -34,6 +34,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 
 CODECOV_API = "https://api.codecov.io/api/v2/github"
 GITHUB_API = "https://api.github.com"
@@ -102,7 +103,12 @@ def base_ci_state(repo: str, sha: str, check_name: str, token: str | None, timeo
     return ("succeeded" if conclusion == "success" else "failed"), f"{check_name} {conclusion}"
 
 
-def main(argv=None, *, clock=time.monotonic, sleep=time.sleep) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("repo", help="the repository, as owner/name")
     parser.add_argument("sha", help="the PR's base commit")

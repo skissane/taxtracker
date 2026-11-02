@@ -104,7 +104,7 @@ just screenshots-post 123
 uv run ruff check .
 uv run ruff format .
 
-# Type-check src with mypy (also part of `just check`, `just ci` and the `test` job)
+# Type-check src, scripts, tests and screenshot_tests with mypy (also part of `just check`, `just ci` and the `test` job)
 just mypy
 
 # Template lint
@@ -492,8 +492,12 @@ Ruff: rules E, F, W, I, UP, TID252, PLC0415, RUF100; line length 120; migrations
 
 ## Type checking
 
-`just mypy` (`uv run mypy src`; part of `just check`, `just ci` and the `test` job) type-checks `src/` with mypy and the `django-stubs` plugin, configured in `pyproject.toml`'s `[tool.mypy]` with `strict = true`, so every function needs annotations, generic classes need their type arguments, and a `# type: ignore` that no longer hides an error fails (`warn_unused_ignores`).
-Migrations are analysed but their errors ignored (`ignore_errors`), and `boto3`, `botocore`, `django_google_sso` and `pdfkit` (no stubs) have `ignore_missing_imports`.
+`just mypy` (`uv run --group dev --group screenshots mypy`; part of `just check`, `just ci` and the `test` job) type-checks `src/`, `scripts/`, `tests/` and `screenshot_tests/` (`[tool.mypy]`'s `files`) with mypy and the `django-stubs` plugin, configured in `pyproject.toml`'s `[tool.mypy]` with `strict = true`, so every function needs annotations, generic classes need their type arguments, and a `# type: ignore` that no longer hides an error fails (`warn_unused_ignores`).
+The `screenshots` group is there so mypy can see Playwright's types; only its Python package is installed, not a browser.
+`mypy_path = "src"` and `explicit_package_bases` give each file one module name (`lifetracker.*` from `src`, `scripts.*` and `tests.*` from the repo root); without them `scripts/github_comments.py` is found as both `github_comments` and `scripts.github_comments`.
+For now, `tests.*` and `screenshot_tests.*` may leave functions unannotated (`disallow_untyped_defs`, `disallow_incomplete_defs` and `disallow_untyped_calls` are off for them), but strict's `check_untyped_defs` still checks their bodies, so type errors in tests fail too; `scripts/` gets no such exception.
+In tests, narrow an optional with a bare `assert x is not None` (or `isinstance`) rather than `self.assertIsNotNone(x)`, which mypy doesn't treat as narrowing; patch a module the code under test imports (`mock.patch.object(sqlite3, ...)`) rather than reaching it through that code's module (`client_ips.sqlite3`), which strict mode doesn't count as re-exported; and give a mixin that calls `TestCase` methods `SimpleTestCase` as its base.
+Migrations are analysed but their errors ignored (`ignore_errors`), and `boto3`, `botocore`, `django_google_sso`, `gunicorn` and `pdfkit` (no stubs) have `ignore_missing_imports`.
 Django's own classes that django-stubs makes generic (`ModelAdmin`, `TabularInline`, `ModelForm`, `BaseInlineFormSet`, `ContentFile`, etc.) aren't subscriptable at runtime, so `settings.py` calls `django_stubs_ext.monkeypatch()` first thing, before any app module is imported, to add `__class_getitem__` to them; `django-stubs-ext` is therefore a main dependency, not just a dev one.
 So write them with their type arguments, in base classes (`admin.ModelAdmin[Item]`, `admin.TabularInline[Attachment, Item]`, `forms.ModelForm[Attachment]`) and annotations (`ContentFile[bytes]`) alike.
 A module that subscripts one at import time (a base class) can't be imported before settings are loaded, which Django's models already require; one that only annotates with one is fine until something reads its annotations, as Python 3.14 evaluates them lazily.

@@ -20,6 +20,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 
 
 def check_once(url: str, commit: str, timeout: float) -> str | None:
@@ -49,7 +50,12 @@ def check_once(url: str, commit: str, timeout: float) -> str | None:
     return None
 
 
-def main(argv=None, *, clock=time.monotonic, sleep=time.sleep) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("url", help="the deployed app's /healthz/ URL")
     parser.add_argument("commit", help="the commit that was deployed")

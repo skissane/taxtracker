@@ -51,7 +51,7 @@ def _encode(value):
 
 def write_mmdb(path, networks, database_type="DBIP-Test"):
     """Write ``networks`` ({"203.0.113.0/24": record, ...}) as a MaxMind DB."""
-    nodes = [[None, None]]
+    nodes: list[list[tuple[str, int] | None]] = [[None, None]]
     data = b""
     for network, record in networks.items():
         net = ipaddress.ip_network(network)
@@ -72,7 +72,9 @@ def write_mmdb(path, networks, database_type="DBIP-Test"):
                 if nodes[node][bit] is None:
                     nodes.append([None, None])
                     nodes[node][bit] = ("node", len(nodes) - 1)
-                node = nodes[node][bit][1]
+                child = nodes[node][bit]
+                assert child is not None
+                node = child[1]
     count = len(nodes)
 
     def record_value(entry):

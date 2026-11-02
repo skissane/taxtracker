@@ -7,10 +7,12 @@ import io
 import json
 import os
 import re
+import sqlite3
 import tempfile
 from pathlib import Path
 from unittest import mock
 
+import maxminddb
 import requests
 from django.contrib.auth.models import User
 from django.core.management import CommandError, call_command
@@ -79,7 +81,13 @@ def relay_lookup(geoip_dir, ip):
         relay.close()
 
 
-class TempDirMixin:
+def _parse(line: str) -> client_ips.Request:
+    parsed = client_ips.parse_line(line)
+    assert parsed is not None
+    return parsed
+
+
+class TempDirMixin(SimpleTestCase):
     def setUp(self):
         super().setUp()
         tempdir = tempfile.TemporaryDirectory()
@@ -137,7 +145,7 @@ class ParseLineTests(SimpleTestCase):
         )
 
     def test_logged_in(self):
-        parsed = client_ips.parse_line(envoy_line(jwt_sub="1", status=200))
+        parsed = _parse(envoy_line(jwt_sub="1", status=200))
         self.assertTrue(parsed.logged_in)
         self.assertFalse(parsed.rejected)
         self.assertEqual(parsed.status, 200)
@@ -145,21 +153,21 @@ class ParseLineTests(SimpleTestCase):
     def test_peer_without_fly_client_ip(self):
         for value in (None, "-", "not an IP"):
             with self.subTest(value):
-                parsed = client_ips.parse_line(envoy_line(fly_client_ip=value))
+                parsed = _parse(envoy_line(fly_client_ip=value))
                 self.assertEqual(parsed.ip, "172.16.0.2")
 
     def test_ipv6_is_normalised(self):
-        parsed = client_ips.parse_line(envoy_line(fly_client_ip="2001:DB8:0::1"))
+        parsed = _parse(envoy_line(fly_client_ip="2001:DB8:0::1"))
         self.assertEqual(parsed.ip, "2001:db8::1")
 
     def test_missing_fields(self):
-        parsed = client_ips.parse_line(envoy_line(method=None, path=None, status=None, user_agent=None))
+        parsed = _parse(envoy_line(method=None, path=None, status=None, user_agent=None))
         self.assertEqual(parsed.request, "- -")
         self.assertIsNone(parsed.status)
         self.assertEqual(parsed.user_agent, "")
 
     def test_long_text_is_cut_off(self):
-        parsed = client_ips.parse_line(envoy_line(path="/" + "x" * 1000, user_agent="y" * 1000))
+        parsed = _parse(envoy_line(path="/" + "x" * 1000, user_agent="y" * 1000))
         self.assertEqual(len(parsed.request), client_ips.MAX_TEXT_LENGTH)
         self.assertEqual(len(parsed.user_agent), client_ips.MAX_TEXT_LENGTH)
 
@@ -441,7 +449,7 @@ class DownloadTests(TempDirMixin, SimpleTestCase):
     def test_not_a_database_is_left_out(self):
         destination = self.temp / "x.mmdb"
         with mock.patch.object(requests, "get", return_value=self._response(200, gzip.compress(b"junk"))):
-            with self.assertRaises(client_ips.maxminddb.InvalidDatabaseError):
+            with self.assertRaises(maxminddb.InvalidDatabaseError):
                 client_ips._download("https://x/y.gz", destination)
         self.assertEqual(list(self.temp.iterdir()), [])
 
@@ -490,8 +498,9 @@ class RelayRangesTests(TempDirMixin, SimpleTestCase):
         relay = client_ips.RelayRanges(self.temp)
         self.addCleanup(relay.close)
         self.assertTrue(relay.lookup("203.0.113.1").private_relay)
+        assert relay._connection is not None
         relay._connection.close()
-        relay._connection = mock.Mock(execute=mock.Mock(side_effect=client_ips.sqlite3.DatabaseError("disk I/O error")))
+        relay._connection = mock.Mock(execute=mock.Mock(side_effect=sqlite3.DatabaseError("disk I/O error")))
         self.assertEqual(relay.lookup("203.0.113.1"), client_ips.Relay())
 
     def test_reopens_when_replaced(self):
@@ -598,7 +607,9 @@ class UpdateRelayRangesTests(TempDirMixin, SimpleTestCase):
         self.assertEqual(status["outcome"], client_ips.UP_TO_DATE)
         self.assertEqual(status["etag"], '"v1"')
         self.assertEqual(status["succeeded"], self.NOW + 60)
-        self.assertEqual(client_ips.read_geoip_status(self.temp)[client_ips.RELAY_RANGES], status)
+        statuses = client_ips.read_geoip_status(self.temp)
+        assert statuses is not None
+        self.assertEqual(statuses[client_ips.RELAY_RANGES], status)
         # Without the file, its ETag is no use.
         (self.temp / client_ips.RELAY_RANGES_FILE).unlink()
         status = self._update(download)
@@ -887,7 +898,7 @@ class RecordTests(TempDirMixin, SimpleTestCase):
     def test_upgrades_version_1(self):
         self.connection.close()
         path = self.temp / "v1.sqlite3"
-        old = client_ips.sqlite3.connect(path)
+        old = sqlite3.connect(path)
         old.execute(
             "CREATE TABLE client_ip (ip TEXT PRIMARY KEY, first_seen REAL NOT NULL,"
             " last_seen REAL NOT NULL, requests INTEGER NOT NULL,"
@@ -921,7 +932,7 @@ class RecordTests(TempDirMixin, SimpleTestCase):
         reader = client_ips.connect_read_only(self.db_path)
         self.addCleanup(reader.close)
         self.assertEqual(client_ips.ip_count(reader), 1)
-        with self.assertRaises(client_ips.sqlite3.OperationalError):
+        with self.assertRaises(sqlite3.OperationalError):
             reader.execute("DELETE FROM client_ip")
 
 
@@ -1065,6 +1076,7 @@ class RunTests(TempDirMixin, SimpleTestCase):
             [client_ips.GEOIP_STATUS_NAME],
         )
         statuses = client_ips.read_geoip_status(config.geoip_dir)
+        assert statuses is not None
         self.assertEqual(statuses["dbip-asn-lite"]["outcome"], client_ips.FAILED)
         self.assertIn("EOFError", statuses["dbip-asn-lite"]["traceback"])
 
@@ -1075,7 +1087,7 @@ class RunTests(TempDirMixin, SimpleTestCase):
             mock.patch.object(
                 client_ips,
                 "fill_in_locations",
-                side_effect=client_ips.sqlite3.OperationalError("locked"),
+                side_effect=sqlite3.OperationalError("locked"),
             ),
             mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
         ):
@@ -1087,7 +1099,7 @@ class RunTests(TempDirMixin, SimpleTestCase):
         config.request_log.write_text(envoy_line() + "\n")
         parents = iter([1, 1, 2])
         record = client_ips.record
-        failures = [client_ips.sqlite3.OperationalError("full")]
+        failures = [sqlite3.OperationalError("full")]
 
         def record_failing_once(*args):
             if failures:
