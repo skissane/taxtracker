@@ -36,6 +36,7 @@ If the branch moves after checkout, the push isn't a fast-forward and fails.
 It isn't specific to this repo; it lives here until there's a better place for general utility scripts.
 It never copies assignees or reviewers, as GitHub rejects assigning a bot.
 If `gh pr create` fails, it reopens the original unless an open PR from the branch exists after all (gh can fail after creating it, e.g. adding labels).
+If that check itself fails, it aborts with the original still closed rather than reopen it, as the new PR may exist.
 It refuses fork PRs by `isCrossRepository` alone, not by comparing the head repository with the URL's, which an old URL still names after a rename.
 
 **Whitespace:** `just whitespace-check` (part of `just check`, `just ci` and the `test` job; `scripts/check_whitespace.py`, stdlib-only) checks every file `git ls-files` lists, except ones Git's own detection calls binary (`git ls-files --eol` shows `w/-text`) and symlinks: no trailing whitespace on any line, no leading blank line, and exactly one newline at the end of a non-empty file (none in an empty one).

@@ -53,18 +53,20 @@ def parse_pr_url(url: str) -> tuple[str, str, str]:
 
 
 def find_open_pr(gh_repo: str, head_branch: str, base_branch: str) -> str | None:
-    """Return the URL of an open PR from head_branch into base_branch, or None if there's none or the check fails."""
-    try:
-        out = subprocess.run(
-            ["gh", "pr", "list", "--repo", gh_repo, "--head", head_branch, "--base", base_branch]
-            + ["--state", "open", "--json", "url"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-        prs = json.loads(out or "[]")
-    except subprocess.CalledProcessError, ValueError:
-        return None
+    """
+    Return the URL of an open PR from head_branch into base_branch, or None if there's none.
+    Raises subprocess.CalledProcessError or ValueError if the lookup itself fails, so a failure isn't taken for "none".
+    """
+    out = subprocess.run(
+        ["gh", "pr", "list", "--repo", gh_repo, "--head", head_branch, "--base", base_branch]
+        + ["--state", "open", "--json", "url"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    prs = json.loads(out)
+    if not isinstance(prs, list):
+        raise ValueError(f"unexpected gh pr list output: {out!r}")
     return prs[0]["url"] if prs else None
 
 
@@ -149,7 +151,18 @@ def main(argv: list[str] | None = None) -> None:
         print("Error creating new draft PR:", file=sys.stderr)
         print(e.stderr.strip(), file=sys.stderr)
         # gh can fail after creating the PR (e.g. adding labels), so check before reopening the original
-        existing = find_open_pr(gh_repo, head_branch, base_branch)
+        try:
+            existing = find_open_pr(gh_repo, head_branch, base_branch)
+        except (subprocess.CalledProcessError, ValueError) as lookup_error:
+            # Reopening when the new PR may exist could leave both open, so leave it to the user
+            detail = lookup_error.stderr.strip() if isinstance(lookup_error, subprocess.CalledProcessError) else ""
+            print(detail or str(lookup_error), file=sys.stderr)
+            print(
+                f"Error: could not check whether the new PR was created anyway. PR #{old_number} is still CLOSED; "
+                f"check for an open PR from '{head_branch}' and reopen #{old_number} manually if there's none.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         if existing:
             print(
                 f"Error: {existing} was created anyway, but may lack labels or milestone; "

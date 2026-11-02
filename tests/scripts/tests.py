@@ -1732,10 +1732,20 @@ class RecreatePrTests(SimpleTestCase):
         self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "list"])
         self.assertIn("https://github.com/o/r/pull/9 was created anyway", err)
 
-    def test_create_failure_list_failure_reopens_original(self):
-        code, calls, _ = self.run_main([self.URL], create_error=True, list_error=True)
+    def test_create_failure_list_failure_aborts_without_reopening(self):
+        code, calls, err = self.run_main([self.URL], create_error=True, list_error=True)
         self.assertEqual(code, 1)
-        self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "list", "reopen"])
+        self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "list"])
+        self.assertIn("list failed", err)
+        self.assertIn("could not check whether the new PR was created anyway", err)
+
+    def test_create_failure_bad_list_output_aborts_without_reopening(self):
+        for output in ("not json", "{}"):
+            with self.subTest(output=output):
+                code, calls, err = self.run_main([self.URL], create_error=True, list_json=output)
+                self.assertEqual(code, 1)
+                self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "list"])
+                self.assertIn("could not check whether the new PR was created anyway", err)
 
     def test_moved_repo_is_not_a_fork(self):
         # An old URL still resolves after a rename or transfer, so the head repo can differ from the URL's
