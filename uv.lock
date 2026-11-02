@@ -510,7 +510,7 @@ requires-dist = [
 dev = [
     { name = "coverage", specifier = ">=7.16.2" },
     { name = "diff-cover", specifier = ">=11.0.0" },
-    { name = "djlint", specifier = ">=1.46.6" },
+    { name = "djlint", specifier = ">=1.47.0" },
     { name = "jactionlint", specifier = ">=2.3.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
