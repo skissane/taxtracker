@@ -9,6 +9,8 @@ import tempfile
 import textwrap
 import threading
 import urllib.error
+import urllib.request
+from collections.abc import Callable, Sequence
 from email.message import Message
 from pathlib import Path
 from typing import Any
@@ -69,7 +71,7 @@ class RequirementsMinVersionsTests(SimpleTestCase):
             result = (path / "pyproject.toml").read_text(encoding="utf-8")
         return code, stdout.getvalue(), stderr.getvalue(), result
 
-    def test_fix_rewrites_minimums(self):
+    def test_fix_rewrites_minimums(self) -> None:
         cases = [
             ("double quotes", '"click>=8.0"', '"click>=8.1.7"'),
             ("single quotes", "'click>=8.0'", "'click>=8.1.7'"),
@@ -92,7 +94,7 @@ class RequirementsMinVersionsTests(SimpleTestCase):
                 self.assertEqual(result, f"[project]\ndependencies = [{after}]\n")
                 self.assertIn("-> 8.1.7", stdout)
 
-    def test_fix_covers_extras_and_groups(self):
+    def test_fix_covers_extras_and_groups(self) -> None:
         pyproject = textwrap.dedent("""\
             [project]
             dependencies = ["click>=8.0"]
@@ -122,7 +124,7 @@ class RequirementsMinVersionsTests(SimpleTestCase):
                 """),
         )
 
-    def test_ignores_dependencies_without_minimum(self):
+    def test_ignores_dependencies_without_minimum(self) -> None:
         pyproject = '[project]\ndependencies = ["click==8.0", "boto3~=1.0", "ruff", ""]\n'
         code, stdout, _, result = self._run("check", pyproject, _lock())
         self.assertEqual(code, 0)
@@ -132,7 +134,7 @@ class RequirementsMinVersionsTests(SimpleTestCase):
         self.assertIn("No dependency minimum version updates needed", stdout)
         self.assertEqual(result, pyproject)
 
-    def test_check_reports_mismatch_without_writing(self):
+    def test_check_reports_mismatch_without_writing(self) -> None:
         pyproject = '[project]\ndependencies = ["click>=8.1.7", "ruff>=0.1"]\n'
         lock = _lock(("click", "8.1.7"), ("ruff", "0.5.0"))
         code, stdout, _, result = self._run("check", pyproject, lock)
@@ -141,12 +143,12 @@ class RequirementsMinVersionsTests(SimpleTestCase):
         self.assertNotIn("click", stdout)
         self.assertEqual(result, pyproject)
 
-    def test_minimum_compared_as_exact_string(self):
+    def test_minimum_compared_as_exact_string(self) -> None:
         pyproject = '[project]\ndependencies = ["click>=8.1"]\n'
         code, _, _, _ = self._run("check", pyproject, _lock(("click", "8.1.0")))
         self.assertEqual(code, 1)
 
-    def test_errors(self):
+    def test_errors(self) -> None:
         cases = [
             (
                 "missing from lock",
@@ -177,7 +179,7 @@ class RequirementsMinVersionsTests(SimpleTestCase):
                 self.assertIn(message, stderr)
                 self.assertEqual(result, pyproject)
 
-    def test_other_packages_with_several_versions_are_ignored(self):
+    def test_other_packages_with_several_versions_are_ignored(self) -> None:
         pyproject = '[project]\ndependencies = ["click>=8.1.7"]\n'
         # A versionless entry, as uv writes for e.g. a dynamic-version
         # workspace member, is skipped.
@@ -188,7 +190,7 @@ class RequirementsMinVersionsTests(SimpleTestCase):
 
 
 class ValidateUvLockOsArchTests(SimpleTestCase):
-    def test_split_platform(self):
+    def test_split_platform(self) -> None:
         cases = [
             ("any", ("any", None)),
             ("win32", ("win", "x86")),
@@ -208,11 +210,11 @@ class ValidateUvLockOsArchTests(SimpleTestCase):
             with self.subTest(platform):
                 self.assertEqual(_split_platform(platform), expected)
 
-    def test_split_platform_rejects_unrecognised(self):
+    def test_split_platform_rejects_unrecognised(self) -> None:
         with self.assertRaisesRegex(ValueError, "unrecognised"):
             _split_platform("2_17_x86_64")
 
-    def test_classify_platform(self):
+    def test_classify_platform(self) -> None:
         supported = PlatformClassification.SUPPORTED
         tolerated = PlatformClassification.TOLERATED
         unsupported = PlatformClassification.UNSUPPORTED
@@ -263,7 +265,7 @@ class ValidateUvLockOsArchTests(SimpleTestCase):
                 code = os_arch_main()
         return code, stdout.getvalue()
 
-    def test_allowed_platforms_pass(self):
+    def test_allowed_platforms_pass(self) -> None:
         code, stdout = self._run(
             "pkg-1.0-py3-none-any.whl",
             "pkg-1.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
@@ -272,7 +274,7 @@ class ValidateUvLockOsArchTests(SimpleTestCase):
         self.assertEqual(code, 0)
         self.assertIn("only has wheels for allowed platforms", stdout)
 
-    def test_disallowed_platforms_fail(self):
+    def test_disallowed_platforms_fail(self) -> None:
         code, stdout = self._run(
             "pkg-1.0-py3-none-any.whl",
             "pkg-1.0-cp314-cp314-win_amd64.whl",
@@ -286,7 +288,7 @@ class ValidateUvLockOsArchTests(SimpleTestCase):
         self.assertIn("(weird)", stdout)
         self.assertNotIn("any.whl", stdout)
 
-    def test_local_wheels_checked(self):
+    def test_local_wheels_checked(self) -> None:
         code, stdout = self._run_wheels(
             'path = "dist/pkg-1.0-py3-none-any.whl"',
             'path = "dist/pkg-1.0-cp314-cp314-win_amd64.whl"',
@@ -297,7 +299,7 @@ class ValidateUvLockOsArchTests(SimpleTestCase):
         self.assertIn("(manylinux_2_17_s390x)", stdout)
         self.assertNotIn("any.whl", stdout)
 
-    def test_wheel_without_location_rejected(self):
+    def test_wheel_without_location_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "no url, path or filename"):
             self._run_wheels('hash = "sha256:00"')
 
@@ -305,22 +307,24 @@ class ValidateUvLockOsArchTests(SimpleTestCase):
 class PostScreenshotsTests(SimpleTestCase):
     def _run(
         self,
-        filenames,
-        *args,
-        comments=(),
-        env=None,
-        fail=None,
-        asset_url=True,
-        head="abc1234def",
+        filenames: list[str],
+        *args: str,
+        comments: Sequence[dict[str, Any]] = (),
+        env: dict[str, str] | None = None,
+        fail: tuple[Any, ...] | None = None,
+        asset_url: bool = True,
+        head: str = "abc1234def",
     ) -> tuple[int, str, list[tuple[Any, ...]]]:
         """Run main() on PR 7 in a temp dir whose screenshots/ holds the given
         files, with the API faked: uploads return a URL based on the file name,
         and the PR has the given head commit and comments. fail names a (method,
         URL prefix) to answer with a 403. Return the exit code, stderr and each
         request as (method, url, token, json_body, data)."""
-        requests = []
+        requests: list[tuple[Any, ...]] = []
 
-        def fake_request(method, url, token, *, json_body=None, data=None, **kw):
+        def fake_request(
+            method: str, url: str, token: str, *, json_body: object = None, data: bytes | None = None, **kw: Any
+        ) -> Any:
             requests.append((method, url, token, json_body, data))
             if fail and method == fail[0] and url.startswith(fail[1]):
                 if len(fail) > 2:
@@ -362,10 +366,10 @@ class PostScreenshotsTests(SimpleTestCase):
                 code = post_screenshots_main(["7", *args])
         return code, stderr.getvalue(), requests
 
-    def _writes(self, requests):
+    def _writes(self, requests: list[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
         return [r for r in requests if r[0] in ("POST", "PATCH", "DELETE")]
 
-    def test_uploads_with_pat_and_posts_with_github_token(self):
+    def test_uploads_with_pat_and_posts_with_github_token(self) -> None:
         code, _, requests = self._run(
             ["login.png", "index.png", "notes.txt"],
             "--commit",
@@ -411,7 +415,7 @@ class PostScreenshotsTests(SimpleTestCase):
         )
         self.assertNotIn("notes", body)
 
-    def test_checks_head_commit(self):
+    def test_checks_head_commit(self) -> None:
         code, _, requests = self._run(["index.png"], "--commit", "abc1234def")
         self.assertEqual(code, 0)
         self.assertIn(
@@ -420,7 +424,7 @@ class PostScreenshotsTests(SimpleTestCase):
         )
         self.assertEqual(self._writes(requests)[-1][0], "POST")
 
-    def test_stale_commit_posts_nothing(self):
+    def test_stale_commit_posts_nothing(self) -> None:
         # An older commit's run finishing after the newer commit's has posted.
         comments = [{"id": 1, "user": {"login": "me"}, "body": MARKER + "\nnew"}]
         code, _, requests = self._run(["index.png"], "--commit", "0ld0ld0", comments=comments)
@@ -428,7 +432,7 @@ class PostScreenshotsTests(SimpleTestCase):
         # Not even the uploads.
         self.assertEqual(self._writes(requests), [])
 
-    def test_edits_own_previous_comment_in_place(self):
+    def test_edits_own_previous_comment_in_place(self) -> None:
         comments = [
             {"id": 1, "user": {"login": "me"}, "body": MARKER + "\nold"},
             {"id": 2, "user": {"login": "me"}, "body": "a review reply"},
@@ -443,7 +447,7 @@ class PostScreenshotsTests(SimpleTestCase):
             [("PATCH", f"{comments_url}/1"), ("DELETE", f"{comments_url}/4")],
         )
 
-    def test_paginates_comments(self):
+    def test_paginates_comments(self) -> None:
         comments = [{"id": n, "user": {"login": "me"}, "body": "chatter"} for n in range(150)]
         comments[120]["body"] = MARKER + "\nold"
         code, _, requests = self._run(["index.png"], comments=comments)
@@ -457,14 +461,14 @@ class PostScreenshotsTests(SimpleTestCase):
             ("PATCH", "https://api.github.com/repos/o/r/issues/comments/120"),
         )
 
-    def test_failed_upload_posts_nothing(self):
+    def test_failed_upload_posts_nothing(self) -> None:
         code, stderr, requests = self._run(["index.png"], fail=("POST", "https://uploads."))
         self.assertEqual(code, 1)
         self.assertIn("HTTP 403", stderr)
         self.assertIn("nope", stderr)
         self.assertEqual(self._writes(requests)[1:], [])
 
-    def test_network_error_reported(self):
+    def test_network_error_reported(self) -> None:
         code, stderr, _ = self._run(
             ["index.png"],
             fail=("POST", "https://uploads.", urllib.error.URLError("unreachable")),
@@ -472,14 +476,14 @@ class PostScreenshotsTests(SimpleTestCase):
         self.assertEqual(code, 1)
         self.assertIn("unreachable", stderr)
 
-    def test_upload_without_url_fails(self):
+    def test_upload_without_url_fails(self) -> None:
         code, stderr, requests = self._run(["index.png"], asset_url=False)
         self.assertEqual(code, 1)
         self.assertIn("returned no asset URL", stderr)
         self.assertEqual(self._writes(requests)[1:], [])
 
-    def test_tokens_and_repo_default_to_gh(self):
-        def fake_gh(cmd, **kwargs):
+    def test_tokens_and_repo_default_to_gh(self) -> None:
+        def fake_gh(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
             out = "o/r" if cmd[1] == "repo" else "gho_local"
             return subprocess.CompletedProcess(cmd, 0, stdout=out + "\n")
 
@@ -488,8 +492,8 @@ class PostScreenshotsTests(SimpleTestCase):
         self.assertEqual(code, 0)
         self.assertEqual({r[2] for r in requests}, {"gho_local"})
 
-    def test_gh_failure_reported(self):
-        def fake_gh(cmd, **kwargs):
+    def test_gh_failure_reported(self) -> None:
+        def fake_gh(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
             raise subprocess.CalledProcessError(1, cmd, stderr="not logged in")
 
         with (
@@ -505,13 +509,13 @@ class PostScreenshotsTests(SimpleTestCase):
         self.assertEqual(code, 1)
         self.assertIn("not logged in", stderr.getvalue())
 
-    def test_no_screenshots(self):
+    def test_no_screenshots(self) -> None:
         code, stderr, requests = self._run(["notes.txt"])
         self.assertEqual(code, 1)
         self.assertIn("no screenshots", stderr)
         self.assertEqual(requests, [])
 
-    def test_unsafe_names_rejected(self):
+    def test_unsafe_names_rejected(self) -> None:
         for name in ["--help.png", "a b.png", "x](y).png", "Index.png"]:
             with self.subTest(name):
                 # Not index.png, which is the same file as Index.png on
@@ -530,14 +534,19 @@ class PostPatchCoverageTests(SimpleTestCase):
     REPORT = HEAD + "\n\n\n## a&#46;py\n\nLines 1-2\n\n```python\n  1 a = 1\n! 2 b = 2\n```\n\n\n---\n"
 
     def _run(
-        self, *args, report=REPORT, comments=(), fail=None, head="abc1234def"
+        self,
+        *args: str,
+        report: str | None = REPORT,
+        comments: Sequence[dict[str, Any]] = (),
+        fail: tuple[Any, ...] | None = None,
+        head: str = "abc1234def",
     ) -> tuple[int, str, list[tuple[Any, ...]]]:
         """Run main() on PR 7 in a temp dir holding patch-coverage.md (unless
         report is None), with the API faked as in PostScreenshotsTests. Return
         the exit code, stderr and each request as (method, url, token, json_body)."""
-        requests = []
+        requests: list[tuple[Any, ...]] = []
 
-        def fake_request(method, url, token, *, json_body=None, **kw):
+        def fake_request(method: str, url: str, token: str, *, json_body: object = None, **kw: Any) -> Any:
             requests.append((method, url, token, json_body))
             if fail and method == fail[0] and url.startswith(fail[1]):
                 if len(fail) > 2:
@@ -565,10 +574,10 @@ class PostPatchCoverageTests(SimpleTestCase):
                 code = post_patch_coverage_main(["7", *args])
         return code, stderr.getvalue(), requests
 
-    def _writes(self, requests):
+    def _writes(self, requests: list[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
         return [r for r in requests if r[0] in ("POST", "PATCH", "DELETE")]
 
-    def test_posts_report(self):
+    def test_posts_report(self) -> None:
         code, _, requests = self._run(
             "--commit",
             "abc1234",
@@ -592,7 +601,7 @@ class PostPatchCoverageTests(SimpleTestCase):
             "### a&#46;py\n\nLines 1-2\n\n```python\n  1 a = 1\n! 2 b = 2\n```\n\n\n---",
         )
 
-    def test_no_lines(self):
+    def test_no_lines(self) -> None:
         report = "# Diff Coverage\n## Diff: origin/master...HEAD\n\nNo lines with coverage information in this diff.\n"
         code, _, requests = self._run(report=report)
         self.assertEqual(code, 0)
@@ -602,7 +611,7 @@ class PostPatchCoverageTests(SimpleTestCase):
             "No lines with coverage information in this diff.",
         )
 
-    def test_unexpected_report_fails(self):
+    def test_unexpected_report_fails(self) -> None:
         no_lines = "# Diff Coverage\n## Diff: x\n\nNo lines with coverage information in this diff.\n"
         cases = {
             "": "line 1: expected '# Diff Coverage', found ''",
@@ -622,12 +631,12 @@ class PostPatchCoverageTests(SimpleTestCase):
                 self.assertIn(f"diff-cover report {error}", stderr)
                 self.assertEqual(requests, [])
 
-    def test_stale_commit_posts_nothing(self):
+    def test_stale_commit_posts_nothing(self) -> None:
         code, _, requests = self._run("--commit", "0ld0ld0")
         self.assertEqual(code, 0)
         self.assertEqual(self._writes(requests), [])
 
-    def test_edits_previous_comment(self):
+    def test_edits_previous_comment(self) -> None:
         comments = [
             {"id": 1, "user": {"login": "me"}, "body": MARKER + "\nscreenshots"},
             {"id": 2, "user": {"login": "me"}, "body": PATCH_COVERAGE_MARKER + "\nold"},
@@ -639,7 +648,7 @@ class PostPatchCoverageTests(SimpleTestCase):
             [("PATCH", "https://api.github.com/repos/o/r/issues/comments/2")],
         )
 
-    def test_lists_become_tables(self):
+    def test_lists_become_tables(self) -> None:
         report = (
             "# Diff Coverage\n## Diff: origin/master...HEAD\n\n"
             "- scripts/a&#46;py (100%)\n- b&#46;py (40.0%): Missing lines 3,5-9,12\n\n"
@@ -673,7 +682,7 @@ class PostPatchCoverageTests(SimpleTestCase):
             ],
         )
 
-    def test_long_report_truncated(self):
+    def test_long_report_truncated(self) -> None:
         lines = "\n".join(f"  {n} x = {n}" for n in range(20_000))
         report = f"{self.HEAD}\n## a.py\n\n```python\n{lines}\n```\n"
         code, _, requests = self._run("--run-url", "https://example.com/run", report=report)
@@ -691,25 +700,25 @@ class PostPatchCoverageTests(SimpleTestCase):
             "[this workflow run](https://example.com/run)._",
         )
 
-    def test_missing_report(self):
+    def test_missing_report(self) -> None:
         code, stderr, requests = self._run(report=None)
         self.assertEqual(code, 1)
         self.assertIn("patch-coverage.md", stderr)
         self.assertEqual(requests, [])
 
-    def test_network_error_reported(self):
+    def test_network_error_reported(self) -> None:
         code, stderr, _ = self._run(fail=("GET", "https://api.github.com/user", urllib.error.URLError("unreachable")))
         self.assertEqual(code, 1)
         self.assertIn("unreachable", stderr)
 
-    def test_http_error_reported(self):
+    def test_http_error_reported(self) -> None:
         code, stderr, _ = self._run(fail=("POST", "https://api.github.com/repos/o/r/issues/7/comments"))
         self.assertEqual(code, 1)
         self.assertIn("HTTP 403", stderr)
         self.assertIn("nope", stderr)
 
-    def test_gh_failure_reported(self):
-        def fake_gh(cmd, **kwargs):
+    def test_gh_failure_reported(self) -> None:
+        def fake_gh(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
             raise subprocess.CalledProcessError(1, cmd, stderr="not logged in")
 
         with (
@@ -737,7 +746,7 @@ class PatchCoverageRealDiffCoverTests(SimpleTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)
 
-            def git(*args):
+            def git(*args: str) -> None:
                 subprocess.run(
                     ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
                     cwd=path,
@@ -772,34 +781,34 @@ class PatchCoverageRealDiffCoverTests(SimpleTestCase):
             )
             return (path / "report.md").read_text()
 
-    def test_missing_lines(self):
+    def test_missing_lines(self) -> None:
         body = _build_body(self._report("a = 1\nb = 2\nc = 3\nd = 4\n", {1: 1, 2: 0, 3: 1, 4: 0}), "abc", None)
         self.assertIn("| `a.py` | 33.3% | 2, 4 |", body)
         self.assertIn("| 3 lines | 2 lines | 33% |", body)
         self.assertIn("! 2 b = 2", body)
 
-    def test_all_covered(self):
+    def test_all_covered(self) -> None:
         body = _build_body(self._report("a = 1\nb = 2\n", {1: 1, 2: 1}), "abc", None)
         self.assertIn("| `a.py` | 100% |  |", body)
         self.assertIn("| 1 line | 0 lines | 100% |", body)
 
-    def test_no_lines(self):
+    def test_no_lines(self) -> None:
         body = _build_body(self._report("a = 1\n# comment\n", {1: 1}), "abc", None)
         self.assertTrue(body.endswith("No lines with coverage information in this diff."))
 
 
 class GitHubCommentsRequestTests(SimpleTestCase):
-    def _response(self, payload: bytes):
+    def _response(self, payload: bytes) -> mock.MagicMock:
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = payload
         return response
 
-    def _redirect(self, url, location, code=307):
+    def _redirect(self, url: str, location: str, code: int = 307) -> urllib.error.HTTPError:
         headers = Message()
         headers["Location"] = location
         return urllib.error.HTTPError(url, code, "Redirect", headers, None)
 
-    def test_sends_json_with_token(self):
+    def test_sends_json_with_token(self) -> None:
         with mock.patch("scripts.github_comments._opener.open", return_value=self._response(b'{"a": 1}')) as urlopen:
             result = github_request("POST", "https://api.github.com/x", "tok", json_body={"b": 2})
         self.assertEqual(result, {"a": 1})
@@ -810,16 +819,16 @@ class GitHubCommentsRequestTests(SimpleTestCase):
         self.assertEqual(request.get_header("Content-type"), "application/json")
         self.assertEqual(request.get_header("Authorization"), "Bearer tok")
 
-    def test_empty_response_is_none(self):
+    def test_empty_response_is_none(self) -> None:
         with mock.patch("scripts.github_comments._opener.open", return_value=self._response(b"")):
             self.assertIsNone(github_request("DELETE", "https://api.github.com/x", "tok"))
 
-    def test_follows_redirects_dropping_token_off_host(self):
+    def test_follows_redirects_dropping_token_off_host(self) -> None:
         for code in (301, 302, 307, 308):
             with self.subTest(code=code):
                 self._check_follows_redirects(code)
 
-    def _check_follows_redirects(self, code):
+    def _check_follows_redirects(self, code: int) -> None:
         responses = [
             self._redirect("https://uploads.github.com/a", "/b", code),
             self._redirect("https://uploads.github.com/b", "https://elsewhere.example/c", code),
@@ -844,7 +853,7 @@ class GitHubCommentsRequestTests(SimpleTestCase):
             ["Bearer tok", "Bearer tok", None],
         )
 
-    def test_redirect_to_http_drops_token(self):
+    def test_redirect_to_http_drops_token(self) -> None:
         responses = [
             self._redirect("https://api.github.com/a", "http://api.github.com/b", 301),
             self._response(b"{}"),
@@ -856,7 +865,7 @@ class GitHubCommentsRequestTests(SimpleTestCase):
             ["Bearer tok", None],
         )
 
-    def test_too_many_redirects(self):
+    def test_too_many_redirects(self) -> None:
         redirect = self._redirect("https://api.github.com/x", "/x")
         with (
             mock.patch("scripts.github_comments._opener.open", side_effect=[redirect] * 5),
@@ -864,14 +873,14 @@ class GitHubCommentsRequestTests(SimpleTestCase):
         ):
             github_request("GET", "https://api.github.com/x", "tok")
 
-    def test_get_redirect_off_host_drops_token(self):
+    def test_get_redirect_off_host_drops_token(self) -> None:
         # A real server, as urllib's own redirect handling (which would keep
         # the token) is what's being replaced; 127.0.0.1 and localhost are
         # different hosts to request().
         seen = []
 
         class Handler(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
+            def do_GET(self) -> None:
                 seen.append((self.path, self.headers.get("Authorization")))
                 if self.path == "/a":
                     self.send_response(302)
@@ -886,7 +895,7 @@ class GitHubCommentsRequestTests(SimpleTestCase):
                     self.end_headers()
                     self.wfile.write(body)
 
-            def log_message(self, format, *args):
+            def log_message(self, format: str, *args: Any) -> None:
                 pass
 
         with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
@@ -900,7 +909,7 @@ class GitHubCommentsRequestTests(SimpleTestCase):
         self.assertEqual(result, {"ok": True})
         self.assertEqual(seen, [("/a", "Bearer tok"), ("/b", None)])
 
-    def test_other_errors_raised(self):
+    def test_other_errors_raised(self) -> None:
         error = urllib.error.HTTPError("https://api.github.com/x", 404, "Not Found", Message(), None)
         with (
             error,
@@ -911,7 +920,7 @@ class GitHubCommentsRequestTests(SimpleTestCase):
 
 
 class CheckWhitespaceTests(SimpleTestCase):
-    def test_problems(self):
+    def test_problems(self) -> None:
         cases = [
             (b"", []),
             (b"a\nb\n", []),
@@ -942,7 +951,7 @@ class CheckWhitespaceTests(SimpleTestCase):
             with self.subTest(data):
                 self.assertEqual(_problems(data), expected)
 
-    def _run(self, files: dict[str, bytes], untracked: dict[str, bytes]):
+    def _run(self, files: dict[str, bytes], untracked: dict[str, bytes]) -> tuple[int, str]:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)
             for name, data in (files | untracked).items():
@@ -954,7 +963,7 @@ class CheckWhitespaceTests(SimpleTestCase):
                 code = whitespace_main()
         return code, stdout.getvalue()
 
-    def test_clean_files_pass(self):
+    def test_clean_files_pass(self) -> None:
         code, stdout = self._run(
             {"empty.py": b"", "ok.md": b"# Title\n\ntext\n"},
             {"untracked.txt": b"bad \n\n"},
@@ -962,7 +971,7 @@ class CheckWhitespaceTests(SimpleTestCase):
         self.assertEqual(code, 0)
         self.assertIn("clean whitespace", stdout)
 
-    def test_problems_reported_and_binary_skipped(self):
+    def test_problems_reported_and_binary_skipped(self) -> None:
         code, stdout = self._run(
             {
                 "logo.svg": b"<svg/>",
@@ -978,7 +987,7 @@ class CheckWhitespaceTests(SimpleTestCase):
 
 
 class CheckSentencePerLineTests(SimpleTestCase):
-    def test_problem_detection_respects_exceptions(self):
+    def test_problem_detection_respects_exceptions(self) -> None:
         text = textwrap.dedent("""\
             This is one sentence.
             This line has two sentences. Another starts here.
@@ -1032,12 +1041,12 @@ class CheckSentencePerLineTests(SimpleTestCase):
                 code = sentence_per_line_main()
         return code, stdout.getvalue()
 
-    def test_main_passes(self):
+    def test_main_passes(self) -> None:
         code, stdout = self._run({"AGENTS.md": "One sentence.\n", "README.md": "Another sentence.\n"})
         self.assertEqual(code, 0)
         self.assertIn("one-sentence-per-line formatting", stdout)
 
-    def test_main_reports_failures(self):
+    def test_main_reports_failures(self) -> None:
         code, stdout = self._run(
             {
                 "AGENTS.md": "One sentence. Another sentence.\n",
@@ -1050,7 +1059,7 @@ class CheckSentencePerLineTests(SimpleTestCase):
 
 
 class CheckScreenshotsDirTests(SimpleTestCase):
-    def _run(self, setup):
+    def _run(self, setup: Callable[[Path], None]) -> tuple[int, str]:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)
             (path / "screenshots").mkdir()
@@ -1066,15 +1075,15 @@ class CheckScreenshotsDirTests(SimpleTestCase):
                     code = screenshots_dir_main()
         return code, stdout.getvalue()
 
-    def _git(self, *args):
+    def _git(self, *args: str) -> None:
         subprocess.run(["git", *args], check=True, capture_output=True)
 
-    def test_only_gitignore_passes(self):
+    def test_only_gitignore_passes(self) -> None:
         code, stdout = self._run(lambda path: None)
         self.assertEqual(code, 0)
         self.assertIn("unchanged", stdout)
 
-    def test_force_added_file_fails(self):
+    def test_force_added_file_fails(self) -> None:
         code, stdout = self._run(lambda path: self._git("add", "-f", "screenshots/index-light.png"))
         self.assertEqual(code, 1)
         self.assertIn(
@@ -1082,8 +1091,8 @@ class CheckScreenshotsDirTests(SimpleTestCase):
             stdout,
         )
 
-    def test_deleted_gitignore_fails(self):
-        def setup(path):
+    def test_deleted_gitignore_fails(self) -> None:
+        def setup(path: Path) -> None:
             (path / "screenshots" / ".gitignore").unlink()
             self._git("add", "-A")
 
@@ -1093,14 +1102,14 @@ class CheckScreenshotsDirTests(SimpleTestCase):
         self.assertIn("- screenshots/.gitignore isn't tracked", stdout)
         self.assertIn("- screenshots/.gitignore is missing from the working tree", stdout)
 
-    def test_unstaged_deletion_fails(self):
+    def test_unstaged_deletion_fails(self) -> None:
         code, stdout = self._run(lambda path: (path / "screenshots" / ".gitignore").unlink())
         self.assertEqual(code, 1)
         self.assertNotIn("isn't tracked", stdout)
         self.assertIn("- screenshots/.gitignore is missing from the working tree", stdout)
 
-    def test_modified_gitignore_fails(self):
-        def setup(path):
+    def test_modified_gitignore_fails(self) -> None:
+        def setup(path: Path) -> None:
             (path / "screenshots" / ".gitignore").write_text("*.png\n")
 
         code, stdout = self._run(setup)
@@ -1108,7 +1117,7 @@ class CheckScreenshotsDirTests(SimpleTestCase):
         self.assertIn("unexpected contents in the working tree", stdout)
         self.assertNotIn("staged", stdout)
 
-        def setup_staged(path):
+        def setup_staged(path: Path) -> None:
             setup(path)
             self._git("add", "screenshots/.gitignore")
 
@@ -1160,32 +1169,32 @@ class CheckBlameIgnoreRevsTests(SimpleTestCase):
                 code = blame_ignore_revs_main() if target is None else blame_ignore_revs_main(target)
         return code, stdout.getvalue()
 
-    def test_valid_hashes_pass(self):
+    def test_valid_hashes_pass(self) -> None:
         code, stdout = self._run(["# A merged change", "", "{ancestor}"])
         self.assertEqual(code, 0)
         self.assertIn("real commit hashes that are ancestors of HEAD", stdout)
 
-    def test_invalid_hash_format_fails(self):
+    def test_invalid_hash_format_fails(self) -> None:
         code, stdout = self._run(["not-a-hash"])
         self.assertEqual(code, 1)
         self.assertIn("not a full 40-character lowercase hex hash", stdout)
 
-    def test_nonexistent_hash_fails(self):
+    def test_nonexistent_hash_fails(self) -> None:
         code, stdout = self._run(["0000000000000000000000000000000000000000"])
         self.assertEqual(code, 1)
         self.assertIn("doesn't name an existing Git object", stdout)
 
-    def test_non_commit_hash_fails(self):
+    def test_non_commit_hash_fails(self) -> None:
         code, stdout = self._run(["{tree}"])
         self.assertEqual(code, 1)
         self.assertIn("is a tree, not a commit", stdout)
 
-    def test_non_ancestor_hash_fails(self):
+    def test_non_ancestor_hash_fails(self) -> None:
         code, stdout = self._run(["{side}"])
         self.assertEqual(code, 1)
         self.assertIn("is not an ancestor of HEAD", stdout)
 
-    def test_target_given(self):
+    def test_target_given(self) -> None:
         # As on a PR: the side branch's own commit is an ancestor of HEAD but not of the base branch.
         code, stdout = self._run(["{side}"], checkout="side")
         self.assertEqual(code, 0)
@@ -1195,10 +1204,10 @@ class CheckBlameIgnoreRevsTests(SimpleTestCase):
         code, stdout = self._run(["{ancestor}"], checkout="side", target="main")
         self.assertEqual(code, 0)
 
-    def test_ancestor_check_error_fails(self):
+    def test_ancestor_check_error_fails(self) -> None:
         real_git = check_blame_ignore_revs._git
 
-        def fake_git(*args):
+        def fake_git(*args: str) -> subprocess.CompletedProcess[str]:
             if args[0] == "merge-base":
                 return subprocess.CompletedProcess(["git", *args], 128, "", "fatal: bad object\n")
             return real_git(*args)
@@ -1209,7 +1218,7 @@ class CheckBlameIgnoreRevsTests(SimpleTestCase):
         self.assertIn("couldn't check whether", stdout)
         self.assertIn("(exit 128)", stdout)
 
-    def test_missing_file_fails(self):
+    def test_missing_file_fails(self) -> None:
         stdout = io.StringIO()
         with tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp), contextlib.redirect_stdout(stdout):
             code = blame_ignore_revs_main()
@@ -1228,7 +1237,7 @@ class DependabotRelockTests(SimpleTestCase):
         resulting uv.lock."""
         uv_calls = []
 
-        def fake_run(args, **kwargs):
+        def fake_run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
             if args[:2] == ["git", "merge-base"]:
                 self.assertEqual(args, ["git", "merge-base", "HEAD", "origin/master"])
                 return subprocess.CompletedProcess(args, 0, stdout="abc123\n")
@@ -1258,7 +1267,7 @@ class DependabotRelockTests(SimpleTestCase):
             result = (path / "uv.lock").read_text(encoding="utf-8")
         return code, stderr.getvalue(), uv_calls, result
 
-    def test_relocks_changed_packages_from_base(self):
+    def test_relocks_changed_packages_from_base(self) -> None:
         # A virtual project has no version, and is never upgraded.
         virtual = '[[package]]\nname = "virtual"\nsource = { virtual = "." }\n\n'
         branch = "revision = 5\n" + _lock(("certifi", "2.0"), ("click", "8.0")) + virtual
@@ -1268,7 +1277,7 @@ class DependabotRelockTests(SimpleTestCase):
         self.assertEqual(uv_calls, [["uv", "lock", "--upgrade-package", "certifi==2.0"]])
         self.assertEqual(result, relocked)
 
-    def test_added_and_multi_version_packages(self):
+    def test_added_and_multi_version_packages(self) -> None:
         branch = _lock(
             ("certifi", "1.0"),
             ("click", "8.0"),
@@ -1292,12 +1301,12 @@ class DependabotRelockTests(SimpleTestCase):
             ],
         )
 
-    def test_no_version_changes_still_relocks(self):
+    def test_no_version_changes_still_relocks(self) -> None:
         code, _, uv_calls, _ = self._run(self.BASE, self.BASE)
         self.assertEqual(code, 0)
         self.assertEqual(uv_calls, [["uv", "lock"]])
 
-    def test_mismatch_restores_branch_lock(self):
+    def test_mismatch_restores_branch_lock(self) -> None:
         branch = _lock(("certifi", "2.0"), ("click", "8.0"))
         relocked = _lock(("certifi", "2.0"), ("click", "8.1"))
         code, stderr, _, result = self._run(branch, relocked)
@@ -1305,7 +1314,7 @@ class DependabotRelockTests(SimpleTestCase):
         self.assertIn("click: Dependabot locked ('8.0',), re-locking gave ('8.1',)", stderr)
         self.assertEqual(result, branch)
 
-    def test_uv_lock_failure_restores_branch_lock(self):
+    def test_uv_lock_failure_restores_branch_lock(self) -> None:
         branch = _lock(("certifi", "2.0"), ("click", "8.0"))
         code, _, _, result = self._run(branch, None)
         self.assertIsNone(code)
@@ -1316,45 +1325,45 @@ class CheckDeployTests(SimpleTestCase):
     URL = "https://app.example/healthz/"
     COMMIT = "abc123"
 
-    def _response(self, status: int, payload: bytes):
+    def _response(self, status: int, payload: bytes) -> mock.MagicMock:
         response = mock.MagicMock()
         response.__enter__.return_value.status = status
         response.__enter__.return_value.read.return_value = payload
         return response
 
-    def _http_error(self, status: int, payload: bytes):
+    def _http_error(self, status: int, payload: bytes) -> urllib.error.HTTPError:
         return urllib.error.HTTPError(self.URL, status, "Error", Message(), io.BytesIO(payload))
 
-    def _check(self, result):
-        kwargs = {"side_effect" if isinstance(result, Exception) else "return_value": result}
+    def _check(self, result: object) -> str | None:
+        kwargs: dict[str, Any] = {"side_effect" if isinstance(result, Exception) else "return_value": result}
         with mock.patch("urllib.request.urlopen", **kwargs) as urlopen:
             problem = check_once(self.URL, self.COMMIT, 7)
         self.assertEqual(urlopen.call_args.kwargs, {"timeout": 7})
         return problem
 
-    def test_healthy(self):
+    def test_healthy(self) -> None:
         body = b'{"status": "ok", "commit": "abc123"}'
         self.assertIsNone(self._check(self._response(200, body)))
 
-    def test_other_commit(self):
+    def test_other_commit(self) -> None:
         body = b'{"status": "ok", "commit": "old"}'
         self.assertEqual(
             self._check(self._response(200, body)),
             "running commit 'old', not 'abc123'",
         )
 
-    def test_unhealthy(self):
+    def test_unhealthy(self) -> None:
         body = b'{"status": "error", "problem": "unapplied migrations"}'
         self.assertEqual(
             self._check(self._http_error(503, body)),
             "HTTP 503, status 'error': unapplied migrations",
         )
 
-    def test_not_json(self):
+    def test_not_json(self) -> None:
         self.assertEqual(self._check(self._http_error(502, b"<html>")), "HTTP 502, not JSON")
         self.assertEqual(self._check(self._response(200, b"[]")), "HTTP 200, unexpected JSON")
 
-    def test_request_failed(self):
+    def test_request_failed(self) -> None:
         self.assertEqual(
             self._check(urllib.error.URLError("timed out")),
             "request failed: timed out",
@@ -1365,11 +1374,11 @@ class CheckDeployTests(SimpleTestCase):
             "request failed: IncompleteRead(0 bytes read)",
         )
 
-    def _main(self, problems, *args):
+    def _main(self, problems: list[str | None], *args: str) -> tuple[int, list[float], str, str]:
         now = [0.0]
-        sleeps = []
+        sleeps: list[float] = []
 
-        def sleep(seconds):
+        def sleep(seconds: float) -> None:
             sleeps.append(seconds)
             now[0] += seconds
 
@@ -1382,7 +1391,7 @@ class CheckDeployTests(SimpleTestCase):
             code = check_deploy_main([self.URL, self.COMMIT, *args], clock=lambda: now[0], sleep=sleep)
         return code, sleeps, out.getvalue(), err.getvalue()
 
-    def test_retries_until_healthy(self):
+    def test_retries_until_healthy(self) -> None:
         code, sleeps, out, _ = self._main(["request failed: x", None])
         self.assertEqual(code, 0)
         self.assertEqual(sleeps, [5])
@@ -1392,23 +1401,23 @@ class CheckDeployTests(SimpleTestCase):
         )
         self.assertNotIn(self.URL, out)
 
-    def test_gives_up_after_timeout(self):
+    def test_gives_up_after_timeout(self) -> None:
         code, sleeps, out, err = self._main(["down"] * 10, "--timeout", "10", "--interval", "4")
         self.assertEqual(code, 1)
         self.assertEqual(sleeps, [4, 4])
         self.assertEqual(out.count("down"), 3)
         self.assertIn("not healthy after 10 seconds", err)
 
-    def test_request_timeout_capped_by_deadline(self):
+    def test_request_timeout_capped_by_deadline(self) -> None:
         now = [0.0]
         timeouts = []
 
-        def check(url, commit, timeout):
+        def check(url: str, commit: str, timeout: float) -> str:
             timeouts.append(timeout)
             now[0] += 8
             return "down"
 
-        def sleep(seconds):
+        def sleep(seconds: float) -> None:
             now[0] += seconds
 
         with (
@@ -1429,28 +1438,28 @@ class WaitForBaseCoverageTests(SimpleTestCase):
     REPO = "owner/repo"
     SHA = "abc123"
 
-    def _response(self, status: int, payload: bytes):
+    def _response(self, status: int, payload: bytes) -> mock.MagicMock:
         response = mock.MagicMock()
         response.__enter__.return_value.status = status
         response.__enter__.return_value.read.return_value = payload
         return response
 
-    def _http_error(self, status: int, payload: bytes):
+    def _http_error(self, status: int, payload: bytes) -> urllib.error.HTTPError:
         return urllib.error.HTTPError("https://example/", status, "Error", Message(), io.BytesIO(payload))
 
-    def _call(self, func, result, *args):
-        kwargs = {"side_effect" if isinstance(result, Exception) else "return_value": result}
+    def _call(self, func: Callable[..., Any], result: object, *args: Any) -> tuple[Any, urllib.request.Request]:
+        kwargs: dict[str, Any] = {"side_effect" if isinstance(result, Exception) else "return_value": result}
         with mock.patch("urllib.request.urlopen", **kwargs) as urlopen:
             outcome = func(self.REPO, self.SHA, *args, 7)
         self.assertEqual(urlopen.call_args.kwargs, {"timeout": 7})
         return outcome, urlopen.call_args.args[0]
 
-    def test_codecov_coverage(self):
+    def test_codecov_coverage(self) -> None:
         outcome, request = self._call(codecov_coverage, self._response(200, b'{"totals": {"coverage": 98.5}}'))
         self.assertEqual(outcome, (True, "coverage 98.5%"))
         self.assertEqual(request.full_url, "https://api.codecov.io/api/v2/github/owner/repos/repo/totals/?sha=abc123")
 
-    def test_codecov_no_coverage(self):
+    def test_codecov_no_coverage(self) -> None:
         self.assertEqual(
             self._call(codecov_coverage, self._http_error(404, b'{"detail": "No coverage report"}'))[0],
             (False, "no report yet"),
@@ -1466,13 +1475,15 @@ class WaitForBaseCoverageTests(SimpleTestCase):
             (False, "request failed: timed out"),
         )
 
-    def _check_runs(self, *runs, token=None):
+    def _check_runs(
+        self, *runs: dict[str, Any], token: str | None = None
+    ) -> tuple[tuple[str, str], urllib.request.Request]:
         body = json.dumps({"total_count": len(runs), "check_runs": list(runs)}).encode()
         with mock.patch("urllib.request.urlopen", return_value=self._response(200, body)) as urlopen:
             outcome = base_ci_state(self.REPO, self.SHA, "test", token, 7)
         return outcome, urlopen.call_args.args[0]
 
-    def test_base_ci_running(self):
+    def test_base_ci_running(self) -> None:
         outcome, request = self._check_runs({"id": 1, "status": "in_progress", "conclusion": None})
         self.assertEqual(outcome, ("running", "test in_progress"))
         self.assertEqual(
@@ -1481,7 +1492,7 @@ class WaitForBaseCoverageTests(SimpleTestCase):
         )
         self.assertFalse(request.has_header("Authorization"))
 
-    def test_base_ci_finished(self):
+    def test_base_ci_finished(self) -> None:
         outcome, request = self._check_runs(
             {"id": 2, "status": "completed", "conclusion": "failure"},
             {"id": 1, "status": "in_progress", "conclusion": None},
@@ -1499,7 +1510,7 @@ class WaitForBaseCoverageTests(SimpleTestCase):
         )
         self.assertEqual(self._check_runs()[0], ("none", "no test check run"))
 
-    def test_base_ci_errors(self):
+    def test_base_ci_errors(self) -> None:
         self.assertEqual(
             self._call(base_ci_state, self._http_error(403, b'{"message": "no"}'), "test", None)[0],
             ("running", "HTTP 403"),
@@ -1509,11 +1520,13 @@ class WaitForBaseCoverageTests(SimpleTestCase):
             ("running", "request failed: IncompleteRead(0 bytes read)"),
         )
 
-    def _main(self, coverage, ci, *args):
+    def _main(
+        self, coverage: list[tuple[bool, str]], ci: list[tuple[str, str]], *args: str
+    ) -> tuple[int, list[float], str, mock.MagicMock]:
         now = [0.0]
-        sleeps = []
+        sleeps: list[float] = []
 
-        def sleep(seconds):
+        def sleep(seconds: float) -> None:
             sleeps.append(seconds)
             now[0] += seconds
 
@@ -1527,14 +1540,14 @@ class WaitForBaseCoverageTests(SimpleTestCase):
             code = wait_for_base_coverage_main([self.REPO, self.SHA, *args], clock=lambda: now[0], sleep=sleep)
         return code, sleeps, out.getvalue(), ci_mock
 
-    def test_base_already_has_coverage(self):
+    def test_base_already_has_coverage(self) -> None:
         code, sleeps, out, ci = self._main([(True, "coverage 98%")], [])
         self.assertEqual(code, 0)
         self.assertEqual(sleeps, [])
         self.assertEqual(out, "Attempt 1: Codecov has the base report for abc123 (coverage 98%)\n")
         ci.assert_not_called()
 
-    def test_waits_for_base_ci(self):
+    def test_waits_for_base_ci(self) -> None:
         code, sleeps, out, ci = self._main(
             [(False, "no report yet"), (False, "no report yet"), (True, "coverage 98%")],
             [("running", "test in_progress"), ("succeeded", "test success")],
@@ -1545,7 +1558,7 @@ class WaitForBaseCoverageTests(SimpleTestCase):
         self.assertNotIn("::warning::", out)
         self.assertEqual(ci.call_args.args, (self.REPO, self.SHA, "test", "t0k", 30))
 
-    def test_gives_up_after_grace(self):
+    def test_gives_up_after_grace(self) -> None:
         code, sleeps, out, _ = self._main(
             [(False, "no report yet")] * 10,
             [("succeeded", "test success")] * 10,
@@ -1560,7 +1573,7 @@ class WaitForBaseCoverageTests(SimpleTestCase):
             )
         )
 
-    def test_gives_up_at_once_if_base_ci_failed(self):
+    def test_gives_up_at_once_if_base_ci_failed(self) -> None:
         code, sleeps, out, _ = self._main(
             [(False, "no report yet")] * 10,
             [("running", "test in_progress"), ("failed", "test failure")],
@@ -1573,7 +1586,7 @@ class WaitForBaseCoverageTests(SimpleTestCase):
             )
         )
 
-    def test_grace_restarts_if_base_ci_reruns(self):
+    def test_grace_restarts_if_base_ci_reruns(self) -> None:
         code, sleeps, _, _ = self._main(
             [(False, "no report yet")] * 10,
             [("none", "no test check run"), ("running", "test queued"), ("succeeded", "test success")] * 2,
@@ -1583,7 +1596,7 @@ class WaitForBaseCoverageTests(SimpleTestCase):
         self.assertEqual(code, 0)
         self.assertEqual(sleeps, [10, 10, 10])
 
-    def test_gives_up_after_timeout(self):
+    def test_gives_up_after_timeout(self) -> None:
         code, sleeps, out, _ = self._main(
             [(False, "no report yet")] * 10,
             [("running", "test in_progress")] * 10,
@@ -1594,16 +1607,16 @@ class WaitForBaseCoverageTests(SimpleTestCase):
         self.assertEqual(sleeps, [10, 10])
         self.assertIn("::warning::Codecov still has no coverage for base commit abc123 after 25 seconds", out)
 
-    def test_request_timeout_capped_by_deadline(self):
+    def test_request_timeout_capped_by_deadline(self) -> None:
         now = [0.0]
         timeouts = []
 
-        def request(*args):
+        def request(*args: Any) -> tuple[bool, str]:
             timeouts.append(args[-1])
             now[0] += 4
             return False, "slow"
 
-        def sleep(seconds):
+        def sleep(seconds: float) -> None:
             now[0] += seconds
 
         with (
@@ -1623,8 +1636,8 @@ class WaitForBaseCoverageTests(SimpleTestCase):
 class RecreatePrTests(SimpleTestCase):
     URL = "https://github.com/o/r/pull/5"
 
-    def pr_json(self, **overrides):
-        data = {
+    def pr_json(self, **overrides: object) -> str:
+        data: dict[str, object] = {
             "number": 5,
             "title": "T",
             "body": "B",
@@ -1641,18 +1654,18 @@ class RecreatePrTests(SimpleTestCase):
 
     def run_main(
         self,
-        argv,
-        view_json=None,
-        create_error=False,
-        reopen_error=False,
-        comment_error=False,
-        list_json="[]",
-        list_error=False,
-    ):
+        argv: list[str],
+        view_json: str | None = None,
+        create_error: bool = False,
+        reopen_error: bool = False,
+        comment_error: bool = False,
+        list_json: str = "[]",
+        list_error: bool = False,
+    ) -> tuple[str | int | None, list[tuple[list[str], str | None]], str]:
         """Run main() with `gh` mocked; return (exit code or None, calls, stderr)."""
         calls = []
 
-        def fake_run(cmd, input=None, **kwargs):
+        def fake_run(cmd: list[str], input: str | None = None, **kwargs: Any) -> subprocess.CompletedProcess[str]:
             calls.append((cmd[1:], input))
             sub = cmd[2]
             if sub == "view":
@@ -1683,13 +1696,13 @@ class RecreatePrTests(SimpleTestCase):
                 code = e.code
         return code, calls, err.getvalue()
 
-    def test_parse_pr_url(self):
+    def test_parse_pr_url(self) -> None:
         self.assertEqual(parse_pr_url("https://github.com/o/r/pull/5/files"), ("github.com", "o/r", "5"))
         self.assertEqual(parse_pr_url("https://ghe.example.com/o/r/pull/5"), ("ghe.example.com", "o/r", "5"))
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             parse_pr_url("https://github.com/o/r/issues/5")
 
-    def test_success_closes_creates_and_comments(self):
+    def test_success_closes_creates_and_comments(self) -> None:
         code, calls, _ = self.run_main([self.URL])
         self.assertIsNone(code)
         subs = [c[0][1] for c in calls]
@@ -1706,24 +1719,24 @@ class RecreatePrTests(SimpleTestCase):
             self.assertEqual(args[args.index("--repo") + 1], "github.com/o/r")
         self.assertIn("Superseded by #9", calls[3][0])
 
-    def test_refuses_fork(self):
+    def test_refuses_fork(self) -> None:
         code, calls, err = self.run_main([self.URL], view_json=self.pr_json(isCrossRepository=True))
         self.assertEqual(code, 1)
         self.assertIn("fork", err)
         self.assertEqual(len(calls), 1)
 
-    def test_refuses_non_open(self):
+    def test_refuses_non_open(self) -> None:
         code, calls, err = self.run_main([self.URL], view_json=self.pr_json(state="MERGED"))
         self.assertEqual(code, 1)
         self.assertIn("MERGED", err)
         self.assertEqual(len(calls), 1)
 
-    def test_refuses_number_mismatch(self):
+    def test_refuses_number_mismatch(self) -> None:
         code, _, err = self.run_main([self.URL], view_json=self.pr_json(number=6))
         self.assertEqual(code, 1)
         self.assertIn("PR #6", err)
 
-    def test_create_failure_reopens_original(self):
+    def test_create_failure_reopens_original(self) -> None:
         code, calls, err = self.run_main([self.URL], create_error=True)
         self.assertEqual(code, 1)
         self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "list", "reopen"])
@@ -1732,7 +1745,7 @@ class RecreatePrTests(SimpleTestCase):
         self.assertEqual(list_args[list_args.index("--head") + 1], "feat")
         self.assertEqual(list_args[list_args.index("--base") + 1], "master")
 
-    def test_create_failure_after_creating_does_not_reopen(self):
+    def test_create_failure_after_creating_does_not_reopen(self) -> None:
         code, calls, err = self.run_main(
             [self.URL], create_error=True, list_json='[{"url": "https://github.com/o/r/pull/9"}]'
         )
@@ -1740,14 +1753,14 @@ class RecreatePrTests(SimpleTestCase):
         self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "list"])
         self.assertIn("https://github.com/o/r/pull/9 was created anyway", err)
 
-    def test_create_failure_list_failure_aborts_without_reopening(self):
+    def test_create_failure_list_failure_aborts_without_reopening(self) -> None:
         code, calls, err = self.run_main([self.URL], create_error=True, list_error=True)
         self.assertEqual(code, 1)
         self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "list"])
         self.assertIn("list failed", err)
         self.assertIn("could not check whether the new PR was created anyway", err)
 
-    def test_create_failure_bad_list_output_aborts_without_reopening(self):
+    def test_create_failure_bad_list_output_aborts_without_reopening(self) -> None:
         for output in ("not json", "{}"):
             with self.subTest(output=output):
                 code, calls, err = self.run_main([self.URL], create_error=True, list_json=output)
@@ -1755,25 +1768,25 @@ class RecreatePrTests(SimpleTestCase):
                 self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "list"])
                 self.assertIn("could not check whether the new PR was created anyway", err)
 
-    def test_moved_repo_is_not_a_fork(self):
+    def test_moved_repo_is_not_a_fork(self) -> None:
         # An old URL still resolves after a rename or transfer, so the head repo can differ from the URL's
         code, calls, _ = self.run_main([self.URL], view_json=self.pr_json(headRepositoryOwner={"login": "new"}))
         self.assertIsNone(code)
         self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "comment"])
 
-    def test_reopen_failure_says_to_reopen_manually(self):
+    def test_reopen_failure_says_to_reopen_manually(self) -> None:
         code, _, err = self.run_main([self.URL], create_error=True, reopen_error=True)
         self.assertEqual(code, 1)
         self.assertIn("still CLOSED", err)
 
-    def test_comment_failure_reports_new_pr(self):
+    def test_comment_failure_reports_new_pr(self) -> None:
         code, calls, err = self.run_main([self.URL], comment_error=True)
         self.assertEqual(code, 1)
         self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "comment"])
         self.assertIn("comment failed", err)
         self.assertIn("created https://github.com/o/r/pull/9 and closed PR #5", err)
 
-    def test_gh_missing(self):
+    def test_gh_missing(self) -> None:
         err = io.StringIO()
         with (
             mock.patch("scripts.recreate_pr.subprocess.run", side_effect=FileNotFoundError),
@@ -1783,7 +1796,7 @@ class RecreatePrTests(SimpleTestCase):
             recreate_pr_main([self.URL])
         self.assertIn("'gh' CLI not found", err.getvalue())
 
-    def test_gh_command_failure(self):
+    def test_gh_command_failure(self) -> None:
         error = subprocess.CalledProcessError(1, ["gh"], stderr="boom")
         err = io.StringIO()
         with (

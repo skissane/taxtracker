@@ -6,7 +6,7 @@ import pytest
 from lifetracker.core.archives import PDF_MAGIC, extract_pdfs_from_zip, select_importable_files
 
 
-def _zip(entries):
+def _zip(entries: list[tuple[str, bytes]]) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, mode="w") as zf:
         for name, data in entries:
@@ -14,7 +14,7 @@ def _zip(entries):
     return buf.getvalue()
 
 
-def test_extract_pdfs_from_zip():
+def test_extract_pdfs_from_zip() -> None:
     zip_bytes = _zip(
         [
             ("folder/", b""),
@@ -27,7 +27,7 @@ def test_extract_pdfs_from_zip():
     assert extract_pdfs_from_zip(zip_bytes) == ([("statement.pdf", PDF_MAGIC + b"a")], ["notes.txt", "fake.pdf"])
 
 
-def test_extract_pdfs_from_zip_skips_corrupt_deflate_data():
+def test_extract_pdfs_from_zip_skips_corrupt_deflate_data() -> None:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("corrupt.pdf", PDF_MAGIC + bytes(range(256)) * 50)
@@ -38,18 +38,18 @@ def test_extract_pdfs_from_zip_skips_corrupt_deflate_data():
     assert extract_pdfs_from_zip(bytes(zip_bytes)) == ([("good.pdf", PDF_MAGIC + b"a")], ["corrupt.pdf"])
 
 
-def test_extract_pdfs_from_zip_skips_bad_crc():
+def test_extract_pdfs_from_zip_skips_bad_crc() -> None:
     zip_bytes = bytearray(_zip([("corrupt.pdf", PDF_MAGIC + b"original"), ("good.pdf", PDF_MAGIC + b"a")]))
     zip_bytes[zip_bytes.find(b"original")] ^= 0xFF
     assert extract_pdfs_from_zip(bytes(zip_bytes)) == ([("good.pdf", PDF_MAGIC + b"a")], ["corrupt.pdf"])
 
 
-def test_extract_pdfs_from_zip_raises_bad_zip_file():
+def test_extract_pdfs_from_zip_raises_bad_zip_file() -> None:
     with pytest.raises(zipfile.BadZipFile):
         extract_pdfs_from_zip(b"not a zip")
 
 
-def test_select_importable_files_skips_duplicates():
+def test_select_importable_files_skips_duplicates() -> None:
     existing = {"invoice.pdf"}
     duplicate_names: list[str] = []
 

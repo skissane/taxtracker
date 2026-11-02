@@ -8,6 +8,7 @@ import typing
 import zipfile
 from email.message import EmailMessage
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import click
@@ -91,7 +92,7 @@ def _build_eml_with_nested_pdf_attachment() -> bytes:
 
 
 class ExtractEmlTests(TestCase):
-    def test_iter_parts_with_date_prefix_payload_not_wrapped_in_list(self):
+    def test_iter_parts_with_date_prefix_payload_not_wrapped_in_list(self) -> None:
         nested = EmailMessage()
         nested["Date"] = "Tue, 02 Jul 2024 08:30:00 +0000"
         nested.set_content("body")
@@ -104,7 +105,7 @@ class ExtractEmlTests(TestCase):
         self.assertEqual([p for p, _ in results], [part, nested])
         self.assertEqual([prefix for _, prefix in results], ["2024-07-02-"] * 2)
 
-    def test_nested_pdf_attachment_inherits_containing_email_date(self):
+    def test_nested_pdf_attachment_inherits_containing_email_date(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             eml_path = Path(tmp) / "message.eml"
             eml_path.write_bytes(_build_eml_with_nested_pdf_attachment())
@@ -118,7 +119,7 @@ class ExtractEmlTests(TestCase):
                 self.assertIn("2024-07-02-payslip.pdf", names)
                 self.assertEqual(zf.read("2024-07-02-payslip.pdf"), PDF_MAGIC)
 
-    def test_extracts_attachments_and_nested_email(self):
+    def test_extracts_attachments_and_nested_email(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             eml_path = Path(tmp) / "message.eml"
             eml_path.write_bytes(_build_eml_with_nested())
@@ -136,7 +137,7 @@ class ExtractEmlTests(TestCase):
                 self.assertEqual(len(nested_names), 1)
                 self.assertTrue(nested_names[0].startswith("2024-07-02-"))
 
-    def test_prefix_option_applied(self):
+    def test_prefix_option_applied(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             eml_path = Path(tmp) / "message.eml"
             eml_path.write_bytes(_build_eml_with_nested())
@@ -147,18 +148,18 @@ class ExtractEmlTests(TestCase):
             with zipfile.ZipFile(zip_path) as zf:
                 self.assertTrue(any(n.startswith("case1-doc") for n in zf.namelist()))
 
-    def test_get_unique_filename_deduplicates(self):
+    def test_get_unique_filename_deduplicates(self) -> None:
         used: dict[str, int] = {}
         self.assertEqual(get_unique_filename("a.pdf", used), "a.pdf")
         self.assertEqual(get_unique_filename("a.pdf", used), "a_1.pdf")
         self.assertEqual(get_unique_filename("a.pdf", used), "a_2.pdf")
 
-    def test_get_unique_filename_deduplicates_without_extension(self):
+    def test_get_unique_filename_deduplicates_without_extension(self) -> None:
         used: dict[str, int] = {}
         self.assertEqual(get_unique_filename("noext", used), "noext")
         self.assertEqual(get_unique_filename("noext", used), "noext_1")
 
-    def test_get_attachment_payload_message_payload_not_wrapped_in_list(self):
+    def test_get_attachment_payload_message_payload_not_wrapped_in_list(self) -> None:
         nested = EmailMessage()
         nested.set_content("body")
         part = EmailMessage()
@@ -168,22 +169,22 @@ class ExtractEmlTests(TestCase):
         part.set_payload(nested)
         self.assertIsNotNone(get_attachment_payload(part))
 
-    def test_get_attachment_payload_message_unrecognised_payload(self):
+    def test_get_attachment_payload_message_unrecognised_payload(self) -> None:
         class FakePart:
-            def get_content_type(self):
+            def get_content_type(self) -> str:
                 return "message/rfc822"
 
-            def get_payload(self):
+            def get_payload(self) -> object:
                 return "not a message object"
 
         self.assertIsNone(get_attachment_payload(typing.cast(EmailMessage, FakePart())))
 
-    def test_get_email_date_prefix_non_rfc822_part(self):
+    def test_get_email_date_prefix_non_rfc822_part(self) -> None:
         part = EmailMessage()
         part.set_content("body")
         self.assertEqual(get_email_date_prefix(part), "")
 
-    def test_get_email_date_prefix_payload_not_wrapped_in_list(self):
+    def test_get_email_date_prefix_payload_not_wrapped_in_list(self) -> None:
         nested = EmailMessage()
         nested["Date"] = "Tue, 02 Jul 2024 08:30:00 +0000"
         nested.set_content("body")
@@ -192,7 +193,7 @@ class ExtractEmlTests(TestCase):
         part.set_payload(nested)
         self.assertEqual(get_email_date_prefix(part), "2024-07-02-")
 
-    def test_get_email_date_prefix_no_date_header(self):
+    def test_get_email_date_prefix_no_date_header(self) -> None:
         nested = EmailMessage()
         nested.set_content("body")
         part = EmailMessage()
@@ -200,7 +201,7 @@ class ExtractEmlTests(TestCase):
         part.set_payload(nested)
         self.assertEqual(get_email_date_prefix(part), "")
 
-    def test_get_email_date_prefix_unparseable_date(self):
+    def test_get_email_date_prefix_unparseable_date(self) -> None:
         nested = EmailMessage()
         nested["Date"] = "not a real date"
         nested.set_content("body")
@@ -209,17 +210,17 @@ class ExtractEmlTests(TestCase):
         part.set_payload(nested)
         self.assertEqual(get_email_date_prefix(part), "")
 
-    def test_get_email_date_prefix_unrecognised_payload(self):
+    def test_get_email_date_prefix_unrecognised_payload(self) -> None:
         class FakePart:
-            def get_content_type(self):
+            def get_content_type(self) -> str:
                 return "message/rfc822"
 
-            def get_payload(self):
+            def get_payload(self) -> object:
                 return object()
 
         self.assertEqual(get_email_date_prefix(typing.cast(EmailMessage, FakePart())), "")
 
-    def test_skips_attachment_with_no_extractable_payload(self):
+    def test_skips_attachment_with_no_extractable_payload(self) -> None:
         with (
             tempfile.TemporaryDirectory() as tmp,
             patch(
@@ -236,7 +237,7 @@ class ExtractEmlTests(TestCase):
             with zipfile.ZipFile(zip_path) as zf:
                 self.assertEqual(zf.namelist(), [])
 
-    def test_cli_command_end_to_end(self):
+    def test_cli_command_end_to_end(self) -> None:
         runner = CliRunner()
         with tempfile.TemporaryDirectory() as tmp:
             eml_path = Path(tmp) / "message.eml"
@@ -253,20 +254,20 @@ class ExtractEmlTests(TestCase):
 class ExtractFidelityPdfsTests(TestCase):
     @staticmethod
     def _make_har(
-        filename="statement-2023-07-20",
-        pdf_bytes=PDF_MAGIC,
-        method="GET",
-        mime_type="application/json",
-        body_encoding=None,
-        body_text=None,
-        entries=None,
+        filename: str = "statement-2023-07-20",
+        pdf_bytes: bytes = PDF_MAGIC,
+        method: str = "GET",
+        mime_type: str = "application/json",
+        body_encoding: str | None = None,
+        body_text: str | None = None,
+        entries: list[dict[str, Any]] | None = None,
     ) -> bytes:
         if entries is None:
             if body_text is None:
                 file_content_b64 = base64.b64encode(pdf_bytes).decode()
                 body_json = json.dumps({"fileContent": file_content_b64})
                 body_text = base64.b64encode(body_json.encode()).decode() if body_encoding == "base64" else body_json
-            entry = {
+            entry: dict[str, Any] = {
                 "request": {
                     "method": method,
                     "url": f"{FIDELITY_URL_PREFIX}{filename}",
@@ -280,7 +281,7 @@ class ExtractFidelityPdfsTests(TestCase):
             entries = [entry]
         return json.dumps({"log": {"entries": entries}}).encode()
 
-    def test_extracts_matching_pdf(self):
+    def test_extracts_matching_pdf(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_har())
@@ -291,7 +292,7 @@ class ExtractFidelityPdfsTests(TestCase):
             self.assertEqual(count, 1)
             self.assertEqual((out_dir / "statement-2023-07-20.pdf").read_bytes(), PDF_MAGIC)
 
-    def test_skips_non_get_requests(self):
+    def test_skips_non_get_requests(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_har(method="POST"))
@@ -299,7 +300,7 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertEqual(extract_pdfs(har_path, out_dir), 0)
 
-    def test_skips_non_matching_url(self):
+    def test_skips_non_matching_url(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             entries = [
@@ -313,7 +314,7 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertEqual(extract_pdfs(har_path, out_dir), 0)
 
-    def test_skips_wrong_mime_type(self):
+    def test_skips_wrong_mime_type(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_har(mime_type="text/html"))
@@ -321,7 +322,7 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertEqual(extract_pdfs(har_path, out_dir), 0)
 
-    def test_skips_non_json_body(self):
+    def test_skips_non_json_body(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_har(body_text="not json"))
@@ -329,7 +330,7 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertEqual(extract_pdfs(har_path, out_dir), 0)
 
-    def test_skips_missing_file_content(self):
+    def test_skips_missing_file_content(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_har(body_text=json.dumps({})))
@@ -337,7 +338,7 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertEqual(extract_pdfs(har_path, out_dir), 0)
 
-    def test_skips_bad_pdf_magic(self):
+    def test_skips_bad_pdf_magic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_har(pdf_bytes=b"not a pdf"))
@@ -345,7 +346,7 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertEqual(extract_pdfs(har_path, out_dir), 0)
 
-    def test_base64_encoded_body(self):
+    def test_base64_encoded_body(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_har(body_encoding="base64"))
@@ -353,7 +354,7 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertEqual(extract_pdfs(har_path, out_dir), 1)
 
-    def test_path_traversal_sanitized(self):
+    def test_path_traversal_sanitized(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_har(filename="../../../evil"))
@@ -362,7 +363,7 @@ class ExtractFidelityPdfsTests(TestCase):
             self.assertEqual(extract_pdfs(har_path, out_dir), 1)
             self.assertTrue((out_dir / "evil.pdf").exists())
 
-    def test_skips_empty_filename(self):
+    def test_skips_empty_filename(self) -> None:
         """A URL with nothing after the 'c:' prefix yields an empty basename."""
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
@@ -371,7 +372,7 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertEqual(extract_pdfs(har_path, out_dir), 0)
 
-    def test_skips_undecodable_base64_body(self):
+    def test_skips_undecodable_base64_body(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_har(body_encoding="base64", body_text="not-base64!!"))
@@ -379,7 +380,7 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertEqual(extract_pdfs(har_path, out_dir), 0)
 
-    def test_skips_empty_response_body(self):
+    def test_skips_empty_response_body(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_har(body_text=""))
@@ -387,7 +388,7 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertEqual(extract_pdfs(har_path, out_dir), 0)
 
-    def test_skips_undecodable_base64_file_content(self):
+    def test_skips_undecodable_base64_file_content(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_har(body_text=json.dumps({"fileContent": "abc"})))
@@ -395,7 +396,7 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertEqual(extract_pdfs(har_path, out_dir), 0)
 
-    def test_cli_missing_har_file_exits_with_error(self):
+    def test_cli_missing_har_file_exits_with_error(self) -> None:
         runner = CliRunner()
         with tempfile.TemporaryDirectory() as tmp:
             result = runner.invoke(
@@ -404,7 +405,7 @@ class ExtractFidelityPdfsTests(TestCase):
             )
             self.assertEqual(result.exit_code, 1)
 
-    def test_cli_end_to_end(self):
+    def test_cli_end_to_end(self) -> None:
         runner = CliRunner()
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
@@ -416,7 +417,7 @@ class ExtractFidelityPdfsTests(TestCase):
             self.assertEqual(result.exit_code, 0, result.output)
             self.assertTrue((out_dir / "statement-2023-07-20.pdf").exists())
 
-    def test_warns_about_skipped_entries(self):
+    def test_warns_about_skipped_entries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_har(mime_type="text/html"))
@@ -428,7 +429,7 @@ class ExtractFidelityPdfsTests(TestCase):
             url = f"{FIDELITY_URL_PREFIX}statement-2023-07-20"
             self.assertEqual(stderr.getvalue(), f"WARNING: unexpected content type 'text/html' for {url}; skipping\n")
 
-    def test_cli_invalid_har_exits_with_error(self):
+    def test_cli_invalid_har_exits_with_error(self) -> None:
         runner = CliRunner()
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
@@ -439,7 +440,7 @@ class ExtractFidelityPdfsTests(TestCase):
             self.assertEqual(result.exit_code, 1)
             self.assertIn("Error: Could not parse file as a HAR archive", result.output)
 
-    def test_cli_reports_when_no_entries_match(self):
+    def test_cli_reports_when_no_entries_match(self) -> None:
         runner = CliRunner()
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
@@ -455,7 +456,7 @@ class ExtractFidelityPdfsTests(TestCase):
             self.assertIn("No matching Fidelity PDF entries", result.output)
             self.assertFalse(out_dir.exists())
 
-    def test_refuses_to_overwrite_existing_output_file(self):
+    def test_refuses_to_overwrite_existing_output_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_har())
@@ -468,7 +469,7 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertEqual((out_dir / "statement-2023-07-20.pdf").read_bytes(), b"existing")
 
-    def test_refuses_dangling_symlink(self):
+    def test_refuses_dangling_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_har())
@@ -482,13 +483,13 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertFalse(target.exists())
 
-    def _make_multi_har(self, *pdfs) -> bytes:
+    def _make_multi_har(self, *pdfs: tuple[str, bytes]) -> bytes:
         entries = []
         for filename, pdf_bytes in pdfs:
             entries += json.loads(self._make_har(filename=filename, pdf_bytes=pdf_bytes))["log"]["entries"]
         return self._make_har(entries=entries)
 
-    def test_refuses_before_writing_anything(self):
+    def test_refuses_before_writing_anything(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_multi_har(("a", PDF_MAGIC), ("b", PDF_MAGIC)))
@@ -501,7 +502,7 @@ class ExtractFidelityPdfsTests(TestCase):
 
             self.assertFalse((out_dir / "a.pdf").exists())
 
-    def test_writes_one_copy_of_identical_duplicates(self):
+    def test_writes_one_copy_of_identical_duplicates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_multi_har(("a", PDF_MAGIC), ("a", PDF_MAGIC)))
@@ -510,7 +511,7 @@ class ExtractFidelityPdfsTests(TestCase):
             self.assertEqual(extract_pdfs(har_path, out_dir), 1)
             self.assertEqual((out_dir / "a.pdf").read_bytes(), PDF_MAGIC)
 
-    def test_refuses_different_pdfs_with_the_same_name(self):
+    def test_refuses_different_pdfs_with_the_same_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             har_path = Path(tmp) / "export.har"
             har_path.write_bytes(self._make_multi_har(("a", PDF_MAGIC), ("a", PDF_MAGIC + b"2")))
@@ -523,7 +524,7 @@ class ExtractFidelityPdfsTests(TestCase):
 
 
 class FilterZipTests(TestCase):
-    def test_filters_matching_members(self):
+    def test_filters_matching_members(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             input_zip = Path(tmp) / "in.zip"
             with zipfile.ZipFile(input_zip, "w") as zf:
@@ -537,13 +538,13 @@ class FilterZipTests(TestCase):
                 self.assertEqual(zf.namelist(), ["keep.txt"])
                 self.assertEqual(zf.read("keep.txt"), b"keep")
 
-    def test_missing_input_file_exits(self):
+    def test_missing_input_file_exits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(click.ClickException) as ctx:
                 filter_zip(str(Path(tmp) / "missing.zip"), str(Path(tmp) / "out.zip"), "x")
             self.assertIn("missing.zip' was not found", str(ctx.exception))
 
-    def test_missing_output_directory_exits(self):
+    def test_missing_output_directory_exits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             input_zip = Path(tmp) / "in.zip"
             with zipfile.ZipFile(input_zip, "w") as zf:
@@ -554,7 +555,7 @@ class FilterZipTests(TestCase):
                 filter_zip(str(input_zip), str(output_zip), "x")
             self.assertIn("out.zip' was not found", str(ctx.exception))
 
-    def test_bad_zip_file_exits(self):
+    def test_bad_zip_file_exits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             bad_zip = Path(tmp) / "bad.zip"
             bad_zip.write_bytes(b"not a zip")
@@ -562,7 +563,7 @@ class FilterZipTests(TestCase):
                 filter_zip(str(bad_zip), str(Path(tmp) / "out.zip"), "x")
             self.assertIn("is not a valid ZIP file", str(ctx.exception))
 
-    def test_same_input_and_output_path_exits(self):
+    def test_same_input_and_output_path_exits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "same.zip"
             with zipfile.ZipFile(path, "w") as zf:
@@ -573,7 +574,7 @@ class FilterZipTests(TestCase):
 
             self.assertIn("are the same file", str(ctx.exception))
 
-    def test_hard_linked_input_and_output_exits(self):
+    def test_hard_linked_input_and_output_exits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "in.zip"
             with zipfile.ZipFile(path, "w") as zf:
@@ -587,7 +588,7 @@ class FilterZipTests(TestCase):
             with zipfile.ZipFile(path) as zf:
                 self.assertEqual(zf.namelist(), ["keep.txt"])
 
-    def test_cli_end_to_end(self):
+    def test_cli_end_to_end(self) -> None:
         runner = CliRunner()
         with tempfile.TemporaryDirectory() as tmp:
             input_zip = Path(tmp) / "in.zip"
@@ -604,20 +605,20 @@ class FilterZipTests(TestCase):
 
 
 class ProcessDatesTests(TestCase):
-    def test_read_dates_parses_iso_and_ordinal_formats(self):
+    def test_read_dates_parses_iso_and_ordinal_formats(self) -> None:
         dates = read_dates(["2024-01-15\n", "November 20th 2024\n", "\n", "2024-01-15\n"], 0)
         self.assertEqual(dates, {datetime.date(2024, 1, 15), datetime.date(2024, 11, 20)})
 
-    def test_read_dates_applies_add_days(self):
+    def test_read_dates_applies_add_days(self) -> None:
         dates = read_dates(["2024-01-15\n"], 5)
         self.assertEqual(dates, {datetime.date(2024, 1, 20)})
 
-    def test_read_dates_raises_on_bad_format(self):
+    def test_read_dates_raises_on_bad_format(self) -> None:
         with self.assertRaises(ValueError) as ctx:
             read_dates(["not-a-date\n"], 0)
         self.assertIn("line 1", str(ctx.exception))
 
-    def test_group_and_render_markdown(self):
+    def test_group_and_render_markdown(self) -> None:
         dates = {datetime.date(2024, 6, 30), datetime.date(2024, 7, 1)}
         groups = group_by_financial_year(dates)
         self.assertEqual(set(groups.keys()), {2024, 2025})
@@ -627,30 +628,30 @@ class ProcessDatesTests(TestCase):
         self.assertIn("# FY2025 (1 date)", rendered)
         self.assertIn("| 2024-06-30 | Sun |", rendered)
 
-    def test_render_markdown_summary_only(self):
+    def test_render_markdown_summary_only(self) -> None:
         groups = group_by_financial_year({datetime.date(2024, 1, 1)})
         rendered = render_markdown(groups, summary=True, year=None)
         self.assertEqual(rendered, "# FY2024 (1 date)")
 
-    def test_render_markdown_year_filter(self):
+    def test_render_markdown_year_filter(self) -> None:
         groups = group_by_financial_year({datetime.date(2023, 1, 1), datetime.date(2024, 1, 1)})
         rendered = render_markdown(groups, summary=True, year=2024)
         self.assertEqual(rendered, "# FY2024 (1 date)")
 
-    def test_cli_end_to_end(self):
+    def test_cli_end_to_end(self) -> None:
         runner = CliRunner()
         result = runner.invoke(process_dates_command, ["--summary"], input="2024-01-01\n2024-08-01\n")
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("FY2024", result.output)
         self.assertIn("FY2025", result.output)
 
-    def test_cli_empty_input_produces_no_output(self):
+    def test_cli_empty_input_produces_no_output(self) -> None:
         runner = CliRunner()
         result = runner.invoke(process_dates_command, [], input="")
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(result.output, "")
 
-    def test_cli_bad_date_exits_with_error(self):
+    def test_cli_bad_date_exits_with_error(self) -> None:
         runner = CliRunner()
         result = runner.invoke(process_dates_command, [], input="garbage\n")
         self.assertEqual(result.exit_code, 1)
@@ -690,7 +691,7 @@ def _build_eml_with_html_attachment() -> bytes:
 
 
 class ZipEmlToPdfTests(TestCase):
-    def test_converts_eml_members_to_pdf(self):
+    def test_converts_eml_members_to_pdf(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             input_zip = Path(tmp) / "in.zip"
             with zipfile.ZipFile(input_zip, "w") as zf:
@@ -715,7 +716,7 @@ class ZipEmlToPdfTests(TestCase):
             plain_html = mock_from_string.call_args_list[1].args[0]
             self.assertIn("<pre>", plain_html)
 
-    def test_no_eml_members_raises_click_exception(self):
+    def test_no_eml_members_raises_click_exception(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             input_zip = Path(tmp) / "in.zip"
             with zipfile.ZipFile(input_zip, "w") as zf:
@@ -730,7 +731,7 @@ class ZipEmlToPdfTests(TestCase):
             mock_fs.assert_not_called()
             self.assertEqual(output_zip.read_bytes(), b"existing")
 
-    def test_uses_message_body_not_html_attachment(self):
+    def test_uses_message_body_not_html_attachment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             input_zip = Path(tmp) / "in.zip"
             with zipfile.ZipFile(input_zip, "w") as zf:
@@ -748,7 +749,7 @@ class ZipEmlToPdfTests(TestCase):
             self.assertIn("Body plain text", html)
             self.assertNotIn("Attached HTML", html)
 
-    def test_message_without_text_body_gets_empty_body(self):
+    def test_message_without_text_body_gets_empty_body(self) -> None:
         msg = EmailMessage()
         msg["Subject"] = "Only an attachment"
         msg.set_content(b"%PDF-1.4", maintype="application", subtype="pdf")
@@ -767,7 +768,7 @@ class ZipEmlToPdfTests(TestCase):
             self.assertEqual(count, 1)
             self.assertIn("<pre></pre>", mock_from_string.call_args.args[0])
 
-    def test_cli_end_to_end(self):
+    def test_cli_end_to_end(self) -> None:
         runner = CliRunner()
         with tempfile.TemporaryDirectory() as tmp:
             input_zip = Path(tmp) / "in.zip"
@@ -784,7 +785,7 @@ class ZipEmlToPdfTests(TestCase):
             self.assertEqual(result.exit_code, 0, result.output)
             self.assertIn("Batch complete!", result.output)
 
-    def test_cli_exits_non_zero_when_no_eml(self):
+    def test_cli_exits_non_zero_when_no_eml(self) -> None:
         runner = CliRunner()
         with tempfile.TemporaryDirectory() as tmp:
             input_zip = Path(tmp) / "in.zip"
@@ -799,7 +800,7 @@ class ZipEmlToPdfTests(TestCase):
 
 
 class ZipEmlToTxtTests(TestCase):
-    def test_extracts_plain_text_bodies(self):
+    def test_extracts_plain_text_bodies(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             input_zip = Path(tmp) / "in.zip"
             with zipfile.ZipFile(input_zip, "w") as zf:
@@ -816,7 +817,7 @@ class ZipEmlToTxtTests(TestCase):
                 self.assertIn("Subject: Plain Email", content)
                 self.assertIn("Plain body text", content)
 
-    def test_skips_eml_without_plain_text_body(self):
+    def test_skips_eml_without_plain_text_body(self) -> None:
         html_only = EmailMessage()
         html_only["Subject"] = "HTML Only"
         html_only["From"] = "sender@example.com"
@@ -836,7 +837,7 @@ class ZipEmlToTxtTests(TestCase):
             with zipfile.ZipFile(output_zip) as zf:
                 self.assertEqual(zf.namelist(), [])
 
-    def test_no_eml_members_raises_click_exception(self):
+    def test_no_eml_members_raises_click_exception(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             input_zip = Path(tmp) / "in.zip"
             with zipfile.ZipFile(input_zip, "w") as zf:
@@ -848,7 +849,7 @@ class ZipEmlToTxtTests(TestCase):
 
             self.assertFalse(output_zip.exists())
 
-    def test_cli_end_to_end(self):
+    def test_cli_end_to_end(self) -> None:
         runner = CliRunner()
         with tempfile.TemporaryDirectory() as tmp:
             input_zip = Path(tmp) / "in.zip"
@@ -861,7 +862,7 @@ class ZipEmlToTxtTests(TestCase):
             self.assertEqual(result.exit_code, 0, result.output)
             self.assertIn("Batch complete!", result.output)
 
-    def test_cli_exits_non_zero_when_no_eml(self):
+    def test_cli_exits_non_zero_when_no_eml(self) -> None:
         runner = CliRunner()
         with tempfile.TemporaryDirectory() as tmp:
             input_zip = Path(tmp) / "in.zip"
