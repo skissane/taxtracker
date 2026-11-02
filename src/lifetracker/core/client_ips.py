@@ -54,7 +54,7 @@ import traceback
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from types import FrameType
-from typing import Any
+from typing import Any, cast
 
 import maxminddb
 import requests
@@ -483,7 +483,7 @@ class GeoIP:
         self._readers: dict[str, tuple[Path, maxminddb.Reader]] = {}
         self._relay_ranges = RelayRanges(geoip_dir)
 
-    def _reader(self, name: str) -> Any:
+    def _reader(self, name: str) -> maxminddb.Reader | None:
         if self.geoip_dir is None:
             return None
         files = geoip_files(self.geoip_dir, name)
@@ -506,13 +506,13 @@ class GeoIP:
         country = country_name = asn = as_org = None
         reader = self._reader("dbip-country-lite")
         if reader is not None:
-            record = reader.get(ip) or {}
+            record = cast(dict[str, Any], reader.get(ip) or {})
             country_record = record.get("country") or {}
             country = country_record.get("iso_code")
             country_name = (country_record.get("names") or {}).get("en")
         reader = self._reader("dbip-asn-lite")
         if reader is not None:
-            record = reader.get(ip) or {}
+            record = cast(dict[str, Any], reader.get(ip) or {})
             asn = record.get("autonomous_system_number")
             as_org = record.get("autonomous_system_organization")
         return Location(country, country_name, asn, as_org)
