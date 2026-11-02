@@ -519,7 +519,7 @@ dev = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "ruff", specifier = ">=0.17.1" },
 ]
-screenshots = [{ name = "playwright", specifier = ">=1.64.0" }]
+screenshots = [{ name = "playwright", specifier = ">=1.64.1" }]
 
 [[package]]
 name = "loguru"
