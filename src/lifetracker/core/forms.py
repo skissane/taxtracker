@@ -1,3 +1,5 @@
+from typing import Any
+
 from django import forms
 from django.utils import formats
 
@@ -16,7 +18,7 @@ _EXTRA_DATE_FORMATS = [
 class FlexibleDateField(forms.DateField):
     """DateField that also accepts common English month-name date formats."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         if "input_formats" not in kwargs:
             locale_formats = list(formats.get_format("DATE_INPUT_FORMATS"))
             extra = [f for f in _EXTRA_DATE_FORMATS if f not in locale_formats]

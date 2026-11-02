@@ -6,7 +6,7 @@ from pathlib import Path
 import click
 
 
-def filter_zip(input_path, output_path, reject_substring):
+def filter_zip(input_path: str | Path, output_path: str | Path, reject_substring: str) -> None:
     """Reads an input zip and writes to an output zip, skipping specific files."""
     # samefile() also catches symlinks and hard links; a missing file can't be the other.
     input_file, output_file = Path(input_path), Path(output_path)

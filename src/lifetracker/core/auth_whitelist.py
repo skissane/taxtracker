@@ -28,7 +28,7 @@ class WhitelistEntry:
     methods: tuple[str, ...]
     prefix: bool = False
 
-    def matches(self, method, path):
+    def matches(self, method: str, path: str) -> bool:
         if method not in self.methods:
             return False
         if self.prefix:
@@ -36,7 +36,7 @@ class WhitelistEntry:
         return path == self.path
 
 
-def auth_whitelist():
+def auth_whitelist() -> list[WhitelistEntry]:
     """The ``WhitelistEntry`` list."""
     return [
         WhitelistEntry(reverse("admin:login"), (*_GET, "POST")),
@@ -59,6 +59,6 @@ def auth_whitelist():
     ]
 
 
-def is_whitelisted(method, path):
+def is_whitelisted(method: str, path: str) -> bool:
     """Whether a ``method`` request to ``path`` (``request.path``) needs no login."""
     return any(entry.matches(method, path) for entry in auth_whitelist())

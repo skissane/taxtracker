@@ -39,6 +39,7 @@ session out once.
 
 import base64
 import contextlib
+import datetime
 import hashlib
 import json
 import logging
@@ -46,14 +47,19 @@ import os
 import secrets
 import tempfile
 import threading
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from django.conf import settings
 from django.contrib.auth import logout
+from django.contrib.auth.base_user import AbstractBaseUser
 from django.core.exceptions import ImproperlyConfigured
+from django.http import HttpRequest
+from django.http.response import HttpResponseBase
 from django.utils import timezone
 from django.utils.crypto import salted_hmac
 from jwt.algorithms import OKPAlgorithm
@@ -74,11 +80,11 @@ JWT_AUDIENCE = "lifetracker-web"
 # it can't disagree.
 SESSION_KEY = "_lifetracker_jwt"
 
-_keys = {}
+_keys: dict[tuple[Path, Path], tuple[Ed25519PrivateKey, str]] = {}
 _keys_lock = threading.Lock()
 
 
-def _jwk_thumbprint(jwk):
+def _jwk_thumbprint(jwk: dict[str, Any]) -> str:
     """The RFC 7638 thumbprint of an OKP ``jwk``, used as its ``kid``."""
     required = {name: jwk[name] for name in ("crv", "kty", "x")}
     canonical = json.dumps(required, separators=(",", ":"), sort_keys=True)
@@ -86,7 +92,7 @@ def _jwk_thumbprint(jwk):
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
-def _create_private_key_file(path):
+def _create_private_key_file(path: Path) -> bytes:
     """Write a new key to ``path``, unless another process got there first.
 
     Returns the PEM that's at ``path`` afterwards, whichever process wrote it.
@@ -114,7 +120,7 @@ def _create_private_key_file(path):
     return pem
 
 
-def _write_jwks(jwk, path):
+def _write_jwks(jwk: dict[str, Any], path: Path) -> None:
     """Write a JWKS of ``jwk`` to ``path``, unless it's already there."""
     content = json.dumps({"keys": [jwk]}, indent=2) + "\n"
     with contextlib.suppress(OSError):
@@ -133,7 +139,7 @@ def _write_jwks(jwk, path):
         raise
 
 
-def signing_key():
+def signing_key() -> tuple[Ed25519PrivateKey, str]:
     """The private key and its ``kid``, creating the key (and JWKS) if need be.
 
     Loaded once per process, for each pair of file paths.
@@ -158,13 +164,13 @@ def signing_key():
         return key, kid
 
 
-def session_id_claim(session_key):
+def session_id_claim(session_key: str) -> str:
     """The ``sid`` claim for a session: keyed by ``SECRET_KEY``, so the cookie
     reveals nothing about the session key."""
     return salted_hmac("lifetracker.core.jwt_auth.sid", session_key, algorithm="sha256").hexdigest()
 
 
-def issue_token(user, session_key, expires_at):
+def issue_token(user: AbstractBaseUser, session_key: str, expires_at: datetime.datetime) -> str:
     """A signed JWT for ``user``'s session, expiring at ``expires_at``."""
     key, kid = signing_key()
     claims = {
@@ -179,7 +185,7 @@ def issue_token(user, session_key, expires_at):
     return jwt.encode(claims, key, algorithm=JWT_ALGORITHM, headers={"kid": kid})
 
 
-def token_problem(token, user, session_key):
+def token_problem(token: str, user: AbstractBaseUser, session_key: str) -> str | None:
     """Why ``token`` isn't valid for ``user``'s session, or ``None`` if it is."""
     key, _ = signing_key()
     try:
@@ -208,27 +214,29 @@ class JWTCookieMiddleware:
     handling has to come after anything else that might change the session.
     """
 
-    def __init__(self, get_response):
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponseBase]) -> None:
         self.get_response = get_response
 
-    def __call__(self, request):
+    def __call__(self, request: HttpRequest) -> HttpResponseBase:
         self._check_cookie(request)
         response = self.get_response(request)
         self._update_cookie(request, response)
         return response
 
-    def _check_cookie(self, request):
+    def _check_cookie(self, request: HttpRequest) -> None:
         stored = request.session.get(SESSION_KEY)
         if stored is None or not request.user.is_authenticated:
             return
         cookie = request.COOKIES.get(JWT_COOKIE_NAME)
-        problem = token_problem(cookie, request.user, request.session.session_key) if cookie else "it's missing"
+        session_key = request.session.session_key
+        assert session_key is not None  # an authenticated session has been saved
+        problem = token_problem(cookie, request.user, session_key) if cookie else "it's missing"
         if problem is None:
             return
         logger.warning("Logging out user %s: JWT cookie: %s", request.user.pk, problem)
         logout(request)
 
-    def _update_cookie(self, request, response):
+    def _update_cookie(self, request: HttpRequest, response: HttpResponseBase) -> None:
         user = getattr(request, "user", None)
         if user is None or not user.is_authenticated:
             if JWT_COOKIE_NAME in request.COOKIES:
@@ -247,6 +255,7 @@ class JWTCookieMiddleware:
         if session.get(SESSION_KEY) == record and not session.modified and not settings.SESSION_SAVE_EVERY_REQUEST:
             return
         session[SESSION_KEY] = record
+        assert session.session_key is not None  # an authenticated session has been saved
         token = issue_token(user, session.session_key, session.get_expiry_date())
         response.set_cookie(
             JWT_COOKIE_NAME,

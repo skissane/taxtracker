@@ -14,18 +14,21 @@ page's Google button passes on the page's own ``next``, which is ``/`` when the
 proxy redirects a logged-out visit to the bare domain.
 """
 
+from collections.abc import Callable
 from functools import wraps
+from typing import Any
 
-from django.http import Http404
+from django.http import Http404, HttpRequest
+from django.http.response import HttpResponseBase
 from django.urls import path, reverse
 from django_google_sso import conf, views
 
 app_name = "django_google_sso"
 
 
-def _require_sso_enabled(view):
+def _require_sso_enabled(view: Callable[..., HttpResponseBase]) -> Callable[..., HttpResponseBase]:
     @wraps(view)
-    def wrapper(request, *args, **kwargs):
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         if not conf.GOOGLE_SSO_ENABLED:
             raise Http404("Google SSO is not enabled.")
         return view(request, *args, **kwargs)
@@ -33,14 +36,15 @@ def _require_sso_enabled(view):
     return wrapper
 
 
-def _admin_next_only(view):
+def _admin_next_only(view: Callable[..., HttpResponseBase]) -> Callable[..., HttpResponseBase]:
     @wraps(view)
-    def wrapper(request, *args, **kwargs):
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         next_url = request.GET.get("next")
         if next_url is not None and not next_url.startswith(reverse("admin:index")):
             # Without it, the library goes to GOOGLE_SSO_NEXT_URL, the admin index.
-            request.GET = request.GET.copy()
-            del request.GET["next"]
+            query = request.GET.copy()
+            del query["next"]
+            request.GET = query  # type: ignore[assignment]  # replacing the immutable QueryDict
         return view(request, *args, **kwargs)
 
     return wrapper

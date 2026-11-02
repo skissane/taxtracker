@@ -9,14 +9,15 @@ reads (``core.client_ips``), which this deletes if it exists, or to
 """
 
 from pathlib import Path
+from typing import Any
 
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from lifetracker.core import client_ips, envoy_config
 from lifetracker.core.jwt_auth import signing_key
 
 
-def _request_log():
+def _request_log() -> Path:
     config = client_ips.config_from_env()
     if config.db_path is None:
         return Path("/dev/null")
@@ -30,7 +31,7 @@ def _request_log():
 class Command(BaseCommand):
     help = "Write Envoy's config, filled in from the settings and URLconf."
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("template", type=Path, help="envoy/envoy.yaml")
         parser.add_argument("output", type=Path, help="Where to write the config.")
         parser.add_argument("--listen-host", required=True, help="The IP address Envoy listens on.")
@@ -42,7 +43,16 @@ class Command(BaseCommand):
             help="Gunicorn's port on 127.0.0.1.",
         )
 
-    def handle(self, *args, template, output, listen_host, listen_port, upstream_port, **opts):
+    def handle(
+        self,
+        *args: Any,
+        template: Path,
+        output: Path,
+        listen_host: str,
+        listen_port: int,
+        upstream_port: int,
+        **opts: Any,
+    ) -> None:
         try:
             config = envoy_config.render(
                 template.read_text(encoding="utf-8"),

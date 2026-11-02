@@ -9,16 +9,20 @@ outer middleware), so it's slightly less than the header's figure.
 """
 
 import time
+from collections.abc import Callable
+
+from django.http import HttpRequest
+from django.http.response import HttpResponseBase
 
 REQUEST_START_ATTR = "lifetracker_start_time"
 
 
-def elapsed_seconds(request):
+def elapsed_seconds(request: HttpRequest) -> float | None:
     """Seconds since the middleware saw ``request``, or ``None`` if it didn't."""
     start = getattr(request, REQUEST_START_ATTR, None)
     if start is None:
         return None
-    return time.perf_counter() - start
+    return float(time.perf_counter() - start)
 
 
 class RequestTimingMiddleware:
@@ -27,12 +31,12 @@ class RequestTimingMiddleware:
     List it first in ``MIDDLEWARE``, so the time covers the other middleware.
     """
 
-    def __init__(self, get_response):
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponseBase]) -> None:
         self.get_response = get_response
 
-    def __call__(self, request):
+    def __call__(self, request: HttpRequest) -> HttpResponseBase:
         setattr(request, REQUEST_START_ATTR, time.perf_counter())
         response = self.get_response(request)
-        duration_ms = elapsed_seconds(request) * 1000
+        duration_ms = (elapsed_seconds(request) or 0.0) * 1000
         response.headers["Server-Timing"] = f"app;dur={duration_ms:.1f}"
         return response

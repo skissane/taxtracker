@@ -7,7 +7,7 @@ class CoreConfig(AppConfig):
     label = "core"
     verbose_name = "Core"
 
-    def ready(self):
+    def ready(self) -> None:
         # Imported here: it imports models, which aren't loaded until now.
         from lifetracker.core.attachments import (  # noqa: PLC0415
             database_storage_file_fields,

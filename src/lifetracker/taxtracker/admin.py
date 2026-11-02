@@ -1,20 +1,24 @@
-import io
+import datetime
 import os
 import re
 import shutil
 import tempfile
 import zipfile
 from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from pathlib import Path
+from typing import IO, Any
 
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
+from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
-from django.db.models import Prefetch
-from django.http import FileResponse, HttpResponse
+from django.db.models import Prefetch, QuerySet
+from django.http import FileResponse, HttpRequest, HttpResponse
+from django.http.response import HttpResponseBase
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.response import TemplateResponse
-from django.urls import path, reverse
+from django.urls import URLPattern, path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
 
@@ -45,13 +49,13 @@ from lifetracker.taxtracker.models import (
 # ---------------------------------------------------------------------------
 
 
-def _attachment_date_warning(obj):
+def _attachment_date_warning(obj: Attachment) -> str:
     """Return an HTML warning span if *obj*'s date falls outside its financial year."""
     if not obj.pk or not obj.date:
         return ""
-    if obj.item_id:
+    if obj.item is not None:
         fy = obj.item.year
-    elif obj.received_document_id:
+    elif obj.received_document is not None:
         fy = obj.received_document.year
     else:
         return ""
@@ -71,10 +75,10 @@ def _attachment_date_warning(obj):
 _RECEIVED_DOC_YEAR_RE = re.compile(r"^(\d{4})(?!\d)")
 
 
-def _item_path_signature(item):
+def _item_path_signature(item: Item) -> list[tuple[str, int]]:
     """Return root→leaf signature for an item path as ``[(title, order), ...]``."""
     signature = []
-    current = item
+    current: Item | None = item
     visited = set()
     while current is not None and current.pk not in visited:
         visited.add(current.pk)
@@ -83,7 +87,7 @@ def _item_path_signature(item):
     return list(reversed(signature))
 
 
-def _find_equivalent_item(path_signature, target_fy):
+def _find_equivalent_item(path_signature: list[tuple[str, int]], target_fy: FinancialYear) -> Item | None:
     """Find the equivalent item in ``target_fy`` by matching title/order path."""
     parent_id = None
     current = None
@@ -103,7 +107,7 @@ def _find_equivalent_item(path_signature, target_fy):
     return current
 
 
-def _existing_attachment_names(**filters):
+def _existing_attachment_names(**filters: Any) -> set[str]:
     """Return the basename of every stored file name matching *filters*."""
     return {
         Path(file_name).name
@@ -112,16 +116,16 @@ def _existing_attachment_names(**filters):
     }
 
 
-def _save_imported_attachment(attachment, filename, file_bytes):
+def _save_imported_attachment(attachment: Attachment, filename: str, file_bytes: bytes) -> None:
     """Store *file_bytes* as *attachment*'s file under *filename*, then save the row."""
     # save=False: store the file in the storage backend now but don't yet
     # write the Attachment row; attachment.save() below will auto-extract
     # the title, date, and file_type from the filename before persisting.
-    attachment.file.save(filename, io.BytesIO(file_bytes), save=False)
+    attachment.file.save(filename, ContentFile(file_bytes), save=False)
     attachment.save()
 
 
-def _extract_archive(request, file_bytes, filename):
+def _extract_archive(request: HttpRequest, file_bytes: bytes, filename: str) -> Any:
     """Extract an uploaded archive, reporting an unsupported one as an error message.
 
     Returns ``(extracted, archive_skipped_names, had_error)``.
@@ -134,7 +138,7 @@ def _extract_archive(request, file_bytes, filename):
     return extracted, archive_skipped_names, False
 
 
-def _warn_skipped(request, names, reason):
+def _warn_skipped(request: HttpRequest, names: Iterable[str], reason: str) -> None:
     """Add a warning listing the distinct *names* skipped for *reason*, if there are any."""
     if names:
         unique_names = list(dict.fromkeys(names))
@@ -157,15 +161,15 @@ class AttachmentInlineBase(admin.TabularInline):
     autocomplete_fields = ("file_type",)
     select_related_path: str
 
-    def get_queryset(self, request):
+    def get_queryset(self, request: HttpRequest) -> QuerySet[Attachment]:
         return super().get_queryset(request).select_related(self.select_related_path)
 
     @admin.display(description="")
-    def date_warning(self, obj):
+    def date_warning(self, obj: Attachment) -> str:
         return _attachment_date_warning(obj)
 
     @admin.display(description="Edit")
-    def change_link(self, obj):
+    def change_link(self, obj: Attachment) -> str:
         if not obj.pk:
             return "—"
         url = reverse("admin:taxtracker_attachment_change", args=[obj.pk])
@@ -209,7 +213,7 @@ class ItemAdmin(admin.ModelAdmin):
     # Custom URLs
     # ------------------------------------------------------------------
 
-    def get_urls(self):
+    def get_urls(self) -> list[URLPattern]:
         custom = [
             path(
                 "<int:pk>/import-archive/",
@@ -225,21 +229,21 @@ class ItemAdmin(admin.ModelAdmin):
         return custom + super().get_urls()
 
     @admin.display(description="Year")
-    def year_link(self, obj):
+    def year_link(self, obj: Item) -> str:
         url = reverse("admin:taxtracker_financialyear_change", args=[obj.year_id])
         return format_html('<a href="{}">{}</a>', url, obj.year)
 
-    def get_queryset(self, request):
+    def get_queryset(self, request: HttpRequest) -> QuerySet[Item]:
         return super().get_queryset(request).select_related("year", "parent")
 
-    def get_fields(self, request, obj=None):
+    def get_fields(self, request: HttpRequest, obj: Any = None) -> Any:
         fields = list(super().get_fields(request, obj))
         # Child items cannot have a different year from their parent — hide the field.
         if obj and obj.parent_id:
             fields = [f for f in fields if f != "year"]
         return fields
 
-    def save_formset(self, request, form, formset, change):
+    def save_formset(self, request: HttpRequest, form: Any, formset: Any, change: Any) -> None:
         instances = formset.save(commit=False)
         # Batch-fetch year_id for all parent IDs to avoid N+1 queries.
         parent_ids = {i.parent_id for i in instances if isinstance(i, Item) and i.parent_id}
@@ -249,15 +253,18 @@ class ItemAdmin(admin.ModelAdmin):
         for instance in instances:
             # Auto-inherit year from parent for inline-created child items.
             if isinstance(instance, Item) and instance.parent_id:
+                assert instance.parent is not None  # parent_id is set
                 instance.year_id = year_by_parent_id.get(instance.parent_id, instance.parent.year_id)
             instance.save()
         formset.save_m2m()
         for obj in formset.deleted_objects:
             obj.delete()
 
-    def change_view(self, request, object_id, form_url="", extra_context=None):
+    def change_view(
+        self, request: HttpRequest, object_id: Any, form_url: Any = "", extra_context: Any = None
+    ) -> HttpResponse:
         response = super().change_view(request, object_id, form_url, extra_context)
-        if not isinstance(response, TemplateResponse):
+        if not isinstance(response, TemplateResponse) or response.context_data is None:
             return response
 
         item = response.context_data.get("original")
@@ -280,7 +287,7 @@ class ItemAdmin(admin.ModelAdmin):
     # Import archive view
     # ------------------------------------------------------------------
 
-    def import_archive_view(self, request, pk):
+    def import_archive_view(self, request: HttpRequest, pk: Any) -> HttpResponse:
         item = get_object_or_404(Item, pk=pk)
 
         # Check that the requesting user can change this Item and can add
@@ -340,7 +347,7 @@ class ItemAdmin(admin.ModelAdmin):
     # Reassign out-of-year attachments view
     # ------------------------------------------------------------------
 
-    def reassign_attachments_view(self, request, pk):
+    def reassign_attachments_view(self, request: HttpRequest, pk: Any) -> HttpResponse:
         item = get_object_or_404(Item.objects.select_related("year", "parent"), pk=pk)
 
         if not self.has_change_permission(request, item):
@@ -352,7 +359,7 @@ class ItemAdmin(admin.ModelAdmin):
         attachments = list(item.attachments.all().order_by("date", "title", "pk"))
         path_signature = _item_path_signature(item)
         target_cache = {}
-        rows = []
+        rows: list[dict[str, Any]] = []
 
         for attachment in attachments:
             if attachment.date is None or item.year.start_date <= attachment.date <= item.year.end_date:
@@ -485,7 +492,7 @@ class AttachmentAdmin(admin.ModelAdmin):
     )
 
     @admin.display(description="")
-    def date_warning(self, obj):
+    def date_warning(self, obj: Attachment) -> str:
         return _attachment_date_warning(obj)
 
 
@@ -504,18 +511,18 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
     fields = ("year", "title", "date", "notes")
 
     @admin.display(description="Year")
-    def year_link(self, obj):
+    def year_link(self, obj: ReceivedDocument) -> str:
         url = reverse("admin:taxtracker_financialyear_change", args=[obj.year_id])
         return format_html('<a href="{}">{}</a>', url, obj.year)
 
-    def get_queryset(self, request):
+    def get_queryset(self, request: HttpRequest) -> QuerySet[ReceivedDocument]:
         return super().get_queryset(request).select_related("year")
 
     # ------------------------------------------------------------------
     # Custom URLs
     # ------------------------------------------------------------------
 
-    def get_urls(self):
+    def get_urls(self) -> list[URLPattern]:
         custom = [
             path(
                 "import-archive/",
@@ -529,7 +536,7 @@ class ReceivedDocumentAdmin(admin.ModelAdmin):
     # Import archive view
     # ------------------------------------------------------------------
 
-    def import_archive_view(self, request):
+    def import_archive_view(self, request: HttpRequest) -> HttpResponse:
         if not self.has_add_permission(request):
             raise PermissionDenied
         attachment_admin = self.admin_site._registry.get(Attachment)
@@ -667,7 +674,7 @@ def _adjust_notes_headings(notes: str, item_heading_level: int) -> str:
     return "".join(lines)
 
 
-def _safe_component(title):
+def _safe_component(title: str) -> str:
     """Sanitize a title for safe use as a ZIP path component.
 
     Prevents Zip Slip by replacing path separators and eliminating ``..``
@@ -680,9 +687,9 @@ def _safe_component(title):
     return safe or "_"
 
 
-def _folder_path(item, item_map):
+def _folder_path(item: Item, item_map: dict[int, Item]) -> str:
     """Return a POSIX path string representing the item hierarchy."""
-    parts = []
+    parts: list[str] = []
     current = item
     visited = set()
     while True:
@@ -693,13 +700,15 @@ def _folder_path(item, item_map):
         parts.insert(0, _safe_component(current.title))
         if current.parent_id is None:
             break
-        current = item_map.get(current.parent_id, current.parent)
+        parent = item_map.get(current.parent_id) or current.parent
+        assert parent is not None  # parent_id is set
+        current = parent
     return "/".join(parts)
 
 
-def _tree_rows_and_unreachable_items(items):
+def _tree_rows_and_unreachable_items(items: Sequence[Item]) -> tuple[list[dict[str, Any]], list[Item]]:
     """Return (tree_rows, unreachable_items) for a list of items."""
-    children_map = {}
+    children_map: dict[Any, Any] = {}
     for item in items:
         children_map.setdefault(item.parent_id, []).append(item)
 
@@ -707,7 +716,7 @@ def _tree_rows_and_unreachable_items(items):
 
     # Each item has one parent, so a walk down from the roots can't revisit an
     # item; items in a parent cycle (and their descendants) are never reached.
-    def item_tree(item, depth=0):
+    def item_tree(item: Item, depth: int = 0) -> list[dict[str, Any]]:
         visited.add(item.pk)
         rows = [{"item": item, "depth": depth}]
         for child in children_map.get(item.pk, []):
@@ -721,7 +730,7 @@ def _tree_rows_and_unreachable_items(items):
     return tree_rows, unreachable_items
 
 
-def _dedupe_name(name, used, keep_extension=False):
+def _dedupe_name(name: str, used: set[str], keep_extension: bool = False) -> str:
     """Return *name*, suffixed `` (2)``, `` (3)``... if *used* already has it.
 
     *used* holds casefolded names, as archives are often extracted onto
@@ -738,7 +747,7 @@ def _dedupe_name(name, used, keep_extension=False):
     return candidate
 
 
-def _unique_folder_paths(items):
+def _unique_folder_paths(items: Sequence[Item]) -> tuple[dict[int, str], defaultdict[str, set[str]]]:
     """Return ({item pk: folder path}, {folder path: casefolded names in it}).
 
     Siblings whose titles are the same after _safe_component() get suffixed
@@ -747,7 +756,7 @@ def _unique_folder_paths(items):
     The second dict lets attachments avoid names already taken in a folder.
     """
     tree_rows, unreachable_items = _tree_rows_and_unreachable_items(items)
-    folder_paths = {}
+    folder_paths: dict[Any, Any] = {}
     used_names = defaultdict(set)
     used_names[""].add("index.md")
     for row in tree_rows:
@@ -765,7 +774,7 @@ def _unique_folder_paths(items):
     return folder_paths, used_names
 
 
-def _build_fy_index_md(fy, prefix="", zf=None):
+def _build_fy_index_md(fy: FinancialYear, prefix: str = "", zf: zipfile.ZipFile | None = None) -> str:
     """Return the index.md content string for one FinancialYear.
 
     If *zf* is given, each attachment is also written into that ZipFile.
@@ -799,15 +808,16 @@ def _build_fy_index_md(fy, prefix="", zf=None):
         fp = folder_paths[item.pk]
         index_lines.append(f"## {fp}\n")
         for attachment in attachments:
-            safe_name = _safe_component(attachment.file.name.split("/")[-1])
+            safe_name = _safe_component((attachment.file.name or "").split("/")[-1])
             safe_name = _dedupe_name(safe_name, used_names[fp], keep_extension=True)
-            zip_path = f"{prefix}{fp}/{safe_name}"
+            entry_path = f"{prefix}{fp}/{safe_name}"
+            zip_path: str | None = entry_path
             missing = False
             try:
                 if zf is not None:
                     with (
                         attachment.file.open("rb") as fh,
-                        zf.open(zip_path, "w") as dest,
+                        zf.open(entry_path, "w") as dest,
                     ):
                         shutil.copyfileobj(fh, dest)
                 else:
@@ -835,7 +845,7 @@ def _build_fy_index_md(fy, prefix="", zf=None):
     return "".join(index_lines)
 
 
-def _write_fy_to_zip(zf, fy, prefix=""):
+def _write_fy_to_zip(zf: zipfile.ZipFile, fy: FinancialYear, prefix: str = "") -> None:
     """Write one FY's files and index.md into an open ZipFile under *prefix*."""
     index_md = _build_fy_index_md(fy, prefix=prefix, zf=zf)
     zf.writestr(f"{prefix}index.md", index_md)
@@ -846,17 +856,17 @@ def _write_fy_to_zip(zf, fy, prefix=""):
 _ZIP_SPOOL_MAX_SIZE = 10 * 1024 * 1024
 
 
-def _zip_buffer():
+def _zip_buffer() -> tempfile.SpooledTemporaryFile[bytes]:
     """Return a file to build a ZIP in: in memory while small, then on disk."""
     return tempfile.SpooledTemporaryFile(max_size=_ZIP_SPOOL_MAX_SIZE)
 
 
-def _zip_response(buf, filename):
+def _zip_response(buf: IO[bytes], filename: str) -> FileResponse:
     """Stream the ZIP in *buf* as a download, closing *buf* once it's sent."""
     return FileResponse(buf, as_attachment=True, filename=filename, content_type="application/zip")
 
 
-def _build_zip(fy):
+def _build_zip(fy: FinancialYear) -> IO[bytes]:
     """Build a ZIP file for all attachments of a FinancialYear."""
     buf = _zip_buffer()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -865,7 +875,7 @@ def _build_zip(fy):
     return buf
 
 
-def _build_multi_zip(fys):
+def _build_multi_zip(fys: Iterable[FinancialYear]) -> IO[bytes]:
     """Build a ZIP with each FinancialYear under its own top-level directory."""
     buf = _zip_buffer()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -875,7 +885,7 @@ def _build_multi_zip(fys):
     return buf
 
 
-def _build_multi_index_md(fys):
+def _build_multi_index_md(fys: Iterable[FinancialYear]) -> str:
     """Concatenate index.md content for each FY, separated by horizontal rules."""
     parts = [_build_fy_index_md(fy, prefix=f"{fy}/") for fy in fys]
     return "\n\n---\n\n".join(parts)
@@ -907,7 +917,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # Custom URLs
     # ------------------------------------------------------------------
 
-    def get_urls(self):
+    def get_urls(self) -> list[URLPattern]:
         custom = [
             path(
                 "<int:pk>/summary/",
@@ -937,20 +947,20 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # ------------------------------------------------------------------
 
     @admin.display(description="Financial Year")
-    def name(self, obj):
+    def name(self, obj: FinancialYear) -> str:
         return str(obj)
 
     @admin.display(description="Period")
-    def period(self, obj):
+    def period(self, obj: FinancialYear) -> str:
         return f"{obj.start_date} – {obj.end_date}"
 
     @admin.display(description="Lodgement Date")
-    def lodgement_date_display(self, obj):
+    def lodgement_date_display(self, obj: FinancialYear) -> str:
         suffix = "" if obj.lodgement_date_override is None else " ★"
         return f"{obj.effective_lodgement_date}{suffix}"
 
     @admin.display(description="Days Until Lodgement")
-    def days_until_lodgement_display(self, obj):
+    def days_until_lodgement_display(self, obj: FinancialYear) -> str:
         d = obj.days_until_lodgement
         if d > 0:
             return f"{d} days"
@@ -960,12 +970,12 @@ class FinancialYearAdmin(admin.ModelAdmin):
             return f"{abs(d)} days ago"
 
     @admin.display(description="Summary")
-    def summary_link(self, obj):
+    def summary_link(self, obj: FinancialYear) -> str:
         url = reverse("admin:taxtracker_financialyear_summary", args=[obj.pk])
         return format_html('<a href="{}">View Summary</a>', url)
 
     @admin.display(description="Download")
-    def download_zip_link(self, obj):
+    def download_zip_link(self, obj: FinancialYear) -> str:
         url = reverse("admin:taxtracker_financialyear_download_zip", args=[obj.pk])
         return format_html('<a href="{}">Download ZIP</a>', url)
 
@@ -977,22 +987,22 @@ class FinancialYearAdmin(admin.ModelAdmin):
     }
 
     @admin.display(description="Status")
-    def status_display(self, obj):
+    def status_display(self, obj: FinancialYear) -> str:
         return self._STATUS_SHORT_LABELS.get(obj.status, obj.get_status_display())
 
     @admin.display(description="Status Since")
-    def status_since_display(self, obj):
+    def status_since_display(self, obj: FinancialYear) -> str | datetime.date:
         dt = obj.current_status_transitioned_at
         return timezone.localdate(dt) if dt else "—"
 
-    def get_queryset(self, request):
+    def get_queryset(self, request: HttpRequest) -> QuerySet[FinancialYear]:
         return super().get_queryset(request).prefetch_related("status_history")
 
     # ------------------------------------------------------------------
     # Changelist view override (inject multi-year ZIP URL)
     # ------------------------------------------------------------------
 
-    def changelist_view(self, request, extra_context=None):
+    def changelist_view(self, request: HttpRequest, extra_context: Any = None) -> HttpResponse:
         extra_context = extra_context or {}
         extra_context["download_multi_zip_url"] = reverse("admin:taxtracker_financialyear_download_multi_zip")
         return super().changelist_view(request, extra_context)
@@ -1001,7 +1011,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # Summary view
     # ------------------------------------------------------------------
 
-    def summary_view(self, request, pk):
+    def summary_view(self, request: HttpRequest, pk: Any) -> HttpResponse:
         fy = get_object_or_404(FinancialYear, pk=pk)
         if not self.has_view_permission(request, fy):
             raise PermissionDenied
@@ -1036,7 +1046,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # ZIP download view
     # ------------------------------------------------------------------
 
-    def _check_export_permission(self, request, fy=None):
+    def _check_export_permission(self, request: HttpRequest, fy: FinancialYear | None = None) -> None:
         """Raise PermissionDenied unless the user can view what a ZIP exports.
 
         A ZIP (or its index) holds the year's items, their notes and every
@@ -1050,7 +1060,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
             if model_admin is None or not model_admin.has_view_permission(request):
                 raise PermissionDenied
 
-    def download_zip_view(self, request, pk):
+    def download_zip_view(self, request: HttpRequest, pk: Any) -> FileResponse:
         fy = get_object_or_404(FinancialYear, pk=pk)
         self._check_export_permission(request, fy)
         return _zip_response(_build_zip(fy), f"{fy}_attachments.zip")
@@ -1059,7 +1069,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # Multi-year ZIP download view
     # ------------------------------------------------------------------
 
-    def download_multi_zip_view(self, request):
+    def download_multi_zip_view(self, request: HttpRequest) -> HttpResponseBase:
         self._check_export_permission(request)
         all_fys = list(FinancialYear.objects.order_by("year").prefetch_related("status_history"))
         error = None
@@ -1109,7 +1119,7 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # Copy to new year view
     # ------------------------------------------------------------------
 
-    def copy_to_new_year_view(self, request, pk):
+    def copy_to_new_year_view(self, request: HttpRequest, pk: Any) -> HttpResponse:
         fy = get_object_or_404(FinancialYear, pk=pk)
         if not self.has_view_permission(request, fy):
             raise PermissionDenied
@@ -1168,12 +1178,14 @@ class FinancialYearAdmin(admin.ModelAdmin):
     # Change-object buttons
     # ------------------------------------------------------------------
 
-    def change_view(self, request, object_id, form_url="", extra_context=None):
+    def change_view(
+        self, request: HttpRequest, object_id: Any, form_url: Any = "", extra_context: Any = None
+    ) -> HttpResponse:
         # Let the admin look the object up first, so a malformed or unknown ID
         # gets its usual redirect rather than reaching the queries below; a
         # successful POST redirects too.
         response = super().change_view(request, object_id, form_url, extra_context)
-        if not isinstance(response, TemplateResponse):
+        if not isinstance(response, TemplateResponse) or response.context_data is None:
             return response
 
         # Reverse with fy.pk, not object_id: the admin accepts e.g. "+1", which <int:pk> URLs don't.
@@ -1192,14 +1204,14 @@ class FinancialYearAdmin(admin.ModelAdmin):
 # ---------------------------------------------------------------------------
 
 
-def _copy_items(source_fy, dest_fy):
+def _copy_items(source_fy: FinancialYear, dest_fy: FinancialYear) -> list[Item]:
     """Copy the item hierarchy from *source_fy* to *dest_fy*.
 
     Notes, status and attachments are NOT copied.
     """
     source_items = list(source_fy.items.order_by("order", "title"))
     tree_rows, unreachable_items = _tree_rows_and_unreachable_items(source_items)
-    old_to_new = {}
+    old_to_new: dict[Any, Any] = {}
     for row in tree_rows:
         item = row["item"]
         new_item = Item.objects.create(

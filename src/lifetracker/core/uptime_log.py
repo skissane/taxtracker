@@ -204,7 +204,7 @@ class UptimeLog:
     """Marks seconds as up in the day files in ``directory``. Only one should
     write to a directory at a time, as it keeps the current day in memory."""
 
-    def __init__(self, directory: Path):
+    def __init__(self, directory: Path) -> None:
         self.directory = directory
         self.day: int | None = None
         self.data = bytearray(DAY_FILE_SIZE)

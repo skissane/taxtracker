@@ -1,5 +1,7 @@
 import datetime
+from collections.abc import Collection, Iterable
 from pathlib import Path
+from typing import Any, Self
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -48,11 +50,13 @@ class FinancialYear(models.Model):
         verbose_name = "Financial Year"
         verbose_name_plural = "Financial Years"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"FY{self.year}"
 
     @classmethod
-    def from_db(cls, db, field_names, values, *, fetch_mode=None):
+    def from_db(
+        cls, db: str | None, field_names: Collection[str], values: Collection[Any], *, fetch_mode: Any = None
+    ) -> Self:
         instance = super().from_db(db, field_names, values, fetch_mode=fetch_mode)
         # Reading a deferred status would load it with a query of its own, so
         # leave _loaded_status unset; save() then reads the previous status.
@@ -60,35 +64,37 @@ class FinancialYear(models.Model):
             instance._loaded_status = instance.status
         return instance
 
-    def refresh_from_db(self, using=None, fields=None, from_queryset=None):
+    def refresh_from_db(
+        self, using: str | None = None, fields: Iterable[str] | None = None, from_queryset: Any = None
+    ) -> None:
         fields = None if fields is None else set(fields)
         super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
         if fields is None or "status" in fields:
             self._loaded_status = self.status
 
     @property
-    def start_date(self):
+    def start_date(self) -> datetime.date:
         return datetime.date(self.year - 1, 7, 1)
 
     @property
-    def end_date(self):
+    def end_date(self) -> datetime.date:
         return datetime.date(self.year, 6, 30)
 
     @property
-    def default_lodgement_date(self):
+    def default_lodgement_date(self) -> datetime.date:
         return datetime.date(self.year, 10, 31)
 
     @property
-    def effective_lodgement_date(self):
+    def effective_lodgement_date(self) -> datetime.date:
         return self.lodgement_date_override or self.default_lodgement_date
 
     @property
-    def days_until_lodgement(self):
+    def days_until_lodgement(self) -> int:
         today = timezone.localdate()
         return (self.effective_lodgement_date - today).days
 
     @property
-    def current_status_transitioned_at(self):
+    def current_status_transitioned_at(self) -> datetime.datetime | None:
         if hasattr(self, "_prefetched_objects_cache") and "status_history" in self._prefetched_objects_cache:
             matching = [
                 history
@@ -97,14 +103,15 @@ class FinancialYear(models.Model):
             ]
             if not matching:
                 return None
-            return max(
+            result: datetime.datetime = max(
                 matching,
                 key=lambda history: (history.transitioned_at, history.pk),
             ).transitioned_at
+            return result
         latest = self.status_history.filter(to_status=self.status).order_by("-transitioned_at", "-pk").first()
         return latest.transitioned_at if latest else None
 
-    def save(self, *args, **kwargs):
+    def save(self, *args: Any, **kwargs: Any) -> None:
         update_fields = kwargs.get("update_fields")
         status_being_saved = update_fields is None or "status" in update_fields
         previous_status = None
@@ -148,7 +155,7 @@ class FinancialYearStatusHistory(models.Model):
         verbose_name = "Financial Year Status Transition"
         verbose_name_plural = "Financial Year Status Transitions"
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.from_status:
             return (
                 f"{self.financial_year}: {self.get_from_status_display()} → "
@@ -189,10 +196,10 @@ class Item(TreeNodeMixin, models.Model):
         verbose_name = "Item"
         verbose_name_plural = "Items"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.year} > {self.tree_path_str()}"
 
-    def clean(self):
+    def clean(self) -> None:
         if self.parent_id is not None:
             # Enforce year inheritance: child items always share their parent's year.
             try:
@@ -202,7 +209,7 @@ class Item(TreeNodeMixin, models.Model):
                 pass
         self.check_parent_cycle()
 
-    def save(self, *args, **kwargs):
+    def save(self, *args: Any, **kwargs: Any) -> None:
         old_year_id = None
         if self.pk is not None:
             old_year_id = (
@@ -253,7 +260,7 @@ class ReceivedDocument(models.Model):
         verbose_name = "Received Document"
         verbose_name_plural = "Received Documents"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.year}: {self.title}"
 
 
@@ -313,7 +320,7 @@ class Attachment(AttachmentAutofillMixin, models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.title:
             label = self.title
         elif self.file and self.file.name:
@@ -323,7 +330,7 @@ class Attachment(AttachmentAutofillMixin, models.Model):
         parent = self.item or self.received_document
         return f"{label} ({parent})"
 
-    def clean(self):
+    def clean(self) -> None:
         # Check the cached related object too, not just the _id attname: when
         # an Attachment is added inline alongside a brand-new (unsaved) parent,
         # the parent's pk (and hence the child's _id) is still None at

@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
@@ -56,10 +57,10 @@ class TaskType(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
-    def clean(self):
+    def clean(self) -> None:
         is_generic_pk = self.pk == self.GENERIC_PK
         is_generic_name = self.name == "Generic"
         if is_generic_pk != is_generic_name:
@@ -69,10 +70,10 @@ class TaskType(models.Model):
         if is_generic_pk and self.content_type_id is not None:
             raise ValidationError({"content_type": ("The built-in 'Generic' task type cannot be linked to a model.")})
 
-    def delete(self, *args, **kwargs):
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
         if self.pk == self.GENERIC_PK:
             raise ValidationError("The built-in 'Generic' task type cannot be deleted.")
-        super().delete(*args, **kwargs)
+        return super().delete(*args, **kwargs)
 
 
 class Task(TreeNodeMixin, models.Model):
@@ -115,10 +116,10 @@ class Task(TreeNodeMixin, models.Model):
         verbose_name = "Task"
         verbose_name_plural = "Tasks"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.tree_path_str()
 
-    def clean(self):
+    def clean(self) -> None:
         self.check_parent_cycle()
 
         if (self.content_type_id is None) != (self.object_id is None):
@@ -169,7 +170,7 @@ class TaskAttachment(AttachmentAutofillMixin, models.Model):
         verbose_name = "Task Attachment"
         verbose_name_plural = "Task Attachments"
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.title:
             label = self.title
         elif self.file and self.file.name:

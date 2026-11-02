@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from django.core.exceptions import ImproperlyConfigured
+from django.http import HttpRequest
 from django.templatetags.static import static
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -27,7 +28,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 
-def _env_path(name):
+def _env_path(name: str) -> Path | None:
     value = os.environ.get(name)
     return Path(value) if value else None
 
@@ -51,7 +52,7 @@ _default_key_file = LIFETRACKER_CONFIG_DIR / "secret_key"
 _key_file = Path(os.environ.get("LIFETRACKER_SECRET_KEY_FILE", _default_key_file))
 
 
-def _write_new_file_private(path, text):
+def _write_new_file_private(path: Path, text: str) -> None:
     """Create and write a text file with mode 0600."""
     fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -110,7 +111,7 @@ LIFETRACKER_JWT_PRIVATE_KEY_FILE = (
 LIFETRACKER_JWT_JWKS_FILE = _env_path("LIFETRACKER_JWT_JWKS_FILE") or LIFETRACKER_CONFIG_DIR / "jwt_jwks.json"
 
 
-def _env_bool(name, default):
+def _env_bool(name: str, default: bool) -> bool:
     value = os.environ.get(name)
     if value is None:
         return default
@@ -122,7 +123,7 @@ def _env_bool(name, default):
     raise ImproperlyConfigured(f"{name} must be 1/true or 0/false, not {value!r}.")
 
 
-def _env_list(name):
+def _env_list(name: str) -> list[str]:
     items = (item.strip() for item in os.environ.get(name, "").split(","))
     return [item for item in items if item]
 
@@ -278,7 +279,7 @@ LIFETRACKER_BACKUP_STATE_FILE = Path(
 )
 
 
-def fly_machine_url(app_name, machine_id):
+def fly_machine_url(app_name: str, machine_id: str) -> str:
     """The Machine's page in Fly's dashboard, linked from the admin's top bar for
     superusers; empty (no link) unless both are non-blank."""
     app_name, machine_id = app_name.strip(), machine_id.strip()
@@ -300,7 +301,7 @@ GOOGLE_SSO_PROJECT_ID = os.environ.get("LIFETRACKER_GOOGLE_SSO_PROJECT_ID", "").
 GOOGLE_SSO_ENABLED = bool(GOOGLE_SSO_CLIENT_ID and GOOGLE_SSO_CLIENT_SECRET)
 
 
-def _google_sso_logo_url(request):
+def _google_sso_logo_url(request: HttpRequest) -> str:
     # A callable, which the library calls per request, so static() builds the URL
     # from STATIC_URL rather than this repeating it.
     return static("core/google_g_logo.svg")

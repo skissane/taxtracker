@@ -68,6 +68,9 @@ jobs:
       - name: Check formatting with ruff
         run: just fmt-check
 
+      - name: Type-check with mypy
+        run: just mypy
+
       - name: Lint with djlint
         run: just lint-templates
 

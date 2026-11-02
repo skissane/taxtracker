@@ -4,6 +4,9 @@ command line."""
 
 import os
 import sys
+from typing import Any
+
+from django.http import HttpRequest
 
 from lifetracker.core import client_ips, idle_watchdog
 
@@ -19,7 +22,7 @@ access_log_format = '%({fly-client-ip}i)s %(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s 
 _REQUEST_FILE = idle_watchdog.request_file_from_env()
 
 
-def when_ready(server):
+def when_ready(server: Any) -> None:
     # Runs once, in the master, after it starts listening; workers never run
     # it, so they never start a watchdog of their own. Nothing keeps the
     # Popens: the master's reap_workers waits on every child, not just its
@@ -29,14 +32,14 @@ def when_ready(server):
     client_ips.spawn(server.pid)
 
 
-def post_request(worker, req, environ, resp):
+def post_request(worker: Any, req: HttpRequest, environ: Any, resp: Any) -> None:
     # Runs in the workers, after every request (even a failed one), so short
     # requests count as activity although the watchdog's checks rarely catch
     # their connections open.
     idle_watchdog.record_request(_REQUEST_FILE)
 
 
-def on_exit(server):
+def on_exit(server: Any) -> None:
     # Runs in the master as gunicorn shuts down. docker-entrypoint.sh creates
     # this file before stopping gunicorn when Envoy keeps failing, so the
     # container exits 1, a failure Fly restarts it after, rather than 0, which

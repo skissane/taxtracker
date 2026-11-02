@@ -8,7 +8,10 @@ cascade or a ``QuerySet.delete()``) left these behind. A dry run unless given
 nothing else is using the database.
 """
 
-from django.core.management.base import BaseCommand
+from collections.abc import Iterator
+from typing import Any
+
+from django.core.management.base import BaseCommand, CommandParser
 from django.db import transaction
 from django.db.models import Sum
 from django.db.models.functions import Length
@@ -20,7 +23,7 @@ from lifetracker.core.models import DBStoredFile
 _BATCH_SIZE = 500
 
 
-def _batches(pks):
+def _batches(pks: list[int]) -> Iterator[list[int]]:
     for start in range(0, len(pks), _BATCH_SIZE):
         yield pks[start : start + _BATCH_SIZE]
 
@@ -28,14 +31,14 @@ def _batches(pks):
 class Command(BaseCommand):
     help = "Report stored files no attachment refers to, and delete them with --delete."
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "--delete",
             action="store_true",
             help="Delete the orphaned files (default: only report them).",
         )
 
-    def handle(self, *args, delete=False, **options):
+    def handle(self, *args: Any, delete: bool = False, **options: Any) -> None:
         # One transaction, so the count reported matches what's deleted. It
         # doesn't lock out writers until its first delete, so an upload saved
         # while it runs (file first, then the row referring to it) could lose

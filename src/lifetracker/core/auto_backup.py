@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
+from typing import Any
 
 # A backup still running after this long is killed, so a hung upload can't
 # keep the Machine from stopping for ever.
@@ -43,8 +44,8 @@ class AutoBackup:
         *,
         log: Callable[[str], None],
         environ: Mapping[str, str] = os.environ,
-        popen=subprocess.Popen,
-    ):
+        popen: Any = subprocess.Popen,
+    ) -> None:
         self.interval_seconds = interval_seconds
         # The first backup is at startup.
         self.next_run = started_at
@@ -113,7 +114,7 @@ class AutoBackup:
         """When ``tick`` next has something to do."""
         return now + POLL_SECONDS if self.running else self.next_run
 
-    def status(self, iso: Callable[[float | None], str | None]) -> dict:
+    def status(self, iso: Callable[[float | None], str | None]) -> dict[str, Any]:
         """For the watchdog's status file, with times formatted by ``iso``."""
         return {
             "interval_seconds": self.interval_seconds,

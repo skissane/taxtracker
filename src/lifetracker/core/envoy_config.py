@@ -14,6 +14,8 @@ so nothing needs escaping.
 import ipaddress
 import json
 import re
+from pathlib import Path
+from typing import Any
 
 from django.conf import settings
 from django.urls import reverse
@@ -27,11 +29,11 @@ JWT_PROVIDER = "django"
 _PLACEHOLDER = re.compile(r"@([A-Z_]+)@")
 
 
-def _method_header(method):
+def _method_header(method: str) -> dict[str, Any]:
     return {"name": ":method", "string_match": {"exact": method}}
 
 
-def jwt_rules():
+def jwt_rules() -> list[dict[str, Any]]:
     """jwt_authn's rules: the whitelist, needing no JWT, then everything else.
 
     One rule per path and method, each matched exactly, so it's plain from the
@@ -47,7 +49,7 @@ def jwt_rules():
     return rules
 
 
-def login_redirect():
+def login_redirect() -> str:
     """The Location for a request without a valid JWT.
 
     The Lua filter in the template puts the percent-encoded path and query
@@ -60,13 +62,13 @@ def login_redirect():
     return f"{login_path}?next=%DYNAMIC_METADATA(lifetracker:next)%"
 
 
-def _port(name, value):
+def _port(name: str, value: int) -> int:
     if not 1 <= value <= 65535:
         raise ValueError(f"{name} must be from 1 to 65535: {value}")
     return value
 
 
-def render(template, *, listen_host, listen_port, upstream_port, request_log):
+def render(template: str, *, listen_host: str, listen_port: int, upstream_port: int, request_log: str | Path) -> str:
     """``template`` with every placeholder filled in. ``request_log`` is the
     file Envoy logs every request to, for ``client_ips``.
 
@@ -95,7 +97,7 @@ def render(template, *, listen_host, listen_port, upstream_port, request_log):
         "REQUEST_LOG": str(request_log),
     }
 
-    def replace(match):
+    def replace(match: re.Match[str]) -> str:
         try:
             return json.dumps(values[match[1]])
         except KeyError:

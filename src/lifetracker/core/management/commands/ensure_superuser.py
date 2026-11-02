@@ -28,10 +28,11 @@ If the user **exists**:
 import os
 import secrets
 from pathlib import Path
+from typing import Any
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandParser
 
 
 def _initial_admin_password_file() -> Path:
@@ -47,7 +48,7 @@ INITIAL_ADMIN_PASSWORD_FILE = _initial_admin_password_file()
 class Command(BaseCommand):
     help = "Ensure a superuser account exists. Creates or repairs the account non-interactively."
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "--username",
             default="admin",
@@ -59,7 +60,7 @@ class Command(BaseCommand):
             help="Email address (only used when creating a new user).",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         User = get_user_model()
         username = options["username"]
         email = options["email"]

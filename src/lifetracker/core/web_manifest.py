@@ -12,8 +12,10 @@ Its one icon is ``app_icon.current_icon()``, the default or an uploaded one,
 served for every size, as iOS and Android scale it down themselves.
 """
 
+from typing import Any
+
 from django.conf import settings
-from django.http import JsonResponse
+from django.http import HttpRequest, JsonResponse
 from django.urls import reverse
 from django.views.decorators.cache import cache_control
 from django.views.decorators.http import require_safe
@@ -24,7 +26,7 @@ from lifetracker.core.app_icon import current_icon
 THEME_COLOR = "#417690"
 
 
-def manifest():
+def manifest() -> dict[str, Any]:
     """The manifest, as a dict."""
     name = settings.LIFETRACKER_UNAUTHENTICATED_SITE_NAME
     icon = current_icon()
@@ -50,6 +52,6 @@ def manifest():
 
 @cache_control(max_age=3600)
 @require_safe
-def web_manifest(request):
+def web_manifest(request: HttpRequest) -> JsonResponse:
     """The manifest as ``application/manifest+json``."""
     return JsonResponse(manifest(), content_type="application/manifest+json")
