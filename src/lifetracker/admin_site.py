@@ -3,7 +3,7 @@ from typing import Any
 from django.conf import settings
 from django.contrib import admin
 from django.http import HttpRequest
-from django.urls import path
+from django.urls import URLPattern, URLResolver, path
 from django.utils.html import format_html
 
 # Git's default abbreviated object name length (core.abbrev's minimum), also what
@@ -68,7 +68,7 @@ class LifetrackerAdminSite(admin.AdminSite):
     # enabled, and renders the stock admin login (no Google button) when it isn't.
     login_template = "google_sso/login.html"
 
-    def get_urls(self) -> Any:
+    def get_urls(self) -> list[URLPattern | URLResolver]:
         # Imported here: core.admin registers its models on admin.site, an
         # instance of this class, so a top-level import would be circular.
         from lifetracker.core.admin import (  # noqa: PLC0415

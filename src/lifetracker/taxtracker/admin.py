@@ -125,7 +125,9 @@ def _save_imported_attachment(attachment: Attachment, filename: str, file_bytes:
     attachment.save()
 
 
-def _extract_archive(request: HttpRequest, file_bytes: bytes, filename: str) -> Any:
+def _extract_archive(
+    request: HttpRequest, file_bytes: bytes, filename: str
+) -> tuple[list[tuple[str, bytes]], list[str], bool]:
     """Extract an uploaded archive, reporting an unsupported one as an error message.
 
     Returns ``(extracted, archive_skipped_names, had_error)``.
@@ -236,7 +238,7 @@ class ItemAdmin(admin.ModelAdmin):
     def get_queryset(self, request: HttpRequest) -> QuerySet[Item]:
         return super().get_queryset(request).select_related("year", "parent")
 
-    def get_fields(self, request: HttpRequest, obj: Any = None) -> Any:
+    def get_fields(self, request: HttpRequest, obj: Any = None) -> list[str | list[str] | tuple[str, ...] | tuple[()]]:
         fields = list(super().get_fields(request, obj))
         # Child items cannot have a different year from their parent — hide the field.
         if obj and obj.parent_id:

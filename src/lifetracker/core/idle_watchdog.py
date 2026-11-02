@@ -348,7 +348,7 @@ def run(
     getppid: Callable[[], int] = os.getppid,
     kill: Callable[[int, int], None] = os.kill,
     uptime: Callable[[], float | None] = system_uptime,
-    popen: Callable[..., Any] = subprocess.Popen,
+    popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
 ) -> int:
     """Record uptime every second (if there's an uptime directory), check
     for idleness every ``config.interval_seconds`` (unless the mode is
