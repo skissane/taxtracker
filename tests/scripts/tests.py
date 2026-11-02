@@ -1,11 +1,13 @@
 import contextlib
 import http.client
+import http.server
 import io
 import json
 import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import urllib.error
 from pathlib import Path
 from unittest import mock
@@ -29,6 +31,8 @@ from scripts.post_patch_coverage import MAX_BODY_CHARS, _build_body
 from scripts.post_patch_coverage import main as post_patch_coverage_main
 from scripts.post_screenshots import MARKER
 from scripts.post_screenshots import main as post_screenshots_main
+from scripts.recreate_pr import main as recreate_pr_main
+from scripts.recreate_pr import parse_pr_url
 from scripts.requirements_min_versions import main
 from scripts.validate_uv_lock_os_arch import (
     PlatformClassification,
@@ -786,11 +790,11 @@ class GitHubCommentsRequestTests(SimpleTestCase):
         response.__enter__.return_value.read.return_value = payload
         return response
 
-    def _redirect(self, url, location):
-        return urllib.error.HTTPError(url, 307, "Redirect", {"Location": location}, None)
+    def _redirect(self, url, location, code=307):
+        return urllib.error.HTTPError(url, code, "Redirect", {"Location": location}, None)
 
     def test_sends_json_with_token(self):
-        with mock.patch("urllib.request.urlopen", return_value=self._response(b'{"a": 1}')) as urlopen:
+        with mock.patch("scripts.github_comments._opener.open", return_value=self._response(b'{"a": 1}')) as urlopen:
             result = github_request("POST", "https://api.github.com/x", "tok", json_body={"b": 2})
         self.assertEqual(result, {"a": 1})
         request = urlopen.call_args.args[0]
@@ -801,16 +805,21 @@ class GitHubCommentsRequestTests(SimpleTestCase):
         self.assertEqual(request.get_header("Authorization"), "Bearer tok")
 
     def test_empty_response_is_none(self):
-        with mock.patch("urllib.request.urlopen", return_value=self._response(b"")):
+        with mock.patch("scripts.github_comments._opener.open", return_value=self._response(b"")):
             self.assertIsNone(github_request("DELETE", "https://api.github.com/x", "tok"))
 
     def test_follows_redirects_dropping_token_off_host(self):
+        for code in (301, 302, 307, 308):
+            with self.subTest(code=code):
+                self._check_follows_redirects(code)
+
+    def _check_follows_redirects(self, code):
         responses = [
-            self._redirect("https://uploads.github.com/a", "/b"),
-            self._redirect("https://uploads.github.com/b", "https://elsewhere.example/c"),
+            self._redirect("https://uploads.github.com/a", "/b", code),
+            self._redirect("https://uploads.github.com/b", "https://elsewhere.example/c", code),
             self._response(b'{"url": "u"}'),
         ]
-        with mock.patch("urllib.request.urlopen", side_effect=responses) as urlopen:
+        with mock.patch("scripts.github_comments._opener.open", side_effect=responses) as urlopen:
             result = github_request("POST", "https://uploads.github.com/a", "tok", data=b"png")
         self.assertEqual(result, {"url": "u"})
         sent = [c.args[0] for c in urlopen.call_args_list]
@@ -822,25 +831,73 @@ class GitHubCommentsRequestTests(SimpleTestCase):
                 "https://elsewhere.example/c",
             ],
         )
+        self.assertEqual([r.get_method() for r in sent], ["POST"] * 3)
         self.assertEqual([r.data for r in sent], [b"png"] * 3)
         self.assertEqual(
             [r.get_header("Authorization") for r in sent],
             ["Bearer tok", "Bearer tok", None],
         )
 
+    def test_redirect_to_http_drops_token(self):
+        responses = [
+            self._redirect("https://api.github.com/a", "http://api.github.com/b", 301),
+            self._response(b"{}"),
+        ]
+        with mock.patch("scripts.github_comments._opener.open", side_effect=responses) as urlopen:
+            github_request("GET", "https://api.github.com/a", "tok")
+        self.assertEqual(
+            [c.args[0].get_header("Authorization") for c in urlopen.call_args_list],
+            ["Bearer tok", None],
+        )
+
     def test_too_many_redirects(self):
         redirect = self._redirect("https://api.github.com/x", "/x")
         with (
-            mock.patch("urllib.request.urlopen", side_effect=[redirect] * 5),
+            mock.patch("scripts.github_comments._opener.open", side_effect=[redirect] * 5),
             self.assertRaisesRegex(RuntimeError, "too many redirects"),
         ):
             github_request("GET", "https://api.github.com/x", "tok")
+
+    def test_get_redirect_off_host_drops_token(self):
+        # A real server, as urllib's own redirect handling (which would keep
+        # the token) is what's being replaced; 127.0.0.1 and localhost are
+        # different hosts to request().
+        seen = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append((self.path, self.headers.get("Authorization")))
+                if self.path == "/a":
+                    self.send_response(302)
+                    self.send_header("Location", f"http://localhost:{self.server.server_port}/b")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                else:
+                    body = b'{"ok": true}'
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+
+            def log_message(self, format, *args):
+                pass
+
+        with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            try:
+                result = github_request("GET", f"http://127.0.0.1:{server.server_port}/a", "tok")
+            finally:
+                server.shutdown()
+                thread.join()
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(seen, [("/a", "Bearer tok"), ("/b", None)])
 
     def test_other_errors_raised(self):
         error = urllib.error.HTTPError("https://api.github.com/x", 404, "Not Found", {}, None)
         with (
             error,
-            mock.patch("urllib.request.urlopen", side_effect=error),
+            mock.patch("scripts.github_comments._opener.open", side_effect=error),
             self.assertRaises(urllib.error.HTTPError),
         ):
             github_request("GET", "https://api.github.com/x", "tok")
@@ -1553,3 +1610,178 @@ class WaitForBaseCoverageTests(SimpleTestCase):
             )
         self.assertEqual(code, 0)
         self.assertEqual(timeouts, [15, 15, 11, 7, 2, 1])
+
+
+class RecreatePrTests(SimpleTestCase):
+    URL = "https://github.com/o/r/pull/5"
+
+    def pr_json(self, **overrides):
+        data = {
+            "number": 5,
+            "title": "T",
+            "body": "B",
+            "headRefName": "feat",
+            "baseRefName": "master",
+            "isCrossRepository": False,
+            "headRepositoryOwner": {"login": "o"},
+            "state": "OPEN",
+            "labels": [{"name": "type:bug"}],
+            "milestone": {"title": "M1"},
+        }
+        data.update(overrides)
+        return json.dumps(data)
+
+    def run_main(
+        self,
+        argv,
+        view_json=None,
+        create_error=False,
+        reopen_error=False,
+        comment_error=False,
+        list_json="[]",
+        list_error=False,
+    ):
+        """Run main() with `gh` mocked; return (exit code or None, calls, stderr)."""
+        calls = []
+
+        def fake_run(cmd, input=None, **kwargs):
+            calls.append((cmd[1:], input))
+            sub = cmd[2]
+            if sub == "view":
+                return subprocess.CompletedProcess(cmd, 0, stdout=view_json or self.pr_json(), stderr="")
+            if sub == "list":
+                if list_error:
+                    raise subprocess.CalledProcessError(1, cmd, stderr="list failed")
+                return subprocess.CompletedProcess(cmd, 0, stdout=list_json, stderr="")
+            if sub == "create" and create_error:
+                raise subprocess.CalledProcessError(1, cmd, stderr="create failed")
+            if sub == "comment" and comment_error:
+                raise subprocess.CalledProcessError(1, cmd, stderr="comment failed")
+            if sub == "reopen" and reopen_error:
+                raise subprocess.CalledProcessError(1, cmd, stderr="reopen failed")
+            out = "https://github.com/o/r/pull/9\n" if sub == "create" else ""
+            return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+
+        err = io.StringIO()
+        code = None
+        with (
+            mock.patch("scripts.recreate_pr.subprocess.run", side_effect=fake_run),
+            contextlib.redirect_stderr(err),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            try:
+                recreate_pr_main(argv)
+            except SystemExit as e:
+                code = e.code
+        return code, calls, err.getvalue()
+
+    def test_parse_pr_url(self):
+        self.assertEqual(parse_pr_url("https://github.com/o/r/pull/5/files"), ("github.com", "o/r", "5"))
+        self.assertEqual(parse_pr_url("https://ghe.example.com/o/r/pull/5"), ("ghe.example.com", "o/r", "5"))
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            parse_pr_url("https://github.com/o/r/issues/5")
+
+    def test_success_closes_creates_and_comments(self):
+        code, calls, _ = self.run_main([self.URL])
+        self.assertIsNone(code)
+        subs = [c[0][1] for c in calls]
+        self.assertEqual(subs, ["view", "close", "create", "comment"])
+        create_args, body = calls[2]
+        self.assertEqual(body, "B")
+        self.assertIn("--draft", create_args)
+        self.assertEqual(create_args[create_args.index("--label") + 1], "type:bug")
+        self.assertEqual(create_args[create_args.index("--milestone") + 1], "M1")
+        # Regression guard: the original's assignees (often a bot) must not be copied
+        self.assertNotIn("--assignee", create_args)
+        # Every call is pinned to the URL's host, so none can go to another host
+        for args, _ in calls[1:]:
+            self.assertEqual(args[args.index("--repo") + 1], "github.com/o/r")
+        self.assertIn("Superseded by #9", calls[3][0])
+
+    def test_refuses_fork(self):
+        code, calls, err = self.run_main([self.URL], view_json=self.pr_json(isCrossRepository=True))
+        self.assertEqual(code, 1)
+        self.assertIn("fork", err)
+        self.assertEqual(len(calls), 1)
+
+    def test_refuses_non_open(self):
+        code, calls, err = self.run_main([self.URL], view_json=self.pr_json(state="MERGED"))
+        self.assertEqual(code, 1)
+        self.assertIn("MERGED", err)
+        self.assertEqual(len(calls), 1)
+
+    def test_refuses_number_mismatch(self):
+        code, _, err = self.run_main([self.URL], view_json=self.pr_json(number=6))
+        self.assertEqual(code, 1)
+        self.assertIn("PR #6", err)
+
+    def test_create_failure_reopens_original(self):
+        code, calls, err = self.run_main([self.URL], create_error=True)
+        self.assertEqual(code, 1)
+        self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "list", "reopen"])
+        self.assertIn("create failed", err)
+        list_args = calls[3][0]
+        self.assertEqual(list_args[list_args.index("--head") + 1], "feat")
+        self.assertEqual(list_args[list_args.index("--base") + 1], "master")
+
+    def test_create_failure_after_creating_does_not_reopen(self):
+        code, calls, err = self.run_main(
+            [self.URL], create_error=True, list_json='[{"url": "https://github.com/o/r/pull/9"}]'
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "list"])
+        self.assertIn("https://github.com/o/r/pull/9 was created anyway", err)
+
+    def test_create_failure_list_failure_aborts_without_reopening(self):
+        code, calls, err = self.run_main([self.URL], create_error=True, list_error=True)
+        self.assertEqual(code, 1)
+        self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "list"])
+        self.assertIn("list failed", err)
+        self.assertIn("could not check whether the new PR was created anyway", err)
+
+    def test_create_failure_bad_list_output_aborts_without_reopening(self):
+        for output in ("not json", "{}"):
+            with self.subTest(output=output):
+                code, calls, err = self.run_main([self.URL], create_error=True, list_json=output)
+                self.assertEqual(code, 1)
+                self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "list"])
+                self.assertIn("could not check whether the new PR was created anyway", err)
+
+    def test_moved_repo_is_not_a_fork(self):
+        # An old URL still resolves after a rename or transfer, so the head repo can differ from the URL's
+        code, calls, _ = self.run_main([self.URL], view_json=self.pr_json(headRepositoryOwner={"login": "new"}))
+        self.assertIsNone(code)
+        self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "comment"])
+
+    def test_reopen_failure_says_to_reopen_manually(self):
+        code, _, err = self.run_main([self.URL], create_error=True, reopen_error=True)
+        self.assertEqual(code, 1)
+        self.assertIn("still CLOSED", err)
+
+    def test_comment_failure_reports_new_pr(self):
+        code, calls, err = self.run_main([self.URL], comment_error=True)
+        self.assertEqual(code, 1)
+        self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "comment"])
+        self.assertIn("comment failed", err)
+        self.assertIn("created https://github.com/o/r/pull/9 and closed PR #5", err)
+
+    def test_gh_missing(self):
+        err = io.StringIO()
+        with (
+            mock.patch("scripts.recreate_pr.subprocess.run", side_effect=FileNotFoundError),
+            contextlib.redirect_stderr(err),
+            self.assertRaises(SystemExit),
+        ):
+            recreate_pr_main([self.URL])
+        self.assertIn("'gh' CLI not found", err.getvalue())
+
+    def test_gh_command_failure(self):
+        error = subprocess.CalledProcessError(1, ["gh"], stderr="boom")
+        err = io.StringIO()
+        with (
+            mock.patch("scripts.recreate_pr.subprocess.run", side_effect=error),
+            contextlib.redirect_stderr(err),
+            self.assertRaises(SystemExit),
+        ):
+            recreate_pr_main([self.URL])
+        self.assertIn("boom", err.getvalue())
