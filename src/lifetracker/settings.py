@@ -16,9 +16,14 @@ import socket
 from pathlib import Path
 from urllib.parse import quote
 
+import django_stubs_ext
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.templatetags.static import static
+
+# Make Django's generic classes (ModelAdmin, ModelForm, ContentFile, ...) subscriptable at runtime, as django-stubs
+# types them, so annotations and base classes such as ModelAdmin[Item] work. Settings load before any app module.
+django_stubs_ext.monkeypatch()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent

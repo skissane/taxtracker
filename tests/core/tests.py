@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import typing
 from pathlib import Path
 from unittest import mock
 
@@ -780,6 +781,10 @@ class DatabaseStorageTests(TestCase):
 
     def setUp(self):
         self.storage = DatabaseStorage()
+
+    def test_open_annotations_evaluate(self):
+        # ContentFile[bytes] only works at runtime because settings.py calls django_stubs_ext.monkeypatch().
+        self.assertEqual(typing.get_type_hints(DatabaseStorage._open)["return"], ContentFile[bytes])
 
     def test_dbstoredfile_str(self):
         obj = DBStoredFile.objects.create(filename="report.pdf", content=b"data")

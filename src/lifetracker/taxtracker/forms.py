@@ -4,7 +4,7 @@ from lifetracker.core.forms import FlexibleDateField
 from lifetracker.taxtracker.models import Attachment
 
 
-class AttachmentForm(forms.ModelForm):
+class AttachmentForm(forms.ModelForm[Attachment]):
     date = FlexibleDateField(required=False)
 
     class Meta:
