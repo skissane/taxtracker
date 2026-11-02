@@ -5,6 +5,7 @@ import subprocess
 import sys
 import urllib.error
 from pathlib import Path
+from typing import NoReturn
 
 from scripts import github_comments
 
@@ -31,7 +32,7 @@ class UnexpectedReport(ValueError):
     pass
 
 
-def _file_table(matches: list[re.Match]) -> list[str]:
+def _file_table(matches: list[re.Match[str]]) -> list[str]:
     rows = ["| File | Coverage | Missing lines |", "| --- | ---: | --- |"]
     for m in matches:
         path = m["path"].replace("&#46;", ".")
@@ -41,7 +42,7 @@ def _file_table(matches: list[re.Match]) -> list[str]:
     return rows
 
 
-def _summary_table(matches: list[re.Match]) -> list[str]:
+def _summary_table(matches: list[re.Match[str]]) -> list[str]:
     return [
         "| " + " | ".join(m["name"] for m in matches) + " |",
         "|" + " ---: |" * len(matches),
@@ -70,15 +71,18 @@ def _reformat(report: str) -> tuple[str, list[str]]:
     lines = report.rstrip("\n").split("\n")
     pos = 0
 
-    def expect(ok: bool, what: str):
-        if not ok:
-            found = repr(lines[pos]) if pos < len(lines) else "the end of the report"
-            raise UnexpectedReport(f"diff-cover report line {pos + 1}: expected {what}, found {found}")
+    def fail(what: str) -> NoReturn:
+        found = repr(lines[pos]) if pos < len(lines) else "the end of the report"
+        raise UnexpectedReport(f"diff-cover report line {pos + 1}: expected {what}, found {found}")
 
-    def at(regex: re.Pattern) -> re.Match | None:
+    def expect(ok: bool, what: str) -> None:
+        if not ok:
+            fail(what)
+
+    def at(regex: re.Pattern[str]) -> re.Match[str] | None:
         return regex.match(lines[pos]) if pos < len(lines) else None
 
-    def skip_blank():
+    def skip_blank() -> None:
         nonlocal pos
         while pos < len(lines) and not lines[pos]:
             pos += 1
@@ -110,7 +114,8 @@ def _reformat(report: str) -> tuple[str, list[str]]:
     summary = []
     for name in ("Total", "Missing", "Coverage"):
         m = at(_SUMMARY_RE)
-        expect(m is not None and m["name"] == name, f"'- **{name}**: ...'")
+        if m is None or m["name"] != name:
+            fail(f"'- **{name}**: ...'")
         summary.append(m)
         pos += 1
     out += _summary_table(summary)

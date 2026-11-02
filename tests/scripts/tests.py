@@ -9,7 +9,9 @@ import tempfile
 import textwrap
 import threading
 import urllib.error
+from email.message import Message
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from django.test import SimpleTestCase
@@ -310,7 +312,7 @@ class PostScreenshotsTests(SimpleTestCase):
         fail=None,
         asset_url=True,
         head="abc1234def",
-    ) -> tuple[int, str, list[tuple]]:
+    ) -> tuple[int, str, list[tuple[Any, ...]]]:
         """Run main() on PR 7 in a temp dir whose screenshots/ holds the given
         files, with the API faked: uploads return a URL based on the file name,
         and the PR has the given head commit and comments. fail names a (method,
@@ -323,7 +325,7 @@ class PostScreenshotsTests(SimpleTestCase):
             if fail and method == fail[0] and url.startswith(fail[1]):
                 if len(fail) > 2:
                     raise fail[2]
-                raise urllib.error.HTTPError(url, 403, "Forbidden", {}, io.BytesIO(b"nope"))
+                raise urllib.error.HTTPError(url, 403, "Forbidden", Message(), io.BytesIO(b"nope"))
             if url == "https://api.github.com/user":
                 return {"login": "me"}
             if url == "https://api.github.com/repos/o/r":
@@ -527,7 +529,9 @@ class PostPatchCoverageTests(SimpleTestCase):
     )
     REPORT = HEAD + "\n\n\n## a&#46;py\n\nLines 1-2\n\n```python\n  1 a = 1\n! 2 b = 2\n```\n\n\n---\n"
 
-    def _run(self, *args, report=REPORT, comments=(), fail=None, head="abc1234def") -> tuple[int, str, list[tuple]]:
+    def _run(
+        self, *args, report=REPORT, comments=(), fail=None, head="abc1234def"
+    ) -> tuple[int, str, list[tuple[Any, ...]]]:
         """Run main() on PR 7 in a temp dir holding patch-coverage.md (unless
         report is None), with the API faked as in PostScreenshotsTests. Return
         the exit code, stderr and each request as (method, url, token, json_body)."""
@@ -538,7 +542,7 @@ class PostPatchCoverageTests(SimpleTestCase):
             if fail and method == fail[0] and url.startswith(fail[1]):
                 if len(fail) > 2:
                     raise fail[2]
-                raise urllib.error.HTTPError(url, 403, "Forbidden", {}, io.BytesIO(b"nope"))
+                raise urllib.error.HTTPError(url, 403, "Forbidden", Message(), io.BytesIO(b"nope"))
             if url == "https://api.github.com/user":
                 return {"login": "me"}
             if url == "https://api.github.com/repos/o/r/pulls/7":
@@ -791,7 +795,9 @@ class GitHubCommentsRequestTests(SimpleTestCase):
         return response
 
     def _redirect(self, url, location, code=307):
-        return urllib.error.HTTPError(url, code, "Redirect", {"Location": location}, None)
+        headers = Message()
+        headers["Location"] = location
+        return urllib.error.HTTPError(url, code, "Redirect", headers, None)
 
     def test_sends_json_with_token(self):
         with mock.patch("scripts.github_comments._opener.open", return_value=self._response(b'{"a": 1}')) as urlopen:
@@ -869,6 +875,7 @@ class GitHubCommentsRequestTests(SimpleTestCase):
                 seen.append((self.path, self.headers.get("Authorization")))
                 if self.path == "/a":
                     self.send_response(302)
+                    assert isinstance(self.server, http.server.HTTPServer)
                     self.send_header("Location", f"http://localhost:{self.server.server_port}/b")
                     self.send_header("Content-Length", "0")
                     self.end_headers()
@@ -894,7 +901,7 @@ class GitHubCommentsRequestTests(SimpleTestCase):
         self.assertEqual(seen, [("/a", "Bearer tok"), ("/b", None)])
 
     def test_other_errors_raised(self):
-        error = urllib.error.HTTPError("https://api.github.com/x", 404, "Not Found", {}, None)
+        error = urllib.error.HTTPError("https://api.github.com/x", 404, "Not Found", Message(), None)
         with (
             error,
             mock.patch("scripts.github_comments._opener.open", side_effect=error),
@@ -1134,7 +1141,8 @@ class CheckBlameIgnoreRevsTests(SimpleTestCase):
             self._commit(path, "tracked.txt", "head\n", "head")
             if checkout == "side":
                 self._git(path, "checkout", "-q", "side-branch")
-            target = {"main": branch}.get(target, target)
+            if target == "main":
+                target = branch
             (path / ".git-blame-ignore-revs").write_text(
                 "\n".join(
                     line.format(
@@ -1315,7 +1323,7 @@ class CheckDeployTests(SimpleTestCase):
         return response
 
     def _http_error(self, status: int, payload: bytes):
-        return urllib.error.HTTPError(self.URL, status, "Error", {}, io.BytesIO(payload))
+        return urllib.error.HTTPError(self.URL, status, "Error", Message(), io.BytesIO(payload))
 
     def _check(self, result):
         kwargs = {"side_effect" if isinstance(result, Exception) else "return_value": result}
@@ -1428,7 +1436,7 @@ class WaitForBaseCoverageTests(SimpleTestCase):
         return response
 
     def _http_error(self, status: int, payload: bytes):
-        return urllib.error.HTTPError("https://example/", status, "Error", {}, io.BytesIO(payload))
+        return urllib.error.HTTPError("https://example/", status, "Error", Message(), io.BytesIO(payload))
 
     def _call(self, func, result, *args):
         kwargs = {"side_effect" if isinstance(result, Exception) else "return_value": result}

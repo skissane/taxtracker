@@ -8,6 +8,8 @@ import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
+from email.message import Message
+from typing import IO, Any
 
 API_URL = "https://api.github.com"
 
@@ -17,7 +19,15 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     urllib's own handler follows GET redirects keeping every header, the
     token included, even to another host."""
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: Message,
+        newurl: str,
+    ) -> None:
         return None
 
 
@@ -37,7 +47,7 @@ def request(
     json_body: object = None,
     data: bytes | None = None,
     content_type: str | None = None,
-):
+) -> Any:
     """Send an API request and return its decoded JSON response (None if empty).
     A 301/302/307/308 redirect is followed with the same method and body,
     keeping the token only while the scheme, host and port are unchanged (so
@@ -72,10 +82,11 @@ def gh_output(*args: str) -> str:
 
 def pr_head(repo: str, pr: int, token: str) -> str:
     """The PR's current head commit."""
-    return request("GET", f"{API_URL}/repos/{repo}/pulls/{pr}", token)["head"]["sha"]
+    sha: str = request("GET", f"{API_URL}/repos/{repo}/pulls/{pr}", token)["head"]["sha"]
+    return sha
 
 
-def marked_comments(repo: str, pr: int, author: str, marker: str, token: str) -> list[dict]:
+def marked_comments(repo: str, pr: int, author: str, marker: str, token: str) -> list[dict[str, Any]]:
     """The comments author has posted on pr whose body starts with marker, oldest first."""
     comments = []
     page = 1

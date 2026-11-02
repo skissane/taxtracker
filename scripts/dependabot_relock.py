@@ -24,7 +24,7 @@ LOCK_PATH = Path("uv.lock")
 
 def _locked_versions(lock_text: str) -> dict[str, tuple[str, ...]]:
     lock = tomllib.loads(lock_text)
-    versions = {}
+    versions: dict[str, set[str]] = {}
     for package in lock.get("package", []):
         version = package.get("version")
         if version is None:

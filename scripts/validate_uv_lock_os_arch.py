@@ -2,6 +2,7 @@ import re
 import tomllib
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 
 # How _classify_platform treats an (OS, arch) pair, as split by _split_platform.
@@ -54,9 +55,9 @@ def _wheel_platforms(filename: str) -> list[str]:
 def main() -> int:
     lock = tomllib.loads(Path("uv.lock").read_text(encoding="utf-8"))
     disallowed = []
-    packages: list[dict] = lock.get("package", [])
+    packages: list[dict[str, Any]] = lock.get("package", [])
     for package in packages:
-        wheels: list[dict] = package.get("wheels", [])
+        wheels: list[dict[str, Any]] = package.get("wheels", [])
         for wheel in wheels:
             # Registry wheels have a `url`; local ones a `path` or `filename`.
             location: str | None = wheel.get("url") or wheel.get("path") or wheel.get("filename")

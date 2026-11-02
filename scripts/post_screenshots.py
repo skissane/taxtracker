@@ -70,7 +70,8 @@ def _upload(path: Path, repository_id: int, token: str) -> str:
     )
     if not isinstance(asset, dict) or not asset.get("url"):
         raise RuntimeError(f"upload of {path} returned no asset URL")
-    return asset["url"]
+    url: str = asset["url"]
+    return url
 
 
 def main(argv: list[str]) -> int:

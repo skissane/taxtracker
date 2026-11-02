@@ -7,6 +7,7 @@ import tracemalloc
 import zipfile
 from unittest import mock
 
+from django.contrib import admin
 from django.contrib.auth.models import Permission, User
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
@@ -15,7 +16,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from lifetracker.core.models import DBStoredFile, FileExtension, FileType
+from lifetracker.core.models import DBStoredFile, FileExtension, FileType, database_storage
 from lifetracker.taxtracker.admin import (
     FinancialYearAdmin,
     _adjust_notes_headings,
@@ -91,13 +92,13 @@ class FinancialYearModelTests(TestCase):
     def test_status_since_display_uses_local_date(self):
         self.fy.status = FinancialYear.STATUS_SUBMITTED
         self.fy.save()
-        history = self.fy.status_history.order_by("-transitioned_at", "-pk").first()
+        history = self.fy.status_history.latest("transitioned_at", "pk")
         history.transitioned_at = datetime.datetime(2024, 10, 30, 14, 30, tzinfo=datetime.UTC)
         history.save(update_fields=["transitioned_at"])
 
         with timezone.override("Australia/Sydney"):
             self.assertEqual(
-                FinancialYearAdmin.status_since_display(None, self.fy),
+                FinancialYearAdmin(FinancialYear, admin.site).status_since_display(self.fy),
                 datetime.date(2024, 10, 31),
             )
 
@@ -107,9 +108,9 @@ class FinancialYearModelTests(TestCase):
     def test_create_adds_initial_status_history(self):
         history = FinancialYearStatusHistory.objects.filter(financial_year=self.fy)
         self.assertEqual(history.count(), 1)
-        self.assertIsNone(history.first().from_status)
+        self.assertIsNone(history.get().from_status)
         self.assertEqual(
-            history.first().to_status,
+            history.get().to_status,
             FinancialYear.STATUS_PENDING_SUBMISSION,
         )
 
@@ -117,7 +118,7 @@ class FinancialYearModelTests(TestCase):
         self.fy.status = FinancialYear.STATUS_SUBMITTED
         self.fy.save()
 
-        latest = self.fy.status_history.order_by("-transitioned_at", "-pk").first()
+        latest = self.fy.status_history.latest("transitioned_at", "pk")
         self.assertEqual(latest.from_status, FinancialYear.STATUS_PENDING_SUBMISSION)
         self.assertEqual(latest.to_status, FinancialYear.STATUS_SUBMITTED)
 
@@ -129,7 +130,7 @@ class FinancialYearModelTests(TestCase):
         self.fy.status = FinancialYear.STATUS_SUBMITTED
         self.fy.save()
 
-        latest = self.fy.status_history.order_by("-transitioned_at", "-pk").first()
+        latest = self.fy.status_history.latest("transitioned_at", "pk")
         self.assertEqual(latest.from_status, FinancialYear.STATUS_MORE_INFO_REQUESTED)
         self.assertEqual(latest.to_status, FinancialYear.STATUS_SUBMITTED)
 
@@ -140,7 +141,7 @@ class FinancialYearModelTests(TestCase):
         self.fy.status = FinancialYear.STATUS_SUBMITTED
         self.fy.save()
 
-        latest = self.fy.status_history.order_by("-transitioned_at", "-pk").first()
+        latest = self.fy.status_history.latest("transitioned_at", "pk")
         self.assertEqual(latest.from_status, FinancialYear.STATUS_PENDING_SUBMISSION)
         self.assertEqual(latest.to_status, FinancialYear.STATUS_SUBMITTED)
 
@@ -179,7 +180,7 @@ class FinancialYearModelTests(TestCase):
         self.assertEqual(fy._loaded_status, FinancialYear.STATUS_PENDING_SUBMISSION)
         fy.save()
 
-        latest = fy.status_history.order_by("-transitioned_at", "-pk").first()
+        latest = fy.status_history.latest("transitioned_at", "pk")
         self.assertEqual(latest.from_status, FinancialYear.STATUS_PENDING_SUBMISSION)
         self.assertEqual(latest.to_status, FinancialYear.STATUS_SUBMITTED)
 
@@ -191,7 +192,7 @@ class FinancialYearModelTests(TestCase):
         fy.status = FinancialYear.STATUS_SUBMITTED
         fy.save()
 
-        latest = fy.status_history.order_by("-transitioned_at", "-pk").first()
+        latest = fy.status_history.latest("transitioned_at", "pk")
         self.assertEqual(latest.from_status, FinancialYear.STATUS_PENDING_SUBMISSION)
         self.assertEqual(latest.to_status, FinancialYear.STATUS_SUBMITTED)
 
@@ -1701,14 +1702,14 @@ class DatabaseStorageTests(TestCase):
         """DBStoredFile.filename should be the uploaded filename."""
         att = Attachment(item=self.item, file=self._simple_file("myfile.pdf"))
         att.save()
-        db_file = DBStoredFile.objects.get(pk=att.file.storage._name_to_pk(att.file.name))
+        db_file = DBStoredFile.objects.get(pk=database_storage._name_to_pk(att.file.name))
         self.assertEqual(db_file.filename, "myfile.pdf")
 
     def test_attachment_file_deleted_removes_db_record(self):
         """Deleting an Attachment should remove the DBStoredFile record."""
         att = Attachment(item=self.item, file=self._simple_file("del.pdf"))
         att.save()
-        pk = att.file.storage._name_to_pk(att.file.name)
+        pk = database_storage._name_to_pk(att.file.name)
         att.delete()
         self.assertFalse(DBStoredFile.objects.filter(pk=pk).exists())
 
@@ -1725,7 +1726,7 @@ class DatabaseStorageTests(TestCase):
         ):
             att = Attachment(file=self._simple_file("c.pdf"), **kwargs)
             att.save()
-            pks.append(att.file.storage._name_to_pk(att.file.name))
+            pks.append(database_storage._name_to_pk(att.file.name))
         self.item.delete()
         self.assertFalse(DBStoredFile.objects.filter(pk__in=pks[:2]).exists())
         self.assertTrue(DBStoredFile.objects.filter(pk=pks[2]).exists())
@@ -1737,7 +1738,7 @@ class DatabaseStorageTests(TestCase):
         removes the DBStoredFile records too."""
         att = Attachment(item=self.item, file=self._simple_file("q.pdf"))
         att.save()
-        pk = att.file.storage._name_to_pk(att.file.name)
+        pk = database_storage._name_to_pk(att.file.name)
         Attachment.objects.filter(pk=att.pk).delete()
         self.assertFalse(DBStoredFile.objects.filter(pk=pk).exists())
 
@@ -1991,7 +1992,7 @@ class ArchiveExtractorTests(TestCase):
 
     def test_har_no_matching_entries(self):
         """A HAR with no Fidelity entries returns an empty list."""
-        har = {"log": {"entries": []}}
+        har: dict[str, object] = {"log": {"entries": []}}
         results = extract_from_archive(json.dumps(har).encode(), "empty.har")
         self.assertEqual(results, [])
 
@@ -2251,7 +2252,7 @@ class ImportArchiveViewTests(TestCase):
         self.assertEqual(att.date, datetime.date(2023, 7, 20))
 
     def test_post_har_with_no_entries_shows_warning(self):
-        har = {"log": {"entries": []}}
+        har: dict[str, object] = {"log": {"entries": []}}
         upload = io.BytesIO(json.dumps(har).encode())
         upload.name = "empty.har"
         response = self.client.post(

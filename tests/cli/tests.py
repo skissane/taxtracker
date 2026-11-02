@@ -4,6 +4,7 @@ import datetime
 import io
 import json
 import tempfile
+import typing
 import zipfile
 from email.message import EmailMessage
 from pathlib import Path
@@ -175,7 +176,7 @@ class ExtractEmlTests(TestCase):
             def get_payload(self):
                 return "not a message object"
 
-        self.assertIsNone(get_attachment_payload(FakePart()))
+        self.assertIsNone(get_attachment_payload(typing.cast(EmailMessage, FakePart())))
 
     def test_get_email_date_prefix_non_rfc822_part(self):
         part = EmailMessage()
@@ -216,7 +217,7 @@ class ExtractEmlTests(TestCase):
             def get_payload(self):
                 return object()
 
-        self.assertEqual(get_email_date_prefix(FakePart()), "")
+        self.assertEqual(get_email_date_prefix(typing.cast(EmailMessage, FakePart())), "")
 
     def test_skips_attachment_with_no_extractable_payload(self):
         with (

@@ -98,13 +98,25 @@ environments = [
 plugins = ["mypy_django_plugin.main"]
 python_version = "3.14"
 strict = true
+files = ["src", "scripts", "tests", "screenshot_tests"]
+# Resolve `lifetracker` from src, and `scripts`, `tests` and `screenshot_tests` from the repo root, so each file has
+# one module name (otherwise scripts/github_comments.py is both `github_comments` and `scripts.github_comments`).
+mypy_path = "src"
+explicit_package_bases = true
+
+# Tests may leave functions unannotated for now, but their bodies are still checked (strict's check_untyped_defs).
+[[tool.mypy.overrides]]
+module = ["tests.*", "screenshot_tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]
 module = "*.migrations.*"
 ignore_errors = true
 
 [[tool.mypy.overrides]]
-module = ["boto3", "botocore.*", "django_google_sso", "django_google_sso.*", "pdfkit"]
+module = ["boto3", "botocore.*", "django_google_sso", "django_google_sso.*", "gunicorn.*", "pdfkit"]
 ignore_missing_imports = true
 
 [tool.django-stubs]

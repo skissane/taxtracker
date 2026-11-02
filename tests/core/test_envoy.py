@@ -21,14 +21,15 @@ import sys
 import tempfile
 import threading
 import time
-import types
 import unittest
 import uuid
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from django.contrib.auth.models import User
 from django.core.management import CommandError, call_command
 from django.test import SimpleTestCase, override_settings
 from django.urls import reverse
@@ -112,7 +113,7 @@ class EnvoyConfigRenderTests(SimpleTestCase):
             envoy_config.login_redirect()
 
     def test_rejects_bad_settings(self):
-        cases = [
+        cases: list[tuple[dict[str, Any], str]] = [
             ({"listen_host": "localhost"}, "The listen host must be an IP address"),
             ({"listen_host": "0.0.0.0/"}, "The listen host must be an IP address"),
             ({"listen_port": 0}, "The listen port must be from 1 to 65535: 0"),
@@ -252,6 +253,11 @@ class _EchoHandler(http.server.BaseHTTPRequestHandler):
 class EnvoyAuthTests(SimpleTestCase):
     """Requests through the real Envoy, to a fake upstream."""
 
+    request_log: Path
+    key_settings: override_settings
+    upstream: http.server.ThreadingHTTPServer
+    port: int
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -309,6 +315,7 @@ class EnvoyAuthTests(SimpleTestCase):
             "warn",
         ]
         if docker is None:
+            assert envoy is not None
             command = [envoy, *args]
         else:
             # Host networking, so 127.0.0.1 is the same inside and out; the
@@ -354,6 +361,7 @@ class EnvoyAuthTests(SimpleTestCase):
         deadline = time.monotonic() + 30
         while True:
             if process.poll() is not None:
+                assert process.stderr is not None
                 raise RuntimeError(f"Envoy exited: {process.stderr.read()}")
             connection = http.client.HTTPConnection("127.0.0.1", cls.port, timeout=1)
             try:
@@ -378,7 +386,7 @@ class EnvoyAuthTests(SimpleTestCase):
         changed if given."""
         expires_at = timezone.now() + datetime.timedelta(seconds=expires_in)
         with self.key_settings:
-            token = jwt_auth.issue_token(types.SimpleNamespace(pk=1), "session-key", expires_at)
+            token = jwt_auth.issue_token(User(pk=1), "session-key", expires_at)
             own_key, kid = jwt_auth.signing_key()
         if key is None and not claims:
             return token
@@ -456,7 +464,7 @@ class EnvoyAuthTests(SimpleTestCase):
             "wrong key": self._token(key=other_key),
             "unsigned": jwt.encode(
                 jwt.decode(self._token(), options={"verify_signature": False}),
-                None,
+                "",
                 algorithm="none",
             ),
         }
