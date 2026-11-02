@@ -29,16 +29,16 @@ packages = ["src/lifetracker"]
 
 [dependency-groups]
 dev = [
-    "coverage>=7.16.2",
+    "coverage>=7.17.0",
     "diff-cover>=11.0.0",
-    "djlint>=1.46.6",
+    "djlint>=1.47.0",
     "jactionlint>=2.3.0",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "pytest-django>=4.14.0",
     "pytest-xdist>=3.8.0",
     "pyyaml>=6.0.3",
-    "ruff>=0.17.1",
+    "ruff>=0.17.2",
 ]
 screenshots = [
     "playwright>=1.64.1",
