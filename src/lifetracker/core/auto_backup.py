@@ -44,7 +44,7 @@ class AutoBackup:
         *,
         log: Callable[[str], None],
         environ: Mapping[str, str] = os.environ,
-        popen: Any = subprocess.Popen,
+        popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
     ) -> None:
         self.interval_seconds = interval_seconds
         # The first backup is at startup.
@@ -54,7 +54,7 @@ class AutoBackup:
         # The watchdog is started from gunicorn's master, where wsgi.py, which
         # sets this, hasn't run.
         self.env = {"DJANGO_SETTINGS_MODULE": "lifetracker.settings", **environ}
-        self.process = None
+        self.process: subprocess.Popen[bytes] | None = None
         self.runs = 0
         self.reason: str | None = None
         self.last_started_at: float | None = None
@@ -86,6 +86,8 @@ class AutoBackup:
         taken too long."""
         if self.process is None:
             return
+        # start() sets last_started_at before process.
+        assert self.last_started_at is not None
         exit_status = self.process.poll()
         if exit_status is None:
             if now - self.last_started_at < TIMEOUT_SECONDS:
