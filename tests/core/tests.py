@@ -5110,6 +5110,15 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
         self.assertIn("Unexpected contents", context["status_error"])
         self.assertIsNone(context["status"])
 
+    def test_status_without_start_time(self):
+        status = _watchdog_status(self.NOW, started_at=None)
+
+        context = self._context(status)
+
+        self.assertIn("Unexpected contents", context["status_error"])
+        self.assertIn("no start time", context["status_error"])
+        self.assertIsNone(context["status"])
+
 
 class IdleWatchdogAdminViewTests(TestCase):
     URL = "/admin/idle-watchdog/"
