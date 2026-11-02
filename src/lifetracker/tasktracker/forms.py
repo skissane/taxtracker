@@ -4,7 +4,7 @@ from lifetracker.core.forms import FlexibleDateField
 from lifetracker.tasktracker.models import TaskAttachment
 
 
-class TaskAttachmentForm(forms.ModelForm):
+class TaskAttachmentForm(forms.ModelForm[TaskAttachment]):
     date = FlexibleDateField(required=False)
 
     class Meta:

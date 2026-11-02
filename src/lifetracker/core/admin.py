@@ -12,8 +12,7 @@ from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db.models import Model
-from django.forms import BaseInlineFormSet
+from django.forms import BaseInlineFormSet, ModelForm
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse
 from django.http.response import HttpResponseBase
 from django.shortcuts import get_object_or_404, redirect, render
@@ -51,7 +50,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
+class _AtLeastOnePrimaryFormSet[M: MimeType | FileExtension](BaseInlineFormSet[M, FileType, ModelForm[M]]):
     """Base formset that enforces exactly one row is marked is_primary=True.
 
     Rules:
@@ -65,7 +64,7 @@ class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
 
     _primary_label: str = "item"
     _nonempty_error: str | None = None  # if set, raised when there are no non-deleted rows
-    _auto_primary_form = None  # set in clean() when auto-setting a single row
+    _auto_primary_form: ModelForm[M] | None = None  # set in clean() when auto-setting a single row
 
     def clean(self) -> None:
         super().clean()
@@ -91,7 +90,7 @@ class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
             else:
                 raise ValidationError(f"At least one {self._primary_label} must be marked as primary.")
 
-    def save(self, commit: bool = True) -> list[Model]:
+    def save(self, commit: bool = True) -> list[M]:
         instances = super().save(commit=commit)
         # For the auto-set-primary case, ensure the DB is updated even when the
         # form was not otherwise "changed" (e.g. an existing row already in the DB
@@ -108,12 +107,12 @@ class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
         return instances
 
 
-class MimeTypeFormSet(_AtLeastOnePrimaryFormSet):
+class MimeTypeFormSet(_AtLeastOnePrimaryFormSet[MimeType]):
     _primary_label = "MIME type"
     _nonempty_error = "A file type must have at least one MIME type."
 
 
-class FileExtensionFormSet(_AtLeastOnePrimaryFormSet):
+class FileExtensionFormSet(_AtLeastOnePrimaryFormSet[FileExtension]):
     _primary_label = "file extension"
     _nonempty_error = "A file type must have at least one file extension."
 
@@ -123,14 +122,14 @@ class FileExtensionFormSet(_AtLeastOnePrimaryFormSet):
 # ---------------------------------------------------------------------------
 
 
-class MimeTypeInline(admin.TabularInline):
+class MimeTypeInline(admin.TabularInline[MimeType, FileType]):
     model = MimeType
     extra = 1
     fields = ("mime_type", "is_primary")
     formset = MimeTypeFormSet
 
 
-class FileExtensionInline(admin.TabularInline):
+class FileExtensionInline(admin.TabularInline[FileExtension, FileType]):
     model = FileExtension
     extra = 1
     fields = ("extension", "is_primary")
@@ -138,7 +137,7 @@ class FileExtensionInline(admin.TabularInline):
 
 
 @admin.register(FileType)
-class FileTypeAdmin(admin.ModelAdmin):
+class FileTypeAdmin(admin.ModelAdmin[FileType]):
     list_display = ("short_name", "full_name", "primary_mime_type", "primary_extension")
     search_fields = ("short_name", "full_name")
     inlines = [MimeTypeInline, FileExtensionInline]
@@ -155,7 +154,7 @@ class FileTypeAdmin(admin.ModelAdmin):
 
 
 @admin.register(MimeType)
-class MimeTypeAdmin(admin.ModelAdmin):
+class MimeTypeAdmin(admin.ModelAdmin[MimeType]):
     list_display = ("mime_type", "file_type", "is_primary")
     list_filter = ("file_type", "is_primary")
     search_fields = ("mime_type",)
@@ -163,7 +162,7 @@ class MimeTypeAdmin(admin.ModelAdmin):
 
 
 @admin.register(FileExtension)
-class FileExtensionAdmin(admin.ModelAdmin):
+class FileExtensionAdmin(admin.ModelAdmin[FileExtension]):
     list_display = ("extension", "file_type", "is_primary")
     list_filter = ("file_type", "is_primary")
     search_fields = ("extension",)
@@ -192,7 +191,7 @@ INLINE_CONTENT_TYPES = frozenset(
 
 
 @admin.register(DBStoredFile)
-class DBStoredFileAdmin(admin.ModelAdmin):
+class DBStoredFileAdmin(admin.ModelAdmin[DBStoredFile]):
     """Registered only to host the serve-file URL; hidden from the admin index."""
 
     def has_module_permission(self, request: HttpRequest) -> bool:
@@ -201,10 +200,10 @@ class DBStoredFileAdmin(admin.ModelAdmin):
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
 
-    def has_change_permission(self, request: HttpRequest, obj: Model | None = None) -> bool:
+    def has_change_permission(self, request: HttpRequest, obj: DBStoredFile | None = None) -> bool:
         return False
 
-    def has_delete_permission(self, request: HttpRequest, obj: Model | None = None) -> bool:
+    def has_delete_permission(self, request: HttpRequest, obj: DBStoredFile | None = None) -> bool:
         return False
 
     def get_urls(self) -> list[URLPattern]:
@@ -269,7 +268,7 @@ class DBStoredFileAdmin(admin.ModelAdmin):
 
 
 @admin.register(CloudBackupStatus)
-class CloudBackupStatusAdmin(admin.ModelAdmin):
+class CloudBackupStatusAdmin(admin.ModelAdmin[CloudBackupStatus]):
     """Hosts the superuser-only backup pages, in place of the usual model views.
 
     Its changelist URL is the backups page, so the admin index's "Backups"
@@ -279,16 +278,16 @@ class CloudBackupStatusAdmin(admin.ModelAdmin):
     def has_module_permission(self, request: HttpRequest) -> bool:
         return request.user.is_active and request.user.is_superuser
 
-    def has_view_permission(self, request: HttpRequest, obj: Model | None = None) -> bool:
+    def has_view_permission(self, request: HttpRequest, obj: CloudBackupStatus | None = None) -> bool:
         return request.user.is_active and request.user.is_superuser
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
 
-    def has_change_permission(self, request: HttpRequest, obj: Model | None = None) -> bool:
+    def has_change_permission(self, request: HttpRequest, obj: CloudBackupStatus | None = None) -> bool:
         return False
 
-    def has_delete_permission(self, request: HttpRequest, obj: Model | None = None) -> bool:
+    def has_delete_permission(self, request: HttpRequest, obj: CloudBackupStatus | None = None) -> bool:
         return False
 
     def get_urls(self) -> list[URLPattern]:

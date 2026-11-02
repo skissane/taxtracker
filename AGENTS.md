@@ -492,10 +492,12 @@ Ruff: rules E, F, W, I, UP, TID252, PLC0415, RUF100; line length 120; migrations
 
 ## Type checking
 
-`just mypy` (`uv run mypy src`; part of `just check`, `just ci` and the `test` job) type-checks `src/` with mypy and the `django-stubs` plugin, configured in `pyproject.toml`'s `[tool.mypy]` with `disallow_untyped_defs`, so every function needs annotations, and `warn_unused_ignores`, so a `# type: ignore` that no longer hides an error fails.
+`just mypy` (`uv run mypy src`; part of `just check`, `just ci` and the `test` job) type-checks `src/` with mypy and the `django-stubs` plugin, configured in `pyproject.toml`'s `[tool.mypy]` with `strict = true`, so every function needs annotations, generic classes need their type arguments, and a `# type: ignore` that no longer hides an error fails (`warn_unused_ignores`).
 Migrations are analysed but their errors ignored (`ignore_errors`), and `boto3`, `botocore`, `django_google_sso` and `pdfkit` (no stubs) have `ignore_missing_imports`.
-`mypy --strict` isn't enforced: its remaining errors are bare `ModelAdmin`, `TabularInline`, `ModelForm` and `BaseInlineFormSet` subclasses, and Django doesn't let those classes be subscripted at runtime (`ModelAdmin[Item]` raises `TypeError`) without `django_stubs_ext.monkeypatch()`.
-Python 3.14 evaluates annotations only when something reads them (e.g. `__annotations__` or `inspect.signature`), and a subscripted Django class such as `ContentFile[bytes]` raises `TypeError` then, so annotate with the bare class (`ContentFile`); quoting doesn't help, as ruff's `UP037` removes the quotes.
+Django's own classes that django-stubs makes generic (`ModelAdmin`, `TabularInline`, `ModelForm`, `BaseInlineFormSet`, `ContentFile`, etc.) aren't subscriptable at runtime, so `settings.py` calls `django_stubs_ext.monkeypatch()` first thing, before any app module is imported, to add `__class_getitem__` to them; `django-stubs-ext` is therefore a main dependency, not just a dev one.
+So write them with their type arguments, in base classes (`admin.ModelAdmin[Item]`, `admin.TabularInline[Attachment, Item]`, `forms.ModelForm[Attachment]`) and annotations (`ContentFile[bytes]`) alike.
+A module that subscripts one at import time (a base class) can't be imported before settings are loaded, which Django's models already require; one that only annotates with one is fine until something reads its annotations, as Python 3.14 evaluates them lazily.
+Quoting such an annotation doesn't help, as ruff's `UP037` removes the quotes.
 Mixins that rely on attributes of the model they're mixed into (`TreeNodeMixin`, `AttachmentAutofillMixin`) declare them under `if TYPE_CHECKING:`.
 
 ## Test warnings policy

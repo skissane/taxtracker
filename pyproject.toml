@@ -9,6 +9,7 @@ dependencies = [
     "click>=8.5.0",
     "django>=6.1.2",
     "django-google-sso>=10.0.0",
+    "django-stubs-ext>=6.1.2",
     "gunicorn>=26.2.0",
     "maxminddb>=3.2.0",
     "pdfkit>=1.0.0",
@@ -96,10 +97,7 @@ environments = [
 [tool.mypy]
 plugins = ["mypy_django_plugin.main"]
 python_version = "3.14"
-warn_return_any = true
-warn_unused_configs = true
-warn_unused_ignores = true
-disallow_untyped_defs = true
+strict = true
 
 [[tool.mypy.overrides]]
 module = "*.migrations.*"

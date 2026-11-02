@@ -152,7 +152,7 @@ def _warn_skipped(request: HttpRequest, names: Iterable[str], reason: str) -> No
 # ---------------------------------------------------------------------------
 
 
-class AttachmentInlineBase(admin.TabularInline):
+class AttachmentInlineBase[P: Item | ReceivedDocument](admin.TabularInline[Attachment, P]):
     """Shared attachment inline; subclasses set ``select_related_path`` (and ``fk_name`` if needed)."""
 
     model = Attachment
@@ -178,16 +178,16 @@ class AttachmentInlineBase(admin.TabularInline):
         return format_html('<a href="{}">Edit</a>', url)
 
 
-class AttachmentInline(AttachmentInlineBase):
+class AttachmentInline(AttachmentInlineBase[Item]):
     select_related_path = "item__year"
 
 
-class ReceivedAttachmentInline(AttachmentInlineBase):
+class ReceivedAttachmentInline(AttachmentInlineBase[ReceivedDocument]):
     fk_name = "received_document"
     select_related_path = "received_document__year"
 
 
-class ChildItemInline(admin.TabularInline):
+class ChildItemInline(admin.TabularInline[Item, Item]):
     model = Item
     fk_name = "parent"
     extra = 1
@@ -203,7 +203,7 @@ class ChildItemInline(admin.TabularInline):
 
 
 @admin.register(Item)
-class ItemAdmin(admin.ModelAdmin):
+class ItemAdmin(admin.ModelAdmin[Item]):
     list_display = ("title", "year_link", "parent", "status", "order")
     list_filter = ("year", "status", "parent")
     search_fields = ("title", "notes")
@@ -448,7 +448,7 @@ class ItemAdmin(admin.ModelAdmin):
 
 
 @admin.register(Attachment)
-class AttachmentAdmin(admin.ModelAdmin):
+class AttachmentAdmin(admin.ModelAdmin[Attachment]):
     form = AttachmentForm
     list_display = (
         "title",
@@ -504,7 +504,7 @@ class AttachmentAdmin(admin.ModelAdmin):
 
 
 @admin.register(ReceivedDocument)
-class ReceivedDocumentAdmin(admin.ModelAdmin):
+class ReceivedDocumentAdmin(admin.ModelAdmin[ReceivedDocument]):
     list_display = ("title", "year_link", "date")
     list_filter = ("year",)
     search_fields = ("title", "notes")
@@ -893,14 +893,14 @@ def _build_multi_index_md(fys: Iterable[FinancialYear]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-class FinancialYearStatusHistoryInline(admin.TabularInline):
+class FinancialYearStatusHistoryInline(admin.TabularInline[FinancialYearStatusHistory, FinancialYear]):
     model = FinancialYearStatusHistory
     extra = 0
     ordering = ("-transitioned_at", "-pk")
 
 
 @admin.register(FinancialYear)
-class FinancialYearAdmin(admin.ModelAdmin):
+class FinancialYearAdmin(admin.ModelAdmin[FinancialYear]):
     list_display = (
         "name",
         "period",
