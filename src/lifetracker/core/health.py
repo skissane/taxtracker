@@ -21,14 +21,14 @@ import logging
 from django.conf import settings
 from django.db import DatabaseError, connection
 from django.db.migrations.executor import MigrationExecutor
-from django.http import JsonResponse
+from django.http import HttpRequest, JsonResponse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_safe
 
 logger = logging.getLogger(__name__)
 
 
-def health_problem():
+def health_problem() -> str | None:
     """A short reason the app isn't healthy, or ``None`` if it is."""
     try:
         with connection.cursor() as cursor:
@@ -54,7 +54,7 @@ def health_problem():
 
 @never_cache
 @require_safe
-def healthz(request):
+def healthz(request: HttpRequest) -> JsonResponse:
     """``{"status": "ok", "commit": ...}``, or a 503 with ``"error"`` and why."""
     problem = health_problem()
     body = {"status": "error" if problem else "ok"}

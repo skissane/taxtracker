@@ -3,44 +3,46 @@
 import email
 import re
 import zipfile
+from collections.abc import Iterator
 from contextlib import suppress
 from email import policy
 from email.generator import BytesGenerator
-from email.message import EmailMessage, Message
+from email.message import EmailMessage, Message, MIMEPart
 from email.utils import parsedate_to_datetime
 from io import BytesIO
+from typing import cast
 
 import click
 
 
-def get_attachment_payload(part: EmailMessage) -> bytes | None:
+def get_attachment_payload(part: MIMEPart) -> bytes | None:
     """Return attachment bytes for regular parts and attached emails."""
     if part.get_content_type() == "message/rfc822":
         payload = part.get_payload()
 
         if isinstance(payload, list) and payload:
             buffer = BytesIO()
-            BytesGenerator(buffer, policy=policy.default).flatten(payload[0])
+            BytesGenerator(buffer, policy=policy.default).flatten(cast(EmailMessage, payload[0]))
             return buffer.getvalue()
 
         if hasattr(payload, "as_bytes"):
-            return payload.as_bytes(policy=policy.default)
+            return cast(bytes, payload.as_bytes(policy=policy.default))
 
         return None
 
-    return part.get_payload(decode=True)
+    return cast("bytes | None", part.get_payload(decode=True))
 
 
-def get_email_date_prefix(part: EmailMessage) -> str:
+def get_email_date_prefix(part: MIMEPart) -> str:
     """Return a YYYY-MM-DD prefix for attached emails when available."""
     if part.get_content_type() != "message/rfc822":
         return ""
 
     payload = part.get_payload()
     if isinstance(payload, list) and payload:
-        attached_message = payload[0]
+        attached_message = cast(Message, payload[0])
     elif hasattr(payload, "get"):
-        attached_message = payload
+        attached_message = cast(Message, payload)
     else:
         return ""
 
@@ -55,7 +57,7 @@ def get_email_date_prefix(part: EmailMessage) -> str:
     return ""
 
 
-def iter_parts_with_date_prefix(part: EmailMessage, inherited_prefix: str = ""):
+def iter_parts_with_date_prefix(part: MIMEPart, inherited_prefix: str = "") -> Iterator[tuple[MIMEPart, str]]:
     """Depth-first walk yielding (part, date_prefix) pairs.
 
     Visits parts in the same depth-first order as ``Message.walk()``, but
@@ -73,9 +75,9 @@ def iter_parts_with_date_prefix(part: EmailMessage, inherited_prefix: str = ""):
 
         payload = part.get_payload()
         if isinstance(payload, list) and payload:
-            yield from iter_parts_with_date_prefix(payload[0], prefix)
+            yield from iter_parts_with_date_prefix(cast(MIMEPart, payload[0]), prefix)
         elif hasattr(payload, "get"):
-            yield from iter_parts_with_date_prefix(payload, prefix)
+            yield from iter_parts_with_date_prefix(cast(MIMEPart, payload), prefix)
         return
 
     if part.is_multipart():
@@ -155,7 +157,7 @@ def eml_to_zip(eml_file_path: str, output_zip_path: str, prefix: str = "") -> No
             if content_type == "message/rfc822":
                 part_payload = part.get_payload()
                 if isinstance(part_payload, list) and len(part_payload) == 1:
-                    message_body: Message = part_payload[0]
+                    message_body = cast(Message, part_payload[0])
                     content_type = message_body.get_content_type()
             click.echo(f"Added to ZIP: {zip_filename} ({content_type})")
 

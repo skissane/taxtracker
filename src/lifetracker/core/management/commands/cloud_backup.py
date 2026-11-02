@@ -11,7 +11,9 @@ With ``--if-changed`` (as the automatic backups run it; see
 database hasn't changed since the last cloud backup.
 """
 
-from django.core.management.base import BaseCommand, CommandError
+from typing import Any
+
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from lifetracker.core.backup import (
     CLOUD_BACKUP_ERRORS,
@@ -24,14 +26,14 @@ from lifetracker.core.backup import (
 class Command(BaseCommand):
     help = "Upload a backup of the database to the cloud backup bucket."
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "--if-changed",
             action="store_true",
             help="Skip the backup if the database hasn't changed since the last one.",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         if options["if_changed"] and not database_changed():
             self.stdout.write("The database hasn't changed since the last cloud backup; skipping.")
             return

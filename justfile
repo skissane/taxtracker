@@ -52,6 +52,10 @@ blame-ignore-revs-check target="HEAD":
 lint:
     uv run --group dev ruff check .
 
+# Type-check src with mypy
+mypy:
+    uv run --group dev mypy src
+
 # Autofix Python lint issues with ruff
 lint-fix:
     uv run --group dev ruff check --fix --exit-zero .
@@ -237,8 +241,8 @@ fly-setup *args:
 lint-workflows:
     uv run --group dev jactionlint --profile correctness
 
-# Run every whitespace, sentence-per-line, screenshots/, blame-ignore-revs, ruff, djlint and jactionlint check (no fixes, no tests)
-check: whitespace-check sentence-per-line-check screenshots-dir-check blame-ignore-revs-check lint fmt-check lint-templates fmt-check-templates lint-workflows
+# Run every whitespace, sentence-per-line, screenshots/, blame-ignore-revs, ruff, mypy, djlint and jactionlint check (no fixes, no tests)
+check: whitespace-check sentence-per-line-check screenshots-dir-check blame-ignore-revs-check lint fmt-check mypy lint-templates fmt-check-templates lint-workflows
 
 # Autofix lint issues and reformat code/templates
 fix: lint-fix fmt fmt-templates

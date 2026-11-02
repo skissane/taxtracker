@@ -46,8 +46,10 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
+from types import FrameType
+from typing import Any
 
 from lifetracker.core import auto_backup, uptime_log
 
@@ -220,7 +222,7 @@ def _iso(timestamp: float | None) -> str | None:
 class Watchdog:
     """Idle tracking, kept apart from the clock and /proc so it's testable."""
 
-    def __init__(self, config: Config, master_pid: int, started_at: float):
+    def __init__(self, config: Config, master_pid: int, started_at: float) -> None:
         self.config = config
         self.master_pid = master_pid
         self.started_at = started_at
@@ -256,7 +258,7 @@ class Watchdog:
     def idle_due(self, now: float) -> bool:
         return now - self.idle_since >= self.config.idle_seconds
 
-    def status(self) -> dict:
+    def status(self) -> dict[str, Any]:
         """The status file's contents. Times are ISO 8601 UTC; ``stop_due_at``
         is when the idle timeout runs out if nothing connects (in ``monitor``
         mode nothing happens then)."""
@@ -292,7 +294,7 @@ class Watchdog:
         }
 
 
-def read_status(path: Path) -> dict | None:
+def read_status(path: Path) -> dict[str, Any] | None:
     """The status ``write_status`` last wrote to ``path``, or None if there's
     no such file. Raises ValueError if it isn't a JSON object, and OSError if it
     can't be read."""
@@ -315,7 +317,7 @@ def system_uptime(path: Path = PROC_UPTIME_FILE) -> float | None:
         return None
 
 
-def write_status(path: Path, status: dict) -> None:
+def write_status(path: Path, status: dict[str, Any]) -> None:
     """Replace ``path`` with ``status`` as JSON, atomically (via a temporary
     file in the same directory and a rename), so a reader never sees a
     partial file."""
@@ -339,14 +341,14 @@ def run(
     config: Config,
     master_pid: int,
     *,
-    clock=time.time,
-    sleep=time.sleep,
-    count=count_connections,
-    request_time=last_request_time,
-    getppid=os.getppid,
-    kill=os.kill,
-    uptime=system_uptime,
-    popen=subprocess.Popen,
+    clock: Callable[[], float] = time.time,
+    sleep: Callable[[float], None] = time.sleep,
+    count: Callable[[Iterable[int]], dict[int, int]] = count_connections,
+    request_time: Callable[[Path], float | None] = last_request_time,
+    getppid: Callable[[], int] = os.getppid,
+    kill: Callable[[int, int], None] = os.kill,
+    uptime: Callable[[], float | None] = system_uptime,
+    popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
 ) -> int:
     """Record uptime every second (if there's an uptime directory), check
     for idleness every ``config.interval_seconds`` (unless the mode is
@@ -456,7 +458,7 @@ def run(
         sleep(max(wake - clock(), 0))
 
 
-def spawn(master_pid: int, environ: Mapping[str, str] = os.environ):
+def spawn(master_pid: int, environ: Mapping[str, str] = os.environ) -> subprocess.Popen[bytes] | None:
     """Start the watchdog for gunicorn master ``master_pid`` unless it has
     nothing to do: it's off, there's no uptime directory and automatic backups
     are off.
@@ -478,7 +480,7 @@ def spawn(master_pid: int, environ: Mapping[str, str] = os.environ):
     return subprocess.Popen([sys.executable, "-m", __name__, str(master_pid)], env=dict(environ))
 
 
-def _exit_quietly(signum, frame):
+def _exit_quietly(signum: int, frame: FrameType | None) -> None:
     sys.exit(0)
 
 

@@ -12,11 +12,12 @@ removes the stored file whenever such a row is deleted.
 import datetime
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from django.apps import apps
 from django.db import models
 
-from lifetracker.core.models import DatabaseStorage, DBStoredFile, FileExtension
+from lifetracker.core.models import DatabaseStorage, DBStoredFile, FileExtension, FileType
 
 # Matches YYYY[-]MM[-]DD where YYYY is not preceded by a digit.
 # The separator between year/month and month/day is independently optional.
@@ -33,13 +34,12 @@ def extract_date_from_filename(name: str) -> datetime.date | None:
     return None
 
 
-def file_type_for_filename(name):
+def file_type_for_filename(name: str) -> FileType | None:
     """Return the ``FileType`` registered for *name*'s extension, or ``None``."""
     ext = Path(name).suffix.lstrip(".").lower()
     if not ext:
         return None
-    fe = FileExtension.objects.select_related("file_type").filter(extension=ext)
-    fe = fe.first()
+    fe = FileExtension.objects.select_related("file_type").filter(extension=ext).first()
     return fe.file_type if fe else None
 
 
@@ -47,7 +47,15 @@ class AttachmentAutofillMixin:
     """On save, fill a blank ``title``, ``file_type`` and ``date`` from the
     uploaded file's name. Put it before ``models.Model`` in the bases."""
 
-    def save(self, *args, **kwargs):
+    if TYPE_CHECKING:
+        # Provided by the model this is mixed into.
+        file: Any
+        title: str
+        file_type: FileType | None
+        file_type_id: int | None
+        date: datetime.date | None
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
         if self.file:
             name = Path(self.file.name).name
             if not self.title:
@@ -56,10 +64,10 @@ class AttachmentAutofillMixin:
                 self.file_type = file_type_for_filename(name)
             if self.date is None:
                 self.date = extract_date_from_filename(name)
-        super().save(*args, **kwargs)
+        super().save(*args, **kwargs)  # type: ignore[misc]
 
 
-def database_storage_file_fields(model):
+def database_storage_file_fields(model: type[models.Model]) -> list[Any]:
     """Return *model*'s ``FileField``s whose storage is a ``DatabaseStorage``."""
     return [
         field
@@ -68,7 +76,7 @@ def database_storage_file_fields(model):
     ]
 
 
-def delete_stored_files(sender, instance, **kwargs):
+def delete_stored_files(sender: type[models.Model], instance: models.Model, **kwargs: Any) -> None:
     """``post_delete`` receiver: delete the row's files from the database.
 
     A signal rather than a ``delete()`` override, so the files also go when
@@ -82,7 +90,7 @@ def delete_stored_files(sender, instance, **kwargs):
             file.storage.delete(file.name)
 
 
-def orphaned_stored_file_pks():
+def orphaned_stored_file_pks() -> list[int]:
     """Return the sorted primary keys of the ``DBStoredFile``s that no
     ``DatabaseStorage`` ``FileField`` on any installed model refers to.
 

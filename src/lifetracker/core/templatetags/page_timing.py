@@ -1,4 +1,5 @@
 from django import template
+from django.template import Context
 
 from lifetracker.core.timing import elapsed_seconds
 
@@ -6,7 +7,7 @@ register = template.Library()
 
 
 @register.simple_tag(takes_context=True)
-def page_generation_time(context):
+def page_generation_time(context: Context) -> str:
     """Seconds spent on this request so far, as text, e.g. ``0.042``.
 
     Empty if the context has no request, or ``RequestTimingMiddleware`` didn't

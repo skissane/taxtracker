@@ -51,8 +51,10 @@ import sys
 import tempfile
 import time
 import traceback
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
+from types import FrameType
+from typing import Any, cast
 
 import maxminddb
 import requests
@@ -160,6 +162,7 @@ def config_from_env(environ: Mapping[str, str] = os.environ) -> Config:
         environ.get("LIFETRACKER_CLIENT_IP_REQUEST_LOG", "").strip()
         or Path(environ.get("TMPDIR", "").strip() or "/tmp") / DEFAULT_REQUEST_LOG_NAME
     )
+    geoip_dir: Path | None
     raw_geoip = environ.get("LIFETRACKER_GEOIP_DIR", "").strip()
     if raw_geoip:
         geoip_dir = Path(raw_geoip)
@@ -192,11 +195,11 @@ class Request:
     logged_in: bool
 
 
-def _present(value) -> bool:
+def _present(value: object) -> bool:
     return value not in (None, "", "-")
 
 
-def _ip(value) -> str | None:
+def _ip(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     try:
@@ -239,7 +242,7 @@ def parse_line(line: str) -> Request | None:
 class RequestLogReader:
     """Reads the lines Envoy has added to its request log since last time."""
 
-    def __init__(self, path: Path, truncate_bytes: int = TRUNCATE_BYTES):
+    def __init__(self, path: Path, truncate_bytes: int = TRUNCATE_BYTES) -> None:
         self.path = path
         self.truncate_bytes = truncate_bytes
         self.offset = 0
@@ -279,7 +282,7 @@ class Location:
     asn: int | None = None
     as_org: str | None = None
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
         return any(dataclasses.astuple(self))
 
 
@@ -330,7 +333,9 @@ def _download(url: str, destination: Path) -> bool:
     return True
 
 
-def _update_one(geoip_dir: Path, name: str, months: tuple[str, str], download, tried: list[str]) -> dict:
+def _update_one(
+    geoip_dir: Path, name: str, months: tuple[str, str], download: Callable[[str, Path], bool], tried: list[str]
+) -> dict[str, Any]:
     """``update_geoip`` for one database: its outcome, and whether it fell back
     to last month's. Each URL is added to ``tried`` before it's downloaded."""
     this_month, last_month = months
@@ -353,9 +358,9 @@ def update_geoip(
     geoip_dir: Path,
     *,
     now: float | None = None,
-    download=_download,
-    download_relay_ranges=None,
-) -> dict[str, dict]:
+    download: Callable[[str, Path], bool] = _download,
+    download_relay_ranges: Callable[[str, Path, str | None], str | None] | None = None,
+) -> dict[str, dict[str, Any]]:
     """Make sure ``geoip_dir`` has this month's DB-IP Lite databases, or last
     month's if this month's aren't out yet, downloading them if not, and
     delete older ones; and download the iCloud Private Relay ranges, unless
@@ -385,7 +390,7 @@ def update_geoip(
     statuses = {}
     for name in GEOIP_DATABASES:
         tried: list[str] = []
-        status = {"attempted": now, "error": None, "traceback": None}
+        status: dict[str, Any] = {"attempted": now, "error": None, "traceback": None}
         try:
             status.update(_update_one(geoip_dir, name, months, download, tried))
         # Any exception: a cut-off download alone can raise EOFError or
@@ -417,7 +422,9 @@ def update_geoip(
     return statuses
 
 
-def _update_relay_ranges(geoip_dir: Path, now: float, previous: dict, download):
+def _update_relay_ranges(
+    geoip_dir: Path, now: float, previous: dict[str, Any], download: Callable[[str, Path, str | None], str | None]
+) -> dict[str, Any]:
     """``update_geoip``'s status for the relay ranges."""
     destination = geoip_dir / RELAY_RANGES_FILE
     # Its ETag is only any use while the file it came with is still there.
@@ -452,7 +459,7 @@ def _update_relay_ranges(geoip_dir: Path, now: float, previous: dict, download):
     return status
 
 
-def read_geoip_status(geoip_dir: Path) -> dict[str, dict] | None:
+def read_geoip_status(geoip_dir: Path) -> dict[str, dict[str, Any]] | None:
     """Each database's status as ``update_geoip`` last wrote it, or None if it
     hasn't yet. Raises ValueError if the file holds something else, and
     OSError if it can't be read."""
@@ -470,13 +477,13 @@ class GeoIP:
     """Looks IPs up in the newest DB-IP Lite databases in a directory, opening
     them again when newer ones appear."""
 
-    def __init__(self, geoip_dir: Path | None):
+    def __init__(self, geoip_dir: Path | None) -> None:
         self.geoip_dir = geoip_dir
         # Each database's name: the file open and its reader.
         self._readers: dict[str, tuple[Path, maxminddb.Reader]] = {}
         self._relay_ranges = RelayRanges(geoip_dir)
 
-    def _reader(self, name: str):
+    def _reader(self, name: str) -> maxminddb.Reader | None:
         if self.geoip_dir is None:
             return None
         files = geoip_files(self.geoip_dir, name)
@@ -499,13 +506,13 @@ class GeoIP:
         country = country_name = asn = as_org = None
         reader = self._reader("dbip-country-lite")
         if reader is not None:
-            record = reader.get(ip) or {}
+            record = cast(dict[str, Any], reader.get(ip) or {})
             country_record = record.get("country") or {}
             country = country_record.get("iso_code")
             country_name = (country_record.get("names") or {}).get("en")
         reader = self._reader("dbip-asn-lite")
         if reader is not None:
-            record = reader.get(ip) or {}
+            record = cast(dict[str, Any], reader.get(ip) or {})
             asn = record.get("autonomous_system_number")
             as_org = record.get("autonomous_system_organization")
         return Location(country, country_name, asn, as_org)
@@ -513,7 +520,7 @@ class GeoIP:
     def relay(self, ip: str) -> Relay:
         return self._relay_ranges.lookup(ip)
 
-    def close(self):
+    def close(self) -> None:
         for _, reader in self._readers.values():
             reader.close()
         self._readers.clear()
@@ -532,7 +539,7 @@ def _range_key(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bytes:
     return address.packed
 
 
-def _parse_range(line: str) -> tuple | None:
+def _parse_range(line: str) -> tuple[bytes, bytes, str | None, str | None, str | None] | None:
     """One line of Apple's list (``prefix,country,region,city,``) as a row of
     the ranges table, or None if it's blank, a comment or not a prefix."""
     fields = [field.strip() for field in line.split(",")]
@@ -571,7 +578,7 @@ def build_relay_ranges(lines: Iterable[str], destination: Path) -> int:
                     "INSERT OR REPLACE INTO relay_range VALUES (?, ?, ?, ?, ?)",
                     filter(None, map(_parse_range, lines)),
                 )
-            count = connection.execute("SELECT count(*) FROM relay_range").fetchone()[0]
+            count = int(connection.execute("SELECT count(*) FROM relay_range").fetchone()[0])
         finally:
             connection.close()
         if not count:
@@ -584,7 +591,7 @@ def build_relay_ranges(lines: Iterable[str], destination: Path) -> int:
     return count
 
 
-def _download_relay_ranges(url: str, destination: Path, etag: str | None):
+def _download_relay_ranges(url: str, destination: Path, etag: str | None) -> str | None:
     """Download Apple's list from ``url`` into ``destination`` (see
     ``build_relay_ranges``), unless it's unchanged since the one with ``etag``.
     Returns the new list's ETag ("" if it has none), or None if unchanged."""
@@ -602,12 +609,12 @@ class RelayRanges:
     """Looks IPs up in the ranges file in a directory, opening it again when
     it's replaced."""
 
-    def __init__(self, geoip_dir: Path | None):
+    def __init__(self, geoip_dir: Path | None) -> None:
         self.path = geoip_dir / RELAY_RANGES_FILE if geoip_dir is not None else None
-        self._connection = None
-        self._stat = None
+        self._connection: sqlite3.Connection | None = None
+        self._stat: tuple[int, int] | None = None
 
-    def _open(self):
+    def _open(self) -> sqlite3.Connection | None:
         if self.path is None:
             return None
         try:
@@ -647,7 +654,7 @@ class RelayRanges:
             return Relay(False)
         return Relay(True, row["country"], row["region"], row["city"])
 
-    def close(self):
+    def close(self) -> None:
         if self._connection is not None:
             self._connection.close()
         self._connection = self._stat = None
@@ -683,7 +690,7 @@ def connect_read_only(path: Path) -> sqlite3.Connection:
 
 
 @contextlib.contextmanager
-def _transaction(connection: sqlite3.Connection):
+def _transaction(connection: sqlite3.Connection) -> Iterator[None]:
     # IMMEDIATE, so a read then a write never fails with "database is locked".
     connection.execute("BEGIN IMMEDIATE")
     try:
@@ -744,15 +751,15 @@ def record(connection: sqlite3.Connection, requests_: Iterable[Request], geoip: 
     return len(by_ip)
 
 
-def _min(a, b):
+def _min(a: float | None, b: float | None) -> float | None:
     return b if a is None else a if b is None else min(a, b)
 
 
-def _max(a, b):
+def _max(a: float | None, b: float | None) -> float | None:
     return b if a is None else a if b is None else max(a, b)
 
 
-def _merge(old: dict, new: dict) -> dict:
+def _merge(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
     merged = {
         **new,
         "first_seen": _min(old["first_seen"], new["first_seen"]),
@@ -805,7 +812,7 @@ def fill_in_relay(connection: sqlite3.Connection, geoip: GeoIP) -> int:
     return checked
 
 
-def refresh_geoip(config: Config, connection: sqlite3.Connection, geoip: GeoIP):
+def refresh_geoip(config: Config, connection: sqlite3.Connection, geoip: GeoIP) -> None:
     """``update_geoip``, then ``fill_in_locations`` and ``fill_in_relay``; logs
     rather than raises, as nothing would restart the collector if it exited."""
     if config.geoip_dir is None:
@@ -843,7 +850,7 @@ def recent_ips(connection: sqlite3.Connection, *, logged_in_only: bool = False, 
 
 def ip_count(connection: sqlite3.Connection, *, logged_in_only: bool = False) -> int:
     where = "WHERE logged_in > 0" if logged_in_only else ""
-    return connection.execute(f"SELECT count(*) FROM client_ip {where}").fetchone()[0]
+    return int(connection.execute(f"SELECT count(*) FROM client_ip {where}").fetchone()[0])
 
 
 # The client_ip columns holding POSIX times, which export_rows gives as ISO
@@ -859,7 +866,7 @@ def _iso_utc(posix_time: float) -> str:
     )
 
 
-def export_rows(connection: sqlite3.Connection, *, logged_in_only: bool = False) -> Iterable[dict]:
+def export_rows(connection: sqlite3.Connection, *, logged_in_only: bool = False) -> Iterable[dict[str, Any]]:
     """Every IP's row (only those with a valid JWT if ``logged_in_only``),
     first seen first, as a dict in the table's column order (so columns a
     later schema adds come last), with times as ISO 8601 UTC strings and
@@ -899,8 +906,8 @@ def run(
     config: Config,
     master_pid: int,
     *,
-    sleep=time.sleep,
-    getppid=os.getppid,
+    sleep: Callable[[float], None] = time.sleep,
+    getppid: Callable[[], int] = os.getppid,
 ) -> int:
     """Record Envoy's requests every ``config.interval_seconds`` until
     gunicorn's master has gone; returns the exit status."""
@@ -918,7 +925,14 @@ def run(
         connection.close()
 
 
-def _collect(config, master_pid, connection, geoip, sleep, getppid) -> int:
+def _collect(
+    config: Config,
+    master_pid: int,
+    connection: sqlite3.Connection,
+    geoip: GeoIP,
+    sleep: Callable[[float], None],
+    getppid: Callable[[], int],
+) -> int:
     reader = RequestLogReader(config.request_log)
     # Requests read but not yet recorded, as the reader has moved past them
     # (and may have emptied the file): retried until recording works again,
@@ -946,7 +960,7 @@ def _collect(config, master_pid, connection, geoip, sleep, getppid) -> int:
         sleep(config.interval_seconds)
 
 
-def spawn(master_pid: int, environ: Mapping[str, str] = os.environ):
+def spawn(master_pid: int, environ: Mapping[str, str] = os.environ) -> subprocess.Popen[bytes] | None:
     """Start the collector for gunicorn master ``master_pid``, unless there's
     no database to record in. Returns the ``Popen`` or None."""
     if config_from_env(environ).db_path is None:
@@ -954,7 +968,7 @@ def spawn(master_pid: int, environ: Mapping[str, str] = os.environ):
     return subprocess.Popen([sys.executable, "-m", __name__, str(master_pid)], env=dict(environ))
 
 
-def _exit_quietly(signum, frame):
+def _exit_quietly(signum: int, frame: FrameType | None) -> None:
     sys.exit(0)
 
 

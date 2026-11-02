@@ -10,7 +10,7 @@ from lifetracker.cli.zip_eml_to_txt import zip_eml_to_txt_command
 
 
 @click.group()
-def cli():
+def cli() -> None:
     """lifetracker command-line utilities."""
 
 

@@ -12,7 +12,9 @@ import http.client
 import json
 import os
 import socket
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 SOCKET_PATH = "/.fly/api"
 
@@ -31,11 +33,11 @@ class Response:
 
 
 class _UnixHTTPConnection(http.client.HTTPConnection):
-    def __init__(self, socket_path: str, timeout: float):
+    def __init__(self, socket_path: str, timeout: float) -> None:
         super().__init__(HOST, timeout=timeout)
         self.socket_path = socket_path
 
-    def connect(self):
+    def connect(self) -> None:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             sock.settimeout(self.timeout)
@@ -46,7 +48,7 @@ class _UnixHTTPConnection(http.client.HTTPConnection):
         self.sock = sock
 
 
-def expand_path(path: str, environ=os.environ) -> str:
+def expand_path(path: str, environ: Mapping[str, str] = os.environ) -> str:
     """Replace ``{app}`` and ``{machine}`` in ``path`` with ``FLY_APP_NAME`` and
     ``FLY_MACHINE_ID``, which Fly sets on the Machine; ``./flyssh.sh`` runs no
     shell there, so ``$FLY_APP_NAME`` wouldn't expand. Raises ``ValueError`` if
@@ -74,7 +76,7 @@ def get(path: str, socket_path: str = SOCKET_PATH, timeout: float = TIMEOUT_SECO
 
 def post(
     path: str,
-    json_body: dict | None = None,
+    json_body: dict[str, Any] | None = None,
     socket_path: str = SOCKET_PATH,
     timeout: float = TIMEOUT_SECONDS,
 ) -> Response:

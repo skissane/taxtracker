@@ -6,8 +6,9 @@ module), via ``uptime_log.daily_report``, as the admin's Uptime page does.
 """
 
 import time
+from typing import Any
 
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from lifetracker.core import uptime_log
 
@@ -15,7 +16,7 @@ from lifetracker.core import uptime_log
 class Command(BaseCommand):
     help = "Show what share of each recent UTC day the app was up."
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "--days",
             type=int,
@@ -23,7 +24,7 @@ class Command(BaseCommand):
             help="How many days to show, ending today (default 7).",
         )
 
-    def handle(self, *args, days, **options):
+    def handle(self, *args: Any, days: int, **options: Any) -> None:
         if days < 1:
             raise CommandError("--days must be at least 1.")
         directory = uptime_log.uptime_dir_from_env()

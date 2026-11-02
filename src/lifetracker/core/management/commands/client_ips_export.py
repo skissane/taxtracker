@@ -7,8 +7,9 @@ client-ips.jsonl``. Times are ISO 8601 UTC, and missing values ``null``.
 
 import json
 import sqlite3
+from typing import Any
 
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from lifetracker.core import client_ips
 
@@ -16,14 +17,14 @@ from lifetracker.core import client_ips
 class Command(BaseCommand):
     help = "Write the client IP record to stdout as JSON Lines."
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "--logged-in",
             action="store_true",
             help="Only IPs with requests that had a valid JWT.",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         config = client_ips.config_from_env()
         if config.db_path is None:
             raise CommandError("Client IPs aren't recorded: set LIFETRACKER_CLIENT_IP_DB or LIFETRACKER_DATA_DIR.")

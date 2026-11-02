@@ -8,11 +8,13 @@ backup, and ``restore_cloud_backup`` restores one; callers must enforce
 authorization themselves.
 """
 
+import datetime
 import logging
 import os
 import sqlite3
 import tempfile
 from pathlib import Path
+from typing import IO, Any
 
 import boto3
 from botocore.config import Config
@@ -46,19 +48,19 @@ CLOUD_BACKUP_ERRORS = (BotoCoreError, ClientError, RuntimeError, OSError, sqlite
 class CloudBackupStatusUpdateError(RuntimeError):
     """Raised when upload succeeds but persisting backup status fails."""
 
-    def __init__(self, object_key):
+    def __init__(self, object_key: str) -> None:
         super().__init__("Cloud backup uploaded, but failed to record backup status.")
         self.object_key = object_key
 
 
-def check_sqlite(feature):
+def check_sqlite(feature: str) -> None:
     """Raise ``RuntimeError`` naming *feature* unless the database is SQLite."""
     engine = settings.DATABASES["default"]["ENGINE"]
     if engine != "django.db.backends.sqlite3":
         raise RuntimeError(f"{feature} is only available for SQLite databases.")
 
 
-def backup_database():
+def backup_database() -> IO[bytes]:
     """Copy the whole default (SQLite) database into a temporary file.
 
     Returns the copy as a binary file open for reading from the start; the
@@ -92,12 +94,12 @@ def backup_database():
         return open(path, "rb")
 
 
-def backup_timestamp(when):
+def backup_timestamp(when: datetime.datetime) -> str:
     """Format *when* as used in backup filenames: ``YYYY-MM-DD.HH.MM.SS``."""
     return when.strftime("%Y-%m-%d.%H.%M.%S")
 
 
-def missing_cloud_backup_settings():
+def missing_cloud_backup_settings() -> list[str]:
     """Return the names of the required cloud backup settings that are unset."""
     return [
         key
@@ -110,14 +112,14 @@ def missing_cloud_backup_settings():
     ]
 
 
-def require_cloud_backup_settings():
+def require_cloud_backup_settings() -> None:
     """Raise ``RuntimeError`` naming any required cloud backup settings unset."""
     missing_required = missing_cloud_backup_settings()
     if missing_required:
         raise RuntimeError(f"Cloud backup settings are incomplete. Missing: {', '.join(missing_required)}.")
 
 
-def cloud_backup_s3_client():
+def cloud_backup_s3_client() -> Any:
     """Return a boto3 S3 client for the configured backup bucket."""
     endpoint_url = settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL or None
     region_name = settings.LIFETRACKER_BACKUP_S3_REGION_NAME or None
@@ -135,7 +137,7 @@ def cloud_backup_s3_client():
         raise RuntimeError(f"Invalid S3 configuration: {exc}") from exc
 
 
-def run_cloud_backup():
+def run_cloud_backup() -> str:
     """Upload the database to the cloud backup bucket; return its object key."""
     # Checked first: unlike missing settings, configuration can't fix this.
     check_sqlite("Cloud backup")
@@ -182,15 +184,15 @@ def run_cloud_backup():
 # the backup, so then nothing is recorded, and the next backup goes ahead.
 
 
-def _data_version():
+def _data_version() -> int:
     """SQLite's ``PRAGMA data_version`` on Django's connection, which changes
     whenever another connection commits (never for this connection's own
     commits)."""
     with connections["default"].cursor() as cursor:
-        return cursor.execute("PRAGMA data_version").fetchone()[0]
+        return int(cursor.execute("PRAGMA data_version").fetchone()[0])
 
 
-def database_signature():
+def database_signature() -> list[int] | None:
     """The database file's identity, size and modification time, or None if
     its write-ahead log isn't empty (or there's no file, as for an in-memory
     database)."""
@@ -207,7 +209,7 @@ def database_signature():
     return [stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns]
 
 
-def _backup_destination():
+def _backup_destination() -> dict[str, Any]:
     """Where backups go, so a new bucket or hostname gets a fresh backup."""
     return {
         "endpoint_url": settings.LIFETRACKER_BACKUP_S3_ENDPOINT_URL,
@@ -216,7 +218,7 @@ def _backup_destination():
     }
 
 
-def _record_backup_state(data_version, object_key):
+def _record_backup_state(data_version: int, object_key: str) -> None:
     """Record the database's state after a backup, if it's certain the backup
     has every commit so far (see above); otherwise remove any old record. Logs
     rather than raises, as the backup itself has succeeded."""
@@ -247,7 +249,7 @@ def _record_backup_state(data_version, object_key):
             pass
 
 
-def database_changed():
+def database_changed() -> bool:
     """Whether the database (or where backups go) might have changed since the
     last cloud backup; True unless that's certain not to be so."""
     try:
@@ -260,7 +262,7 @@ def database_changed():
     return signature is None or state.get("database") != signature or state.get("destination") != _backup_destination()
 
 
-def list_cloud_backups(prefix):
+def list_cloud_backups(prefix: str) -> tuple[list[str], list[dict[str, Any]]]:
     """List the bucket's top-level folders and the objects under *prefix*.
 
     Returns ``(folders, objects)``: the top-level folder prefixes (one per
@@ -288,7 +290,7 @@ def list_cloud_backups(prefix):
     return folders, objects
 
 
-def download_cloud_backup(object_key, path):
+def download_cloud_backup(object_key: str, path: str | Path) -> None:
     """Download the cloud backup *object_key* to the file at *path*."""
     check_sqlite("Cloud backup restore")
     require_cloud_backup_settings()
@@ -297,11 +299,11 @@ def download_cloud_backup(object_key, path):
         s3_client.download_fileobj(settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME, object_key, dest)
 
 
-def _page_size(conn):
-    return conn.execute("PRAGMA page_size").fetchone()[0]
+def _page_size(conn: sqlite3.Connection) -> int:
+    return int(conn.execute("PRAGMA page_size").fetchone()[0])
 
 
-def check_backup_file(path):
+def check_backup_file(path: str | Path) -> None:
     """Raise ``RuntimeError`` unless *path* is a database we can restore.
 
     It must be an intact SQLite database (``PRAGMA quick_check``) that has
@@ -326,7 +328,7 @@ def check_backup_file(path):
         source.close()
 
 
-def restore_database(path):
+def restore_database(path: str | Path) -> None:
     """Replace the whole default (SQLite) database with the database at *path*.
 
     This copies *path* into the live database with SQLite's online backup

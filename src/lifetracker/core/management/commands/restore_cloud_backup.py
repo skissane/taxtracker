@@ -20,9 +20,10 @@ the backup of the current database fails.
 
 import os
 import tempfile
+from typing import Any
 
 from django.core.management import call_command
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import transaction
 
 from lifetracker.core.backup import (
@@ -39,7 +40,7 @@ from lifetracker.core.models import CLOUD_BACKUP_STATUS_PK, CloudBackupStatus
 class Command(BaseCommand):
     help = "Replace the database with a cloud backup, after uploading a cloud backup of the current one."
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "object_key",
             help="The backup's object key, e.g. host.example/db-backup.2026-10-24.01.02.03.sqlite3.",
@@ -52,7 +53,7 @@ class Command(BaseCommand):
             help="Don't ask for confirmation.",
         )
 
-    def handle(self, *args, object_key, interactive, **options):
+    def handle(self, *args: Any, object_key: str, interactive: bool, **options: Any) -> None:
         with tempfile.TemporaryDirectory(prefix="lifetracker-restore-") as tmp_dir:
             path = os.path.join(tmp_dir, "restore.sqlite3")
             try:
@@ -99,7 +100,7 @@ class Command(BaseCommand):
                 status.save(force_insert=True)
         call_command("migrate", interactive=False, stdout=self.stdout)
 
-    def _confirm(self, object_key):
+    def _confirm(self, object_key: str) -> bool:
         self.stdout.write(
             f"This replaces the whole database with {object_key}, after uploading "
             "a cloud backup of the current one. Changes made between that backup "

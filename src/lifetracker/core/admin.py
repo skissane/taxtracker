@@ -3,16 +3,21 @@ import logging
 import mimetypes
 import sqlite3
 import time
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db.models import Model
 from django.forms import BaseInlineFormSet
-from django.http import FileResponse, Http404, HttpResponse
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse
+from django.http.response import HttpResponseBase
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import path, reverse
+from django.urls import URLPattern, path, reverse
 from django.utils import timezone
 from django.utils.html import format_html_join
 from django.utils.safestring import mark_safe
@@ -58,11 +63,11 @@ class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
       IntegrityError from the unique DB constraint).
     """
 
-    _primary_label = "item"
-    _nonempty_error = None  # if set, raised when there are no non-deleted rows
+    _primary_label: str = "item"
+    _nonempty_error: str | None = None  # if set, raised when there are no non-deleted rows
     _auto_primary_form = None  # set in clean() when auto-setting a single row
 
-    def clean(self):
+    def clean(self) -> None:
         super().clean()
         if any(self.errors):
             return
@@ -86,7 +91,7 @@ class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
             else:
                 raise ValidationError(f"At least one {self._primary_label} must be marked as primary.")
 
-    def save(self, commit=True):
+    def save(self, commit: bool = True) -> list[Model]:
         instances = super().save(commit=commit)
         # For the auto-set-primary case, ensure the DB is updated even when the
         # form was not otherwise "changed" (e.g. an existing row already in the DB
@@ -98,7 +103,7 @@ class _AtLeastOnePrimaryFormSet(BaseInlineFormSet):
             # unconditionally issue the UPDATE so unchanged forms are persisted.
             # New rows are already saved by super().save() with is_primary=True.
             if inst.pk:
-                self.model.objects.filter(pk=inst.pk).update(is_primary=True)
+                type(inst)._default_manager.filter(pk=inst.pk).update(is_primary=True)
             inst.is_primary = True
         return instances
 
@@ -139,12 +144,12 @@ class FileTypeAdmin(admin.ModelAdmin):
     inlines = [MimeTypeInline, FileExtensionInline]
 
     @admin.display(description="Primary MIME Type")
-    def primary_mime_type(self, obj):
+    def primary_mime_type(self, obj: FileType) -> str:
         mt = obj.mime_types.filter(is_primary=True).first()
         return mt.mime_type if mt else "—"
 
     @admin.display(description="Primary Extension")
-    def primary_extension(self, obj):
+    def primary_extension(self, obj: FileType) -> str:
         ext = obj.file_extensions.filter(is_primary=True).first()
         return ext.extension if ext else "—"
 
@@ -190,19 +195,19 @@ INLINE_CONTENT_TYPES = frozenset(
 class DBStoredFileAdmin(admin.ModelAdmin):
     """Registered only to host the serve-file URL; hidden from the admin index."""
 
-    def has_module_permission(self, request):
+    def has_module_permission(self, request: HttpRequest) -> bool:
         return False
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request: HttpRequest) -> bool:
         return False
 
-    def has_change_permission(self, request, obj=None):
+    def has_change_permission(self, request: HttpRequest, obj: Model | None = None) -> bool:
         return False
 
-    def has_delete_permission(self, request, obj=None):
+    def has_delete_permission(self, request: HttpRequest, obj: Model | None = None) -> bool:
         return False
 
-    def get_urls(self):
+    def get_urls(self) -> list[URLPattern]:
         custom = [
             path(
                 "file/<int:pk>/",
@@ -212,7 +217,7 @@ class DBStoredFileAdmin(admin.ModelAdmin):
         ]
         return custom + super().get_urls()
 
-    def _can_view_stored_file(self, request, stored_file_pk):
+    def _can_view_stored_file(self, request: HttpRequest, stored_file_pk: int) -> bool:
         """Whether *request.user* can view at least one model row owning this file."""
         if request.user.is_superuser:
             return True
@@ -224,7 +229,7 @@ class DBStoredFileAdmin(admin.ModelAdmin):
                     return True
         return False
 
-    def serve_file_view(self, request, pk):
+    def serve_file_view(self, request: HttpRequest, pk: int) -> HttpResponse:
         obj = get_object_or_404(DBStoredFile, pk=pk)
         if not self._can_view_stored_file(request, pk):
             raise PermissionDenied
@@ -271,22 +276,22 @@ class CloudBackupStatusAdmin(admin.ModelAdmin):
     entry (under Core) leads there.
     """
 
-    def has_module_permission(self, request):
+    def has_module_permission(self, request: HttpRequest) -> bool:
         return request.user.is_active and request.user.is_superuser
 
-    def has_view_permission(self, request, obj=None):
+    def has_view_permission(self, request: HttpRequest, obj: Model | None = None) -> bool:
         return request.user.is_active and request.user.is_superuser
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request: HttpRequest) -> bool:
         return False
 
-    def has_change_permission(self, request, obj=None):
+    def has_change_permission(self, request: HttpRequest, obj: Model | None = None) -> bool:
         return False
 
-    def has_delete_permission(self, request, obj=None):
+    def has_delete_permission(self, request: HttpRequest, obj: Model | None = None) -> bool:
         return False
 
-    def get_urls(self):
+    def get_urls(self) -> list[URLPattern]:
         # Only these: the single status row has no add/change/delete pages.
         return [
             path(
@@ -306,7 +311,7 @@ class CloudBackupStatusAdmin(admin.ModelAdmin):
             ),
         ]
 
-    def backups_view(self, request):
+    def backups_view(self, request: HttpRequest) -> HttpResponse:
         """Cloud backup status, with "Run Backup Now" (on POST)."""
         if not request.user.is_superuser:
             raise PermissionDenied
@@ -352,7 +357,7 @@ class CloudBackupStatusAdmin(admin.ModelAdmin):
         }
         return render(request, "admin/core/cloudbackupstatus/backups.html", context)
 
-    def cloud_backup_list_view(self, request):
+    def cloud_backup_list_view(self, request: HttpRequest) -> HttpResponse:
         if not request.user.is_superuser:
             raise PermissionDenied
 
@@ -361,8 +366,8 @@ class CloudBackupStatusAdmin(admin.ModelAdmin):
         own_prefix = f"{settings.LIFETRACKER_BACKUP_HOSTNAME}/"
         prefix = request.GET.get("prefix", own_prefix)
         missing_required = missing_cloud_backup_settings()
-        folders = []
-        objects = None
+        folders: list[str] = []
+        objects: list[dict[str, Any]] | None = None
         if not missing_required:
             try:
                 folders, objects = list_cloud_backups(prefix)
@@ -385,7 +390,7 @@ class CloudBackupStatusAdmin(admin.ModelAdmin):
         }
         return render(request, "admin/core/cloudbackupstatus/cloud_backup_list.html", context)
 
-    def download_db_backup_view(self, request):
+    def download_db_backup_view(self, request: HttpRequest) -> HttpResponseBase:
         if not request.user.is_superuser:
             raise PermissionDenied
 
@@ -420,7 +425,7 @@ class CloudBackupStatusAdmin(admin.ModelAdmin):
 _IDLE_WATCHDOG_STALE_INTERVALS = 3
 
 
-def _format_duration(seconds):
+def _format_duration(seconds: float) -> str:
     """E.g. "28 seconds", "28 minutes" or "3 hours, 5 minutes"."""
     seconds = max(0, int(seconds))
     if seconds < 60:
@@ -429,11 +434,11 @@ def _format_duration(seconds):
     return timesince(now - datetime.timedelta(seconds=seconds), now, depth=2)
 
 
-def _parse_status_time(value):
+def _parse_status_time(value: str | None) -> datetime.datetime | None:
     return datetime.datetime.fromisoformat(value) if value else None
 
 
-def _auto_backup_status(raw):
+def _auto_backup_status(raw: dict[str, Any] | None) -> dict[str, Any] | None:
     """The status file's automatic backup section, for the page, or None if
     automatic backups are off."""
     if raw is None:
@@ -448,11 +453,11 @@ def _auto_backup_status(raw):
     }
 
 
-def idle_watchdog_page_context(now=None):
+def idle_watchdog_page_context(now: datetime.datetime | None = None) -> dict[str, Any]:
     """The idle watchdog page's context, from the environment (the same as the
     watchdog's) and its status file."""
     now = now or timezone.now()
-    context = {
+    context: dict[str, Any] = {
         "config": None,
         "config_error": None,
         "status": None,
@@ -481,6 +486,8 @@ def idle_watchdog_page_context(now=None):
     try:
         checked_at = _parse_status_time(raw["checked_at"])
         started_at = _parse_status_time(raw["started_at"])
+        if started_at is None:
+            raise ValueError("the status file has no start time")
         idle_timeout = float(raw["idle_timeout_seconds"])
         interval = float(raw["check_interval_seconds"])
         status = {
@@ -538,14 +545,14 @@ def idle_watchdog_page_context(now=None):
     return context
 
 
-def idle_watchdog_view(request):
+def idle_watchdog_view(request: HttpRequest) -> HttpResponse:
     """The superuser-only idle watchdog status page. The admin site serves it
     (wrapped in ``admin_view``) at ``idle-watchdog/`` and links it from the top
     bar, as it belongs to no model."""
     if not request.user.is_superuser:
         raise PermissionDenied
 
-    context = {
+    context: dict[str, Any] = {
         **admin.site.each_context(request),
         **idle_watchdog_page_context(),
         "title": "Idle Watchdog",
@@ -558,7 +565,7 @@ _UPTIME_DEFAULT_DAYS = 7
 _UPTIME_MAX_DAYS = 366
 
 
-def _uptime_days(days_param):
+def _uptime_days(days_param: str | None) -> int | None:
     """The uptime page's ``days`` query parameter (blank for the default) as a
     number of days, or None if it's invalid."""
     if not days_param:
@@ -570,10 +577,10 @@ def _uptime_days(days_param):
     return days if 1 <= days <= _UPTIME_MAX_DAYS else None
 
 
-def uptime_report_page_context(days_param, now=None):
+def uptime_report_page_context(days_param: str | None, now: float | None = None) -> dict[str, Any]:
     """The uptime page's context: the same report as the ``uptime_report``
     command, for the ``days`` query parameter (blank for the default)."""
-    context = {
+    context: dict[str, Any] = {
         "days": _UPTIME_DEFAULT_DAYS,
         "max_days": _UPTIME_MAX_DAYS,
         "days_error": None,
@@ -606,7 +613,7 @@ def uptime_report_page_context(days_param, now=None):
     return context
 
 
-def uptime_report_view(request):
+def uptime_report_view(request: HttpRequest) -> HttpResponse:
     """The superuser-only uptime page, served and linked like the idle watchdog
     page (see ``idle_watchdog_view``)."""
     if not request.user.is_superuser:
@@ -620,13 +627,13 @@ def uptime_report_view(request):
     return render(request, "admin/core/uptime_report.html", context)
 
 
-def _format_clock(second_of_day):
+def _format_clock(second_of_day: int) -> str:
     """E.g. "09:05:03" for a second of a day."""
     hours, rest = divmod(second_of_day, 3600)
     return f"{hours:02}:{rest // 60:02}:{rest % 60:02}"
 
 
-def _utc_iso(date, second_of_day=0):
+def _utc_iso(date: datetime.date, second_of_day: int = 0) -> str:
     """E.g. "2026-10-20T09:05:03Z" for a second of a UTC day, for a ``<time>``
     element's ``datetime``, which ``core/local_times.js`` shows in the browser's
     time zone."""
@@ -634,7 +641,7 @@ def _utc_iso(date, second_of_day=0):
     return f"{moment.isoformat()}Z"
 
 
-def uptime_day_page_context(date_param, days_param, now=None):
+def uptime_day_page_context(date_param: str, days_param: str | None, now: float | None = None) -> dict[str, Any]:
     """The context of the uptime page's drill-down into one UTC day
     (``date_param``, YYYY-MM-DD), listing its up periods. Raises Http404 for an
     invalid date or one after today. ``days_param`` is the Uptime page's, kept
@@ -648,7 +655,7 @@ def uptime_day_page_context(date_param, days_param, now=None):
     if day > uptime_log.day_of(now):
         raise Http404("That day hasn't happened yet.")
     days = _uptime_days(days_param)
-    context = {
+    context: dict[str, Any] = {
         "date": date,
         "directory": uptime_log.uptime_dir_from_env(),
         "report_query": (f"?days={days}" if days_param and days is not None else ""),
@@ -687,7 +694,7 @@ def uptime_day_page_context(date_param, days_param, now=None):
     return context
 
 
-def uptime_day_view(request, date):
+def uptime_day_view(request: HttpRequest, date: str) -> HttpResponse:
     """The superuser-only drill-down from the uptime page into one day's up
     periods, served like the uptime page (see ``idle_watchdog_view``) but not
     linked from the top bar."""
@@ -706,7 +713,7 @@ def uptime_day_view(request, date):
 _CLIENT_IPS_LIMIT = 500
 
 
-def _utc_iso_from_timestamp(timestamp):
+def _utc_iso_from_timestamp(timestamp: float | None) -> str | None:
     """A POSIX time as e.g. "2026-10-20T09:05:03Z", or None for None."""
     if timestamp is None:
         return None
@@ -714,7 +721,7 @@ def _utc_iso_from_timestamp(timestamp):
     return moment.replace(tzinfo=None, microsecond=0).isoformat() + "Z"
 
 
-def _client_ip_row(row):
+def _client_ip_row(row: sqlite3.Row | Mapping[str, Any]) -> dict[str, Any]:
     row = dict(row)
     if "ip" in row:
         # An IPv6 address can be 39 characters: let it wrap after a colon
@@ -731,7 +738,7 @@ def _client_ip_row(row):
     return row
 
 
-def _geoip_status_rows(geoip_dir):
+def _geoip_status_rows(geoip_dir: Path) -> tuple[list[dict[str, Any]] | None, str | None]:
     """The client IPs page's table of DB-IP downloads, from ``update_geoip``'s
     status file (None if there's none), and an error message or None."""
     path = geoip_dir / client_ips.GEOIP_STATUS_NAME
@@ -760,7 +767,7 @@ def _geoip_status_rows(geoip_dir):
     return rows, None
 
 
-def client_ips_page_context(logged_in_only=False):
+def client_ips_page_context(logged_in_only: bool = False) -> dict[str, Any]:
     """The client IPs page's context, from the collector's database (see
     ``client_ips``)."""
     config = client_ips.config_from_env()
@@ -804,7 +811,7 @@ def client_ips_page_context(logged_in_only=False):
     return context
 
 
-def client_ips_view(request):
+def client_ips_view(request: HttpRequest) -> HttpResponse:
     """The superuser-only client IPs page, served and linked like the idle
     watchdog page (see ``idle_watchdog_view``)."""
     if not request.user.is_superuser:
@@ -834,7 +841,7 @@ class AppIconForm(forms.Form):
     )
 
 
-def app_icon_view(request):
+def app_icon_view(request: HttpRequest) -> HttpResponse:
     """The superuser-only app icon page (see ``core/app_icon.py``), served and
     linked like the idle watchdog page (see ``idle_watchdog_view``): it shows
     the current icon, and uploads a replacement or resets it to the default."""

@@ -8,6 +8,7 @@ import base64
 import json
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 PDF_MAGIC = b"%PDF-"
 FIDELITY_URL_PREFIX = "https://netbenefitsww.fidelity.com/mybenefitsww/spshistoryservices/activities/record/c:"
@@ -17,7 +18,7 @@ class UnsupportedArchiveError(Exception):
     """Raised when the uploaded file is not a recognised archive format."""
 
 
-def _field[T](mapping: dict, key: str, kind: type[T]) -> T:
+def _field[T](mapping: dict[str, Any], key: str, kind: type[T]) -> T:
     """Return ``mapping[key]`` if it's a *kind*, else an empty *kind* (``kind()``)."""
     value = mapping.get(key)
     return value if isinstance(value, kind) else kind()

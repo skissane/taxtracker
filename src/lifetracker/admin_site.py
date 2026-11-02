@@ -1,6 +1,9 @@
+from typing import Any
+
 from django.conf import settings
 from django.contrib import admin
-from django.urls import path
+from django.http import HttpRequest
+from django.urls import URLPattern, URLResolver, path
 from django.utils.html import format_html
 
 # Git's default abbreviated object name length (core.abbrev's minimum), also what
@@ -10,7 +13,7 @@ _SHORT_COMMIT_ID_LENGTH = 7
 _SITE_NAME = "Life Tracker"
 
 
-def _commit_url(commit_url_base, commit_id):
+def _commit_url(commit_url_base: str, commit_id: str) -> str:
     return f"{commit_url_base.rstrip('/')}/{commit_id}"
 
 
@@ -20,7 +23,9 @@ _TEXT_COLOR = "var(--header-branding-color)"
 _TEXT_STYLE = f"color: {_TEXT_COLOR};"
 
 
-def _build_admin_site_header(*, site_name, commit_id, commit_url_base, instance_name, link_commit):
+def _build_admin_site_header(
+    *, site_name: str, commit_id: str, commit_url_base: str, instance_name: str, link_commit: bool
+) -> str:
     if commit_id and link_commit:
         return format_html(
             '{} <code style="{}"><a href="{}" target="_blank" rel="noopener noreferrer"'
@@ -63,7 +68,7 @@ class LifetrackerAdminSite(admin.AdminSite):
     # enabled, and renders the stock admin login (no Google button) when it isn't.
     login_template = "google_sso/login.html"
 
-    def get_urls(self):
+    def get_urls(self) -> list[URLPattern | URLResolver]:
         # Imported here: core.admin registers its models on admin.site, an
         # instance of this class, so a top-level import would be circular.
         from lifetracker.core.admin import (  # noqa: PLC0415
@@ -105,7 +110,7 @@ class LifetrackerAdminSite(admin.AdminSite):
             *super().get_urls(),
         ]
 
-    def each_context(self, request):
+    def each_context(self, request: HttpRequest) -> dict[str, Any]:
         context = super().each_context(request)
         authenticated = request.user.is_authenticated
         site_name = _SITE_NAME if authenticated else settings.LIFETRACKER_UNAUTHENTICATED_SITE_NAME

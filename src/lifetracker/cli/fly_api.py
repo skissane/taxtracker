@@ -3,13 +3,14 @@
 import http.client
 import json
 import sys
+from typing import Any
 
 import click
 
 from lifetracker.core import fly_api
 
 
-def _parse_json_object(text: str) -> dict:
+def _parse_json_object(text: str) -> dict[str, Any]:
     try:
         value = json.loads(text)
     except ValueError as e:

@@ -4,12 +4,23 @@
 ForeignKey, a `title` and a `status` using `TreeNodeMixin.STATUS_CHOICES`.
 """
 
+from typing import TYPE_CHECKING, Any
+
 from django.core.exceptions import ValidationError
 
 CYCLE_MARKER = "…"
 
 
 class TreeNodeMixin:
+    if TYPE_CHECKING:
+        # Provided by the model this is mixed into.
+        pk: Any
+        title: str
+        status: str
+        parent_id: Any
+        parent: Any
+        _default_manager: Any
+
     STATUS_PENDING = "pending"
     STATUS_DONE = "done"
     STATUS_CHOICES = [
@@ -18,10 +29,10 @@ class TreeNodeMixin:
     ]
 
     @property
-    def is_done(self):
+    def is_done(self) -> bool:
         return self.status == self.STATUS_DONE
 
-    def ancestor_titles(self, cycle_marker=None):
+    def ancestor_titles(self, cycle_marker: str | None = None) -> list[str]:
         """Return the titles from the root down to this node.
 
         Stops at a parent cycle (which `check_parent_cycle` prevents, but may
@@ -29,7 +40,7 @@ class TreeNodeMixin:
         """
         titles = [self.title]
         visited = {self.pk}
-        current = self
+        current: Any = self
         while current.parent_id is not None:
             if current.parent_id in visited:
                 if cycle_marker is not None:
@@ -40,15 +51,15 @@ class TreeNodeMixin:
             titles.insert(0, current.title)
         return titles
 
-    def tree_path_str(self):
+    def tree_path_str(self) -> str:
         """Return the path as "A > B > C", with "…" at the start on a cycle."""
         return " > ".join(self.ancestor_titles(cycle_marker=CYCLE_MARKER))
 
-    def get_folder_path(self):
+    def get_folder_path(self) -> list[str]:
         """Return a list of titles representing the path from root to this node."""
         return self.ancestor_titles()
 
-    def check_parent_cycle(self):
+    def check_parent_cycle(self) -> None:
         """Raise ValidationError (on `parent`) if `parent` would create a cycle."""
         if self.parent_id is None or self.pk is None:
             return

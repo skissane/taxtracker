@@ -1,4 +1,6 @@
 from django.contrib import admin
+from django.db.models import Model
+from django.http import HttpRequest
 
 from lifetracker.tasktracker.forms import TaskAttachmentForm
 from lifetracker.tasktracker.models import Task, TaskAttachment, TaskType
@@ -45,13 +47,13 @@ class TaskTypeAdmin(admin.ModelAdmin):
     list_filter = ("content_type",)
     search_fields = ("name",)
 
-    def get_readonly_fields(self, request, obj=None):
+    def get_readonly_fields(self, request: HttpRequest, obj: Model | None = None) -> list[str] | tuple[str, ...]:
         readonly_fields = super().get_readonly_fields(request, obj)
         if obj is not None and obj.pk == TaskType.GENERIC_PK:
             readonly_fields = tuple(readonly_fields) + ("name", "content_type")
         return readonly_fields
 
-    def has_delete_permission(self, request, obj=None):
+    def has_delete_permission(self, request: HttpRequest, obj: Model | None = None) -> bool:
         if obj is not None and obj.pk == TaskType.GENERIC_PK:
             return False
         return super().has_delete_permission(request, obj)

@@ -12,7 +12,7 @@ Keep to this when editing them: put each new sentence on its own line, don't rew
 
 ## Commands
 
-CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `sentence-per-line-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `coverage`, `patch-coverage`, `patch-coverage-post`, `screenshots`, `screenshots-post`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
+CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `sentence-per-line-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `mypy`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `coverage`, `patch-coverage`, `patch-coverage-post`, `screenshots`, `screenshots-post`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
 `just ci` drifts from `ci.yml` if the workflow changes without a matching justfile edit; `run_workflow_local.py` avoids that by parsing the workflow YAML directly and running its `run:` steps as written (see its docstring for what it does and doesn't support).
 After `just coverage` runs, CI uploads `coverage.xml` to Codecov (`codecov/codecov-action`), and also uploads the `junit.xml` test results it writes for Codecov Test Analytics (`report_type: test_results`, even if the tests failed; not `codecov/test-results-action`, which is deprecated); these steps need a `CODECOV_TOKEN` repo secret from codecov.io and are skipped by `run_workflow_local.py` since they're `uses:` steps.
 Codecov works out a PR's comparison with its base commit's report only when the PR's own upload is processed, and never redoes it when the base's report arrives later, so a stacked PR rebased onto `master` as its parent merges (whose CI races `master`'s, which uploads last as it saves the Docker image first) got "Please upload report for BASE".
@@ -103,6 +103,9 @@ just screenshots-post 123
 # Lint (matches `just lint`/`just fmt-check`, which check the whole repo root)
 uv run ruff check .
 uv run ruff format .
+
+# Type-check src with mypy (also part of `just check`, `just ci` and the `test` job)
+just mypy
 
 # Template lint
 uv run djlint --check src/lifetracker/taxtracker/templates/
@@ -486,6 +489,14 @@ Every boot runs `migrate` against the only copy of the data, so run a cloud back
 ## Linting config
 
 Ruff: rules E, F, W, I, UP, TID252, PLC0415, RUF100; line length 120; migrations excluded. djlint: profile=django, indent=2.
+
+## Type checking
+
+`just mypy` (`uv run mypy src`; part of `just check`, `just ci` and the `test` job) type-checks `src/` with mypy and the `django-stubs` plugin, configured in `pyproject.toml`'s `[tool.mypy]` with `disallow_untyped_defs`, so every function needs annotations, and `warn_unused_ignores`, so a `# type: ignore` that no longer hides an error fails.
+Migrations are analysed but their errors ignored (`ignore_errors`), and `boto3`, `botocore`, `django_google_sso` and `pdfkit` (no stubs) have `ignore_missing_imports`.
+`mypy --strict` isn't enforced: its remaining errors are bare `ModelAdmin`, `TabularInline`, `ModelForm` and `BaseInlineFormSet` subclasses, and Django doesn't let those classes be subscripted at runtime (`ModelAdmin[Item]` raises `TypeError`) without `django_stubs_ext.monkeypatch()`.
+Python 3.14 evaluates annotations only when something reads them (e.g. `__annotations__` or `inspect.signature`), and a subscripted Django class such as `ContentFile[bytes]` raises `TypeError` then, so annotate with the bare class (`ContentFile`); quoting doesn't help, as ruff's `UP037` removes the quotes.
+Mixins that rely on attributes of the model they're mixed into (`TreeNodeMixin`, `AttachmentAutofillMixin`) declare them under `if TYPE_CHECKING:`.
 
 ## Test warnings policy
 

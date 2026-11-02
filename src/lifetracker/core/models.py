@@ -1,6 +1,7 @@
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 from django.core.exceptions import SuspiciousFileOperation, ValidationError
 from django.core.files.base import ContentFile
@@ -30,7 +31,7 @@ class FileType(models.Model):
         verbose_name = "File Type"
         verbose_name_plural = "File Types"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.short_name
 
 
@@ -73,10 +74,10 @@ class MimeType(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.mime_type
 
-    def clean(self):
+    def clean(self) -> None:
         if self.mime_type and not _MIME_TYPE_RE.match(self.mime_type):
             raise ValidationError(
                 {
@@ -124,16 +125,16 @@ class FileExtension(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.extension
 
-    def clean(self):
+    def clean(self) -> None:
         if self.extension:
             self.extension = self.extension.lower()
             if _EXTENSION_INVALID_RE.search(self.extension):
                 raise ValidationError({"extension": ("File extension must not contain whitespace, a dot, or a slash.")})
 
-    def save(self, *args, **kwargs):
+    def save(self, *args: Any, **kwargs: Any) -> None:
         if self.extension:
             self.extension = self.extension.lower()
         super().save(*args, **kwargs)
@@ -149,7 +150,7 @@ class DBStoredFile(models.Model):
         verbose_name = "Stored File"
         verbose_name_plural = "Stored Files"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.filename
 
 
@@ -161,41 +162,41 @@ class DatabaseStorage(Storage):
     # "db/<pk>/" with the largest BigAutoField pk.
     _MAX_PREFIX_CHARS = len(f"{_PREFIX}{(1 << 63) - 1}/")
 
-    def _open(self, name, mode="rb"):
+    def _open(self, name: str, mode: str = "rb") -> ContentFile:
         pk = self._name_to_pk(name)
         obj = DBStoredFile.objects.get(pk=pk)
         return ContentFile(bytes(obj.content), name=name)
 
-    def _save(self, name, content):
+    def _save(self, name: str, content: Any) -> str:
         filename = os.path.basename(name)
         data = content.read()
         obj = DBStoredFile.objects.create(filename=filename, content=data)
         return f"{self._PREFIX}{obj.pk}/{filename}"
 
-    def exists(self, name):
+    def exists(self, name: str) -> bool:
         try:
             pk = self._name_to_pk(name)
             return DBStoredFile.objects.filter(pk=pk).exists()
         except ValueError:
             return False
 
-    def url(self, name):
+    def url(self, name: str | None) -> str:
         pk = self._name_to_pk(name)
         return reverse("admin:core_dbstoredfile_serve_file", args=[pk])
 
-    def delete(self, name):
+    def delete(self, name: str) -> None:
         try:
             pk = self._name_to_pk(name)
             DBStoredFile.objects.filter(pk=pk).delete()
         except ValueError:
             pass
 
-    def size(self, name):
+    def size(self, name: str) -> int:
         pk = self._name_to_pk(name)
         # LENGTH() of a blob reads only its size, not the content.
         return DBStoredFile.objects.filter(pk=pk).annotate(size=Length("content")).values_list("size", flat=True).get()
 
-    def get_available_name(self, name, max_length=None):
+    def get_available_name(self, name: str, max_length: int | None = None) -> str:
         # Each save creates a new record so there are no name conflicts.
         # _save returns "db/<pk>/<filename>", so leave room for that prefix with the longest pk.
         if max_length:
@@ -211,7 +212,7 @@ class DatabaseStorage(Storage):
                 name = stem[:allowed] + suffix if allowed > 0 else name[:max_length]
         return name
 
-    def _name_to_pk(self, name):
+    def _name_to_pk(self, name: object) -> int:
         # Expected format: "db/<pk>/<filename>"
         if not isinstance(name, str):
             raise ValueError(f"Expected str, got {type(name).__name__}: {name!r}")
@@ -252,7 +253,7 @@ class CloudBackupStatus(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.last_backup_at is None:
             return "Cloud backup status: never backed up"
         return f"Cloud backup status: last backup at {self.last_backup_at}"
@@ -285,9 +286,9 @@ class AppIcon(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"App icon uploaded at {self.uploaded_at}"
 
     @property
-    def version(self):
+    def version(self) -> str:
         return self.sha256[:16]

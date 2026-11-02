@@ -25,7 +25,7 @@ import hashlib
 
 from django.core.files.base import ContentFile
 from django.db import transaction
-from django.http import HttpResponse
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.templatetags.static import static
 from django.urls import reverse
@@ -61,7 +61,7 @@ class PngInfo:
     has_transparency: bool
 
 
-def png_info(data):
+def png_info(data: bytes) -> PngInfo:
     """``data``'s ``PngInfo``, or ``InvalidIcon`` if it isn't a well-formed PNG."""
     if not data.startswith(_PNG_SIGNATURE):
         raise InvalidIcon("The file isn't a PNG image.")
@@ -93,7 +93,7 @@ def png_info(data):
     )
 
 
-def check_icon(data):
+def check_icon(data: bytes) -> PngInfo:
     """``data``'s ``PngInfo`` if it can be the icon, else ``InvalidIcon``."""
     if len(data) > MAX_BYTES:
         raise InvalidIcon(f"The file is bigger than {MAX_BYTES // 1024} KiB.")
@@ -105,7 +105,7 @@ def check_icon(data):
     return info
 
 
-def save_icon(data):
+def save_icon(data: bytes) -> PngInfo:
     """Make the PNG ``data`` the icon, replacing any uploaded one.
 
     Returns its ``PngInfo``; raises ``InvalidIcon`` (changing nothing) if it
@@ -125,7 +125,7 @@ def save_icon(data):
     return info
 
 
-def reset_icon():
+def reset_icon() -> None:
     """Go back to the default icon, deleting any uploaded one."""
     # A queryset delete still sends post_delete, which deletes the file.
     AppIcon.objects.filter(pk=APP_ICON_PK).delete()
@@ -144,7 +144,7 @@ class Icon:
     uploaded_at: datetime.datetime | None = None
 
 
-def current_icon():
+def current_icon() -> Icon:
     """The current ``Icon``: the uploaded one, if any, else the default."""
     uploaded = AppIcon.objects.filter(pk=APP_ICON_PK).first()
     if uploaded is None:
@@ -167,14 +167,14 @@ def current_icon():
 
 
 @require_safe
-def app_icon(request):
+def app_icon(request: HttpRequest) -> HttpResponse:
     """The uploaded icon, or a redirect to the default if there's none."""
     icon = AppIcon.objects.filter(pk=APP_ICON_PK).first()
     if icon is None:
-        response = redirect(static(DEFAULT_ICON))
+        redirect_response = redirect(static(DEFAULT_ICON))
         # An icon may be uploaded later, at this same URL.
-        add_never_cache_headers(response)
-        return response
+        add_never_cache_headers(redirect_response)
+        return redirect_response
     with icon.image.open("rb") as f:
         response = HttpResponse(f.read(), content_type="image/png")
     if request.GET.get("v") == icon.version:

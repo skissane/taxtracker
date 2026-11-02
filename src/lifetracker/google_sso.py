@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+from typing import Any
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.http import HttpRequest
 
 
-def _normalise_email(value):
+def _normalise_email(value: object) -> str:
     if value is None:
         return ""
     return str(value).strip().lower()
 
 
-def _allowed_google_emails():
+def _allowed_google_emails() -> set[str]:
     """Return the explicit Google email allowlist.
 
     This app intentionally keeps Google SSO locked down until an operator adds an
@@ -22,7 +24,7 @@ def _allowed_google_emails():
     return {email for email in emails if email}
 
 
-def _email_is_ambiguous(email):
+def _email_is_ambiguous(email: str) -> bool:
     """Return whether more than one Django user has this email.
 
     With auto-create off, the library looks the user up by email with ``.get()``,
@@ -34,7 +36,7 @@ def _email_is_ambiguous(email):
     return user_model.objects.filter(**lookup)[:2].count() > 1
 
 
-def pre_validate_user(google_user_info: dict, request: HttpRequest) -> bool:
+def pre_validate_user(google_user_info: dict[str, Any], request: HttpRequest) -> bool:
     """Allow only verified, explicitly allowlisted Google emails to log in."""
     email = _normalise_email(google_user_info.get("email"))
     # The v2 userinfo endpoint the library calls reports this as "verified_email".

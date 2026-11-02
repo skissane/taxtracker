@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
+from typing import Any
 
 # A backup still running after this long is killed, so a hung upload can't
 # keep the Machine from stopping for ever.
@@ -43,8 +44,8 @@ class AutoBackup:
         *,
         log: Callable[[str], None],
         environ: Mapping[str, str] = os.environ,
-        popen=subprocess.Popen,
-    ):
+        popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+    ) -> None:
         self.interval_seconds = interval_seconds
         # The first backup is at startup.
         self.next_run = started_at
@@ -53,7 +54,7 @@ class AutoBackup:
         # The watchdog is started from gunicorn's master, where wsgi.py, which
         # sets this, hasn't run.
         self.env = {"DJANGO_SETTINGS_MODULE": "lifetracker.settings", **environ}
-        self.process = None
+        self.process: subprocess.Popen[bytes] | None = None
         self.runs = 0
         self.reason: str | None = None
         self.last_started_at: float | None = None
@@ -85,6 +86,8 @@ class AutoBackup:
         taken too long."""
         if self.process is None:
             return
+        # start() sets last_started_at before process.
+        assert self.last_started_at is not None
         exit_status = self.process.poll()
         if exit_status is None:
             if now - self.last_started_at < TIMEOUT_SECONDS:
@@ -113,7 +116,7 @@ class AutoBackup:
         """When ``tick`` next has something to do."""
         return now + POLL_SECONDS if self.running else self.next_run
 
-    def status(self, iso: Callable[[float | None], str | None]) -> dict:
+    def status(self, iso: Callable[[float | None], str | None]) -> dict[str, Any]:
         """For the watchdog's status file, with times formatted by ``iso``."""
         return {
             "interval_seconds": self.interval_seconds,
