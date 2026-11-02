@@ -162,7 +162,7 @@ class DatabaseStorage(Storage):
     # "db/<pk>/" with the largest BigAutoField pk.
     _MAX_PREFIX_CHARS = len(f"{_PREFIX}{(1 << 63) - 1}/")
 
-    def _open(self, name: str, mode: str = "rb") -> ContentFile[bytes]:
+    def _open(self, name: str, mode: str = "rb") -> ContentFile:
         pk = self._name_to_pk(name)
         obj = DBStoredFile.objects.get(pk=pk)
         return ContentFile(bytes(obj.content), name=name)

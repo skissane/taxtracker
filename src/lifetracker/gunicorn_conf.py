@@ -6,8 +6,6 @@ import os
 import sys
 from typing import Any
 
-from django.http import HttpRequest
-
 from lifetracker.core import client_ips, idle_watchdog
 
 # Gunicorn's default access log format, with the client's IP first. The
@@ -32,7 +30,7 @@ def when_ready(server: Any) -> None:
     client_ips.spawn(server.pid)
 
 
-def post_request(worker: Any, req: HttpRequest, environ: Any, resp: Any) -> None:
+def post_request(worker: Any, req: Any, environ: Any, resp: Any) -> None:
     # Runs in the workers, after every request (even a failed one), so short
     # requests count as activity although the watchdog's checks rarely catch
     # their connections open.

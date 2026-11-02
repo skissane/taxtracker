@@ -3,13 +3,14 @@
 import email
 import re
 import zipfile
+from collections.abc import Iterator
 from contextlib import suppress
 from email import policy
 from email.generator import BytesGenerator
 from email.message import EmailMessage, Message, MIMEPart
 from email.utils import parsedate_to_datetime
 from io import BytesIO
-from typing import Any, cast
+from typing import cast
 
 import click
 
@@ -56,7 +57,7 @@ def get_email_date_prefix(part: MIMEPart) -> str:
     return ""
 
 
-def iter_parts_with_date_prefix(part: MIMEPart, inherited_prefix: str = "") -> Any:
+def iter_parts_with_date_prefix(part: MIMEPart, inherited_prefix: str = "") -> Iterator[tuple[MIMEPart, str]]:
     """Depth-first walk yielding (part, date_prefix) pairs.
 
     Visits parts in the same depth-first order as ``Message.walk()``, but
@@ -156,7 +157,7 @@ def eml_to_zip(eml_file_path: str, output_zip_path: str, prefix: str = "") -> No
             if content_type == "message/rfc822":
                 part_payload = part.get_payload()
                 if isinstance(part_payload, list) and len(part_payload) == 1:
-                    message_body: Message = part_payload[0]
+                    message_body = cast(Message, part_payload[0])
                     content_type = message_body.get_content_type()
             click.echo(f"Added to ZIP: {zip_filename} ({content_type})")
 

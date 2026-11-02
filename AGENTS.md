@@ -493,9 +493,9 @@ Ruff: rules E, F, W, I, UP, TID252, PLC0415, RUF100; line length 120; migrations
 ## Type checking
 
 `just mypy` (`uv run mypy src`; part of `just check`, `just ci` and the `test` job) type-checks `src/` with mypy and the `django-stubs` plugin, configured in `pyproject.toml`'s `[tool.mypy]` with `disallow_untyped_defs`, so every function needs annotations.
-Migrations are excluded, and `boto3`, `botocore`, `django_google_sso` and `pdfkit` (no stubs) have `ignore_missing_imports`.
+Migrations are analysed but their errors ignored (`ignore_errors`), and `boto3`, `botocore`, `django_google_sso` and `pdfkit` (no stubs) have `ignore_missing_imports`.
 `mypy --strict` isn't enforced: its remaining errors are bare `ModelAdmin`, `TabularInline`, `ModelForm` and `BaseInlineFormSet` subclasses, and Django doesn't let those classes be subscripted at runtime (`ModelAdmin[Item]` raises `TypeError`) without `django_stubs_ext.monkeypatch()`.
-Python 3.14 doesn't evaluate annotations at runtime, so a Django generic is fine in an annotation (e.g. `ContentFile[bytes]`), just not as a base class.
+Python 3.14 evaluates annotations only when something reads them (e.g. `__annotations__` or `inspect.signature`), and a subscripted Django class such as `ContentFile[bytes]` raises `TypeError` then, so annotate with the bare class (`ContentFile`); quoting doesn't help, as ruff's `UP037` removes the quotes.
 Mixins that rely on attributes of the model they're mixed into (`TreeNodeMixin`, `AttachmentAutofillMixin`) declare them under `if TYPE_CHECKING:`.
 
 ## Test warnings policy

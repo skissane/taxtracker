@@ -110,7 +110,7 @@ class LifetrackerAdminSite(admin.AdminSite):
             *super().get_urls(),
         ]
 
-    def each_context(self, request: HttpRequest) -> Any:
+    def each_context(self, request: HttpRequest) -> dict[str, Any]:
         context = super().each_context(request)
         authenticated = request.user.is_authenticated
         site_name = _SITE_NAME if authenticated else settings.LIFETRACKER_UNAUTHENTICATED_SITE_NAME
