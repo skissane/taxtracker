@@ -52,6 +52,22 @@ def parse_pr_url(url: str) -> tuple[str, str, str]:
     return parsed.netloc, match.group(1), match.group(2)
 
 
+def find_open_pr(gh_repo: str, head_branch: str, base_branch: str) -> str | None:
+    """Return the URL of an open PR from head_branch into base_branch, or None if there's none or the check fails."""
+    try:
+        out = subprocess.run(
+            ["gh", "pr", "list", "--repo", gh_repo, "--head", head_branch, "--base", base_branch]
+            + ["--state", "open", "--json", "url"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        prs = json.loads(out or "[]")
+    except subprocess.CalledProcessError, ValueError:
+        return None
+    return prs[0]["url"] if prs else None
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Recreate a GitHub PR as a draft and close the original.")
     parser.add_argument("pr_url", help="The URL of the GitHub Pull Request")
@@ -63,10 +79,7 @@ def main(argv: list[str] | None = None) -> None:
     gh_repo = f"{host}/{repo_slug}"
 
     # 2. Fetch PR details
-    fields = (
-        "number,title,body,headRefName,baseRefName,isCrossRepository,headRepository,headRepositoryOwner,state,"
-        "labels,milestone"
-    )
+    fields = "number,title,body,headRefName,baseRefName,isCrossRepository,headRepositoryOwner,state,labels,milestone"
     pr_data = json.loads(run_gh(["pr", "view", args.pr_url, "--json", fields]))
 
     old_number = pr_data["number"]
@@ -80,14 +93,11 @@ def main(argv: list[str] | None = None) -> None:
     state = pr_data["state"]
 
     # 3. Refuse to operate on fork PRs
-    is_cross_repo = pr_data.get("isCrossRepository", False)
-    head_owner = (pr_data.get("headRepositoryOwner") or {}).get("login", "")
-    head_repo_name = (pr_data.get("headRepository") or {}).get("name", "")
-    head_full_name = f"{head_owner}/{head_repo_name}" if head_owner and head_repo_name else ""
-
-    if is_cross_repo or (head_full_name and head_full_name.lower() != repo_slug.lower()):
+    # Not a comparison of the head repo's name with the URL's: after a rename, an old URL still resolves
+    if pr_data.get("isCrossRepository", False):
+        head_owner = (pr_data.get("headRepositoryOwner") or {}).get("login", "")
         print(
-            f"Error: PR #{old_number} comes from a fork ({head_full_name or 'cross-repository'}). "
+            f"Error: PR #{old_number} comes from a fork ({head_owner or 'cross-repository'}). "
             "Refusing to operate on fork PRs.",
             file=sys.stderr,
         )
@@ -138,6 +148,15 @@ def main(argv: list[str] | None = None) -> None:
     except subprocess.CalledProcessError as e:
         print("Error creating new draft PR:", file=sys.stderr)
         print(e.stderr.strip(), file=sys.stderr)
+        # gh can fail after creating the PR (e.g. adding labels), so check before reopening the original
+        existing = find_open_pr(gh_repo, head_branch, base_branch)
+        if existing:
+            print(
+                f"Error: {existing} was created anyway, but may lack labels or milestone; "
+                f"PR #{old_number} stays closed and was not commented on.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         print(f"Attempting to reopen original PR #{old_number}...", file=sys.stderr)
         try:
             subprocess.run(

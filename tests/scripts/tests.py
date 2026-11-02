@@ -1568,7 +1568,6 @@ class RecreatePrTests(SimpleTestCase):
             "headRefName": "feat",
             "baseRefName": "master",
             "isCrossRepository": False,
-            "headRepository": {"name": "r"},
             "headRepositoryOwner": {"login": "o"},
             "state": "OPEN",
             "labels": [{"name": "type:bug"}],
@@ -1577,7 +1576,16 @@ class RecreatePrTests(SimpleTestCase):
         data.update(overrides)
         return json.dumps(data)
 
-    def run_main(self, argv, view_json=None, create_error=False, reopen_error=False, comment_error=False):
+    def run_main(
+        self,
+        argv,
+        view_json=None,
+        create_error=False,
+        reopen_error=False,
+        comment_error=False,
+        list_json="[]",
+        list_error=False,
+    ):
         """Run main() with `gh` mocked; return (exit code or None, calls, stderr)."""
         calls = []
 
@@ -1586,6 +1594,10 @@ class RecreatePrTests(SimpleTestCase):
             sub = cmd[2]
             if sub == "view":
                 return subprocess.CompletedProcess(cmd, 0, stdout=view_json or self.pr_json(), stderr="")
+            if sub == "list":
+                if list_error:
+                    raise subprocess.CalledProcessError(1, cmd, stderr="list failed")
+                return subprocess.CompletedProcess(cmd, 0, stdout=list_json, stderr="")
             if sub == "create" and create_error:
                 raise subprocess.CalledProcessError(1, cmd, stderr="create failed")
             if sub == "comment" and comment_error:
@@ -1651,8 +1663,30 @@ class RecreatePrTests(SimpleTestCase):
     def test_create_failure_reopens_original(self):
         code, calls, err = self.run_main([self.URL], create_error=True)
         self.assertEqual(code, 1)
-        self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "reopen"])
+        self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "list", "reopen"])
         self.assertIn("create failed", err)
+        list_args = calls[3][0]
+        self.assertEqual(list_args[list_args.index("--head") + 1], "feat")
+        self.assertEqual(list_args[list_args.index("--base") + 1], "master")
+
+    def test_create_failure_after_creating_does_not_reopen(self):
+        code, calls, err = self.run_main(
+            [self.URL], create_error=True, list_json='[{"url": "https://github.com/o/r/pull/9"}]'
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "list"])
+        self.assertIn("https://github.com/o/r/pull/9 was created anyway", err)
+
+    def test_create_failure_list_failure_reopens_original(self):
+        code, calls, _ = self.run_main([self.URL], create_error=True, list_error=True)
+        self.assertEqual(code, 1)
+        self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "list", "reopen"])
+
+    def test_moved_repo_is_not_a_fork(self):
+        # An old URL still resolves after a rename or transfer, so the head repo can differ from the URL's
+        code, calls, _ = self.run_main([self.URL], view_json=self.pr_json(headRepositoryOwner={"login": "new"}))
+        self.assertIsNone(code)
+        self.assertEqual([c[0][1] for c in calls], ["view", "close", "create", "comment"])
 
     def test_reopen_failure_says_to_reopen_manually(self):
         code, _, err = self.run_main([self.URL], create_error=True, reopen_error=True)
