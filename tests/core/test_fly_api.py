@@ -4,8 +4,9 @@ import socketserver
 import tempfile
 import threading
 from pathlib import Path
+from typing import Any
 
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 from django.test import SimpleTestCase
 
 from lifetracker.cli import cli
@@ -13,7 +14,7 @@ from lifetracker.core import fly_api
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
+    def do_GET(self) -> None:
         server = self.server
         assert isinstance(server, _UnixHTTPServer)
         server.requests.append((self.command, self.path, self.headers["Host"]))
@@ -30,11 +31,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     do_POST = do_GET
 
-    def address_string(self):
+    def address_string(self) -> str:
         # A Unix socket's client address is "", not (host, port).
         return "unix"
 
-    def log_message(self, format, *args):
+    def log_message(self, format: str, *args: Any) -> None:
         pass
 
 
@@ -50,7 +51,7 @@ class FakeFlyApiMixin(SimpleTestCase):
     recording each request's method, path and Host in ``self.requests``, and
     each POST's Content-Length, Content-Type and body in ``self.posts``."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         super().setUp()
         # Under /tmp, as a Unix socket's path is limited to about 100 bytes.
         tmp = tempfile.TemporaryDirectory(dir="/tmp")
@@ -67,16 +68,16 @@ class FakeFlyApiMixin(SimpleTestCase):
         self.addCleanup(self.server.shutdown)
 
     @property
-    def requests(self):
+    def requests(self) -> list[tuple[str, str, str | None]]:
         return self.server.requests
 
     @property
-    def posts(self):
+    def posts(self) -> list[tuple[str | None, str | None, bytes | None]]:
         return self.server.posts
 
 
 class GetTests(FakeFlyApiMixin, SimpleTestCase):
-    def test_get(self):
+    def test_get(self) -> None:
         response = fly_api.get("/v1/apps/x/machines", socket_path=self.socket_path)
         self.assertEqual(
             response,
@@ -84,91 +85,91 @@ class GetTests(FakeFlyApiMixin, SimpleTestCase):
         )
         self.assertEqual(self.requests, [("GET", "/v1/apps/x/machines", "flaps")])
 
-    def test_error_status_returned(self):
+    def test_error_status_returned(self) -> None:
         self.server.response = (404, "text/plain", b"nope")
         response = fly_api.get("/missing", socket_path=self.socket_path)
         self.assertEqual((response.status, response.body), (404, b"nope"))
 
-    def test_missing_socket(self):
+    def test_missing_socket(self) -> None:
         with self.assertRaises(FileNotFoundError):
             fly_api.get("/", socket_path=self.socket_path + "-missing")
 
 
 class PostTests(FakeFlyApiMixin, SimpleTestCase):
-    def test_post_without_body(self):
+    def test_post_without_body(self) -> None:
         response = fly_api.post("/v1/apps/x/machines/m/stop", socket_path=self.socket_path)
         self.assertEqual(response.status, 200)
         self.assertEqual(self.requests, [("POST", "/v1/apps/x/machines/m/stop", "flaps")])
         self.assertEqual(self.posts, [("0", None, b"")])
 
-    def test_post_json(self):
+    def test_post_json(self) -> None:
         fly_api.post("/x", {"name": "café", "n": 1}, socket_path=self.socket_path)
         self.assertEqual(
             self.posts,
             [("25", "application/json", '{"name": "café", "n": 1}'.encode())],
         )
 
-    def test_post_empty_object_is_a_body(self):
+    def test_post_empty_object_is_a_body(self) -> None:
         fly_api.post("/x", {}, socket_path=self.socket_path)
         self.assertEqual(self.posts, [("2", "application/json", b"{}")])
 
 
 class ExpandPathTests(SimpleTestCase):
-    def test_placeholders(self):
+    def test_placeholders(self) -> None:
         environ = {"FLY_APP_NAME": "app1", "FLY_MACHINE_ID": "m1"}
         self.assertEqual(
             fly_api.expand_path("/v1/apps/{app}/machines/{machine}", environ),
             "/v1/apps/app1/machines/m1",
         )
 
-    def test_no_placeholders_needs_no_environment(self):
+    def test_no_placeholders_needs_no_environment(self) -> None:
         self.assertEqual(fly_api.expand_path("/v1/apps/x", {}), "/v1/apps/x")
 
-    def test_missing_variable(self):
+    def test_missing_variable(self) -> None:
         for environ in ({}, {"FLY_APP_NAME": " "}):
             with self.assertRaisesRegex(ValueError, "FLY_APP_NAME"):
                 fly_api.expand_path("/v1/apps/{app}", environ)
 
-    def test_relative_path(self):
+    def test_relative_path(self) -> None:
         with self.assertRaisesRegex(ValueError, "must start with '/'"):
             fly_api.expand_path("v1/apps", {})
 
 
 class FlyApiCommandTests(FakeFlyApiMixin, SimpleTestCase):
-    def invoke(self, *args, env=None):
+    def invoke(self, *args: str, env: dict[str, str] | None = None) -> Result:
         return CliRunner().invoke(cli, ["fly-api", "--socket", self.socket_path, *args], env=env)
 
-    def test_pretty_prints_json(self):
+    def test_pretty_prints_json(self) -> None:
         result = self.invoke("/v1/apps/{app}/machines", env={"FLY_APP_NAME": "a"})
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertEqual(result.stdout, '{\n  "ok": true\n}\n')
         self.assertEqual(self.requests, [("GET", "/v1/apps/a/machines", "flaps")])
 
-    def test_non_ascii_json_not_escaped(self):
+    def test_non_ascii_json_not_escaped(self) -> None:
         self.server.response = (200, "application/json", '{"name": "café"}'.encode())
         result = self.invoke("/x")
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertEqual(result.stdout_bytes, '{\n  "name": "café"\n}\n'.encode())
 
-    def test_non_json_body_unchanged(self):
+    def test_non_json_body_unchanged(self) -> None:
         self.server.response = (200, "text/plain", b"plain\xff")
         result = self.invoke("/x")
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertEqual(result.stdout_bytes, b"plain\xff")
 
-    def test_error_status_exits_1(self):
+    def test_error_status_exits_1(self) -> None:
         self.server.response = (403, "application/json", b'{"error": "no"}')
         result = self.invoke("/x")
         self.assertEqual(result.exit_code, 1)
         self.assertEqual(result.stdout, '{\n  "error": "no"\n}\n')
         self.assertEqual(result.stderr, "HTTP 403 Forbidden\n")
 
-    def test_get_by_default(self):
+    def test_get_by_default(self) -> None:
         self.invoke("/x")
         self.assertEqual(self.requests, [("GET", "/x", "flaps")])
         self.assertEqual(self.posts, [])
 
-    def test_post_without_body(self):
+    def test_post_without_body(self) -> None:
         env = {"FLY_APP_NAME": "a", "FLY_MACHINE_ID": "m"}
         result = self.invoke("--post", "/v1/apps/{app}/machines/{machine}/stop", env=env)
         self.assertEqual(result.exit_code, 0, result.output)
@@ -176,18 +177,18 @@ class FlyApiCommandTests(FakeFlyApiMixin, SimpleTestCase):
         self.assertEqual(self.requests, [("POST", "/v1/apps/a/machines/m/stop", "flaps")])
         self.assertEqual(self.posts, [("0", None, b"")])
 
-    def test_post_json(self):
+    def test_post_json(self) -> None:
         result = self.invoke("/x", "--post", "--json", '{"signal": "SIGHUP"}')
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertEqual(self.posts, [("20", "application/json", b'{"signal": "SIGHUP"}')])
 
-    def test_json_needs_post(self):
+    def test_json_needs_post(self) -> None:
         result = self.invoke("/x", "--json", "{}")
         self.assertEqual(result.exit_code, 2)
         self.assertIn("--json needs --post", result.stderr)
         self.assertEqual(self.requests, [])
 
-    def test_invalid_json(self):
+    def test_invalid_json(self) -> None:
         for text, message in (
             ("{nope", "--json isn't valid JSON"),
             ("[1]", "--json must be a JSON object"),
@@ -199,13 +200,13 @@ class FlyApiCommandTests(FakeFlyApiMixin, SimpleTestCase):
                 self.assertIn(message, result.stderr)
         self.assertEqual(self.requests, [])
 
-    def test_missing_placeholder_variable(self):
+    def test_missing_placeholder_variable(self) -> None:
         result = self.invoke("/v1/apps/{app}", env={"FLY_APP_NAME": ""})
         self.assertEqual(result.exit_code, 2)
         self.assertIn("FLY_APP_NAME", result.stderr)
         self.assertEqual(self.requests, [])
 
-    def test_unreachable_socket(self):
+    def test_unreachable_socket(self) -> None:
         missing = str(Path(self.socket_path).with_name("missing"))
         result = CliRunner().invoke(cli, ["fly-api", "--socket", missing, "/"])
         self.assertEqual(result.exit_code, 1)

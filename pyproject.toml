@@ -104,13 +104,6 @@ files = ["src", "scripts", "tests", "screenshot_tests"]
 mypy_path = "src"
 explicit_package_bases = true
 
-# Tests may leave functions unannotated for now, but their bodies are still checked (strict's check_untyped_defs).
-[[tool.mypy.overrides]]
-module = ["tests.*", "screenshot_tests.*"]
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-disallow_untyped_calls = false
-
 [[tool.mypy.overrides]]
 module = "*.migrations.*"
 ignore_errors = true

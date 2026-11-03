@@ -106,6 +106,9 @@ from lifetracker.core.models import (
 )
 from lifetracker.core.timing import REQUEST_START_ATTR
 from lifetracker.settings import fly_machine_url
+
+if typing.TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse as TestResponse
 from lifetracker.tasktracker.models import Task, TaskAttachment
 from lifetracker.taxtracker.models import (
     Attachment,
@@ -127,14 +130,14 @@ _GOOGLE_SSO_ENABLED_SETTINGS = {
 class GoogleSSOSettingsTests(TestCase):
     """Tests for the locked-down Google SSO defaults."""
 
-    def test_google_sso_defaults_block_new_accounts(self):
+    def test_google_sso_defaults_block_new_accounts(self) -> None:
         self.assertIs(settings.GOOGLE_SSO_AUTO_CREATE_USERS, False)
         self.assertEqual(
             settings.GOOGLE_SSO_PRE_VALIDATE_CALLBACK,
             "lifetracker.google_sso.pre_validate_user",
         )
 
-    def test_google_sso_admin_login_button_renders_when_enabled(self):
+    def test_google_sso_admin_login_button_renders_when_enabled(self) -> None:
         with override_settings(**_GOOGLE_SSO_ENABLED_SETTINGS):
             response = self.client.get(reverse("admin:login"))
         self.assertEqual(response.status_code, 200)
@@ -143,21 +146,21 @@ class GoogleSSOSettingsTests(TestCase):
         self.assertContains(response, 'src="/static/core/google_g_logo.svg"')
         self.assertNotContains(response, "upload.wikimedia.org")
 
-    def test_google_sso_logo_is_a_static_file(self):
+    def test_google_sso_logo_is_a_static_file(self) -> None:
         # Asserting the src attribute alone would pass even if nothing served it.
         url = settings.GOOGLE_SSO_LOGO_URL(RequestFactory().get("/"))
         path = url.removeprefix(settings.STATIC_URL)
         self.assertIsNotNone(finders.find(path))
 
     @override_settings(GOOGLE_SSO_ENABLED=False)
-    def test_google_sso_admin_login_button_hidden_when_disabled(self):
+    def test_google_sso_admin_login_button_hidden_when_disabled(self) -> None:
         response = self.client.get(reverse("admin:login"))
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "Sign in with Google")
         # The stock username/password form must still be there.
         self.assertContains(response, 'id="login-form"')
 
-    def test_google_sso_start_login_redirects_to_google_when_enabled(self):
+    def test_google_sso_start_login_redirects_to_google_when_enabled(self) -> None:
         with override_settings(**_GOOGLE_SSO_ENABLED_SETTINGS):
             response = self.client.get(reverse("django_google_sso:oauth_start_login"))
         self.assertEqual(response.status_code, 302)
@@ -166,7 +169,7 @@ class GoogleSSOSettingsTests(TestCase):
             response["Location"],
         )
 
-    def test_google_sso_start_login_keeps_only_admin_next(self):
+    def test_google_sso_start_login_keeps_only_admin_next(self) -> None:
         # Any other next makes the library's callback fail with "Google SSO not
         # enabled for Pages"; the login page passes on next=/ for a logged-out
         # visit to the bare domain, which the proxy redirects there.
@@ -186,13 +189,13 @@ class GoogleSSOSettingsTests(TestCase):
                 self.assertEqual(self.client.session["sso_next_url"], expected)
 
     @override_settings(GOOGLE_SSO_ENABLED=False)
-    def test_google_sso_routes_404_when_disabled(self):
+    def test_google_sso_routes_404_when_disabled(self) -> None:
         for name in ("oauth_start_login", "oauth_callback"):
             with self.subTest(name=name):
                 response = self.client.get(reverse(f"django_google_sso:{name}"))
                 self.assertEqual(response.status_code, 404)
 
-    def test_google_sso_urls_match_library(self):
+    def test_google_sso_urls_match_library(self) -> None:
         """lifetracker.google_sso_urls must mirror django_google_sso.urls.
 
         Parsed rather than imported: the library module's urlpatterns depend on
@@ -200,11 +203,11 @@ class GoogleSSOSettingsTests(TestCase):
         upgrading django-google-sso, update lifetracker/google_sso_urls.py.
         """
 
-        def routes(module_name):
+        def routes(module_name: str) -> set[tuple[object, str, object]]:
             spec = importlib.util.find_spec(module_name)
             assert spec is not None and spec.origin is not None
             tree = ast.parse(Path(spec.origin).read_text())
-            found = set()
+            found: set[tuple[object, str, object]] = set()
             for node in ast.walk(tree):
                 if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "path"):
                     continue
@@ -228,34 +231,34 @@ class GoogleSSOSettingsTests(TestCase):
 class GoogleSSOCallbackTests(TestCase):
     """Tests for the lifetracker.google_sso callbacks django_google_sso invokes."""
 
-    def _validate(self, email, verified_email=True):
+    def _validate(self, email: str, verified_email: object = True) -> bool:
         return google_sso.pre_validate_user(
             {"email": email, "verified_email": verified_email}, request=RequestFactory().get("/")
         )
 
-    def test_rejects_unverified_email(self):
+    def test_rejects_unverified_email(self) -> None:
         with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@x.com"]):
             for verified_email in (False, None, "true"):
                 with self.subTest(verified_email=verified_email):
                     self.assertFalse(self._validate("a@x.com", verified_email))
 
-    def test_rejects_missing_or_blank_email(self):
+    def test_rejects_missing_or_blank_email(self) -> None:
         with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@x.com"]):
             self.assertFalse(google_sso.pre_validate_user({}, request=RequestFactory().get("/")))
             self.assertFalse(self._validate("   "))
 
-    def test_rejects_everyone_when_allowlist_empty(self):
+    def test_rejects_everyone_when_allowlist_empty(self) -> None:
         self.assertFalse(self._validate("a@example.com"))
 
-    def test_rejects_email_not_in_allowlist(self):
+    def test_rejects_email_not_in_allowlist(self) -> None:
         with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@x.com"]):
             self.assertFalse(self._validate("b@x.com"))
 
-    def test_allows_allowlisted_email_case_insensitively(self):
+    def test_allows_allowlisted_email_case_insensitively(self) -> None:
         with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["x@x.com", "A@Example.com"]):
             self.assertTrue(self._validate(" a@EXAMPLE.com "))
 
-    def test_rejects_email_shared_by_several_users(self):
+    def test_rejects_email_shared_by_several_users(self) -> None:
         User.objects.create_user("alice", email="a@example.com")
         with override_settings(LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS=["a@example.com"]):
             self.assertTrue(self._validate("a@example.com"))
@@ -271,10 +274,10 @@ class GoogleSSOLoginFlowTests(TestCase):
     """End-to-end tests of the library's callback view with our settings, with
     only the calls out to Google mocked."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.user = User.objects.create_user("alice", email="A@example.com", is_staff=True)
 
-    def _callback(self, **user_info):
+    def _callback(self, **user_info: typing.Any) -> TestResponse:
         user_info = {"email": "a@example.com", "verified_email": True} | user_info
         session = self.client.session
         session["sso_state"] = "test-state"
@@ -288,15 +291,15 @@ class GoogleSSOLoginFlowTests(TestCase):
                 {"code": "test-code", "state": "test-state"},
             )
 
-    def _logged_in_user_id(self):
+    def _logged_in_user_id(self) -> str | None:
         return self.client.session.get("_auth_user_id")
 
-    def test_allowlisted_verified_existing_user_logs_in(self):
+    def test_allowlisted_verified_existing_user_logs_in(self) -> None:
         response = self._callback()
         self.assertRedirects(response, reverse("admin:index"))
         self.assertEqual(self._logged_in_user_id(), str(self.user.pk))
 
-    def test_login_issues_jwt_cookie(self):
+    def test_login_issues_jwt_cookie(self) -> None:
         response = self._callback()
         token = response.cookies[jwt_auth.JWT_COOKIE_NAME].value
         claims = _decode_jwt(token)
@@ -306,7 +309,7 @@ class GoogleSSOLoginFlowTests(TestCase):
         self.assertEqual(session[jwt_auth.SESSION_KEY], {"sub": str(self.user.pk)})
 
     @override_settings(SESSION_COOKIE_AGE=12345)
-    def test_session_expiry_matches_password_login(self):
+    def test_session_expiry_matches_password_login(self) -> None:
         self._callback()
         session = self.client.session
         self.assertEqual(self._logged_in_user_id(), str(self.user.pk))
@@ -314,30 +317,30 @@ class GoogleSSOLoginFlowTests(TestCase):
         self.assertNotIn("_session_expiry", session)
         self.assertEqual(session.get_expiry_age(), 12345)
 
-    def test_rejects_email_not_in_allowlist(self):
+    def test_rejects_email_not_in_allowlist(self) -> None:
         User.objects.create_user("bob", email="b@example.com", is_staff=True)
         self._callback(email="b@example.com")
         self.assertIsNone(self._logged_in_user_id())
 
-    def test_rejects_unverified_email(self):
+    def test_rejects_unverified_email(self) -> None:
         for verified in (False, None):
             with self.subTest(verified=verified):
                 self._callback(verified_email=verified)
                 self.assertIsNone(self._logged_in_user_id())
 
-    def test_does_not_create_missing_user(self):
+    def test_does_not_create_missing_user(self) -> None:
         self.user.delete()
         self._callback()
         self.assertIsNone(self._logged_in_user_id())
         self.assertFalse(User.objects.filter(email__iexact="a@example.com").exists())
 
-    def test_rejects_inactive_user(self):
+    def test_rejects_inactive_user(self) -> None:
         self.user.is_active = False
         self.user.save()
         self._callback()
         self.assertIsNone(self._logged_in_user_id())
 
-    def test_rejects_email_shared_by_several_users(self):
+    def test_rejects_email_shared_by_several_users(self) -> None:
         User.objects.create_user("alice2", email="a@example.com", is_staff=True)
         response = self._callback()
         self.assertRedirects(response, reverse("admin:index"), fetch_redirect_response=False)
@@ -347,17 +350,17 @@ class GoogleSSOLoginFlowTests(TestCase):
 class FileTypeModelTests(TestCase):
     """Tests for FileType, MimeType, and FileExtension models."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.ft = FileType.objects.create(short_name="PDF", full_name="PDF Document")
 
-    def test_filetype_str(self):
+    def test_filetype_str(self) -> None:
         self.assertEqual(str(self.ft), "PDF")
 
-    def test_filetype_short_name_unique(self):
+    def test_filetype_short_name_unique(self) -> None:
         with self.assertRaises(IntegrityError):
             FileType.objects.create(short_name="PDF", full_name="Other PDF")
 
-    def test_filetype_full_name_unique(self):
+    def test_filetype_full_name_unique(self) -> None:
         with self.assertRaises(IntegrityError):
             FileType.objects.create(short_name="PDF2", full_name="PDF Document")
 
@@ -365,11 +368,11 @@ class FileTypeModelTests(TestCase):
     # MimeType tests
     # ------------------------------------------------------------------
 
-    def test_mimetype_str(self):
+    def test_mimetype_str(self) -> None:
         mt = MimeType.objects.create(file_type=self.ft, mime_type="application/pdf", is_primary=True)
         self.assertEqual(str(mt), "application/pdf")
 
-    def test_mimetype_valid_formats(self):
+    def test_mimetype_valid_formats(self) -> None:
         valid = [
             "application/pdf",
             "image/jpeg",
@@ -381,28 +384,28 @@ class FileTypeModelTests(TestCase):
             mt = MimeType(file_type=self.ft, mime_type=mt_str)
             mt.clean()  # should not raise
 
-    def test_mimetype_invalid_no_slash(self):
+    def test_mimetype_invalid_no_slash(self) -> None:
         mt = MimeType(file_type=self.ft, mime_type="applicationpdf")
         with self.assertRaises(ValidationError):
             mt.clean()
 
-    def test_mimetype_invalid_two_slashes(self):
+    def test_mimetype_invalid_two_slashes(self) -> None:
         mt = MimeType(file_type=self.ft, mime_type="application/pdf/extra")
         with self.assertRaises(ValidationError):
             mt.clean()
 
-    def test_mimetype_invalid_with_space(self):
+    def test_mimetype_invalid_with_space(self) -> None:
         mt = MimeType(file_type=self.ft, mime_type="application /pdf")
         with self.assertRaises(ValidationError):
             mt.clean()
 
-    def test_mimetype_globally_unique(self):
+    def test_mimetype_globally_unique(self) -> None:
         ft2 = FileType.objects.create(short_name="PDF2", full_name="PDF 2")
         MimeType.objects.create(file_type=self.ft, mime_type="application/pdf", is_primary=True)
         with self.assertRaises(IntegrityError):
             MimeType.objects.create(file_type=ft2, mime_type="application/pdf", is_primary=False)
 
-    def test_at_most_one_primary_mime_type_per_file_type(self):
+    def test_at_most_one_primary_mime_type_per_file_type(self) -> None:
         MimeType.objects.create(file_type=self.ft, mime_type="application/pdf", is_primary=True)
         with self.assertRaises(IntegrityError):
             MimeType.objects.create(file_type=self.ft, mime_type="application/x-pdf", is_primary=True)
@@ -411,43 +414,43 @@ class FileTypeModelTests(TestCase):
     # FileExtension tests
     # ------------------------------------------------------------------
 
-    def test_extension_str(self):
+    def test_extension_str(self) -> None:
         ext = FileExtension.objects.create(file_type=self.ft, extension="pdf", is_primary=True)
         self.assertEqual(str(ext), "pdf")
 
-    def test_extension_forced_lowercase_on_save(self):
+    def test_extension_forced_lowercase_on_save(self) -> None:
         ext = FileExtension(file_type=self.ft, extension="PDF", is_primary=True)
         ext.save()
         ext.refresh_from_db()
         self.assertEqual(ext.extension, "pdf")
 
-    def test_extension_forced_lowercase_in_clean(self):
+    def test_extension_forced_lowercase_in_clean(self) -> None:
         ext = FileExtension(file_type=self.ft, extension="PDF")
         ext.clean()
         self.assertEqual(ext.extension, "pdf")
 
-    def test_extension_invalid_with_dot(self):
+    def test_extension_invalid_with_dot(self) -> None:
         ext = FileExtension(file_type=self.ft, extension=".pdf")
         with self.assertRaises(ValidationError):
             ext.clean()
 
-    def test_extension_invalid_with_slash(self):
+    def test_extension_invalid_with_slash(self) -> None:
         ext = FileExtension(file_type=self.ft, extension="pd/f")
         with self.assertRaises(ValidationError):
             ext.clean()
 
-    def test_extension_invalid_with_space(self):
+    def test_extension_invalid_with_space(self) -> None:
         ext = FileExtension(file_type=self.ft, extension="p df")
         with self.assertRaises(ValidationError):
             ext.clean()
 
-    def test_extension_globally_unique(self):
+    def test_extension_globally_unique(self) -> None:
         ft2 = FileType.objects.create(short_name="PDF2", full_name="PDF 2")
         FileExtension.objects.create(file_type=self.ft, extension="pdf", is_primary=True)
         with self.assertRaises(IntegrityError):
             FileExtension.objects.create(file_type=ft2, extension="pdf", is_primary=False)
 
-    def test_at_most_one_primary_extension_per_file_type(self):
+    def test_at_most_one_primary_extension_per_file_type(self) -> None:
         FileExtension.objects.create(file_type=self.ft, extension="pdf", is_primary=True)
         with self.assertRaises(IntegrityError):
             FileExtension.objects.create(file_type=self.ft, extension="pdff", is_primary=True)
@@ -456,12 +459,16 @@ class FileTypeModelTests(TestCase):
 class FileTypePrimaryValidationTests(TestCase):
     """Tests for the 'at least one primary' admin formset validation."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "a@b.com", "pass")
         self.client = Client()
         self.client.login(username="admin", password="pass")
 
-    def _post_filetype(self, mime_types=None, extensions=None):
+    def _post_filetype(
+        self,
+        mime_types: list[dict[str, typing.Any]] | None = None,
+        extensions: list[dict[str, typing.Any]] | None = None,
+    ) -> TestResponse:
         """POST to FileType add view with inline mime types and extensions."""
         data = {
             "short_name": "TST",
@@ -493,7 +500,7 @@ class FileTypePrimaryValidationTests(TestCase):
     # Auto-set primary (single row, not marked primary)
     # ------------------------------------------------------------------
 
-    def test_single_mime_type_without_primary_auto_sets_primary(self):
+    def test_single_mime_type_without_primary_auto_sets_primary(self) -> None:
         """Exactly one MIME type with is_primary unchecked should be auto-set."""
         response = self._post_filetype(
             mime_types=[{"mime_type": "application/tst", "is_primary": False}],
@@ -503,7 +510,7 @@ class FileTypePrimaryValidationTests(TestCase):
         ft = FileType.objects.get(short_name="TST")
         self.assertTrue(ft.mime_types.get().is_primary)
 
-    def test_single_extension_without_primary_auto_sets_primary(self):
+    def test_single_extension_without_primary_auto_sets_primary(self) -> None:
         """Exactly one extension with is_primary unchecked should be auto-set."""
         response = self._post_filetype(
             mime_types=[{"mime_type": "application/tst", "is_primary": True}],
@@ -517,7 +524,7 @@ class FileTypePrimaryValidationTests(TestCase):
     # Multiple rows — primary required, or error
     # ------------------------------------------------------------------
 
-    def test_multiple_mime_types_none_primary_fails(self):
+    def test_multiple_mime_types_none_primary_fails(self) -> None:
         """Multiple MIME types with none marked primary must fail validation."""
         response = self._post_filetype(
             mime_types=[
@@ -529,7 +536,7 @@ class FileTypePrimaryValidationTests(TestCase):
         self.assertContains(response, "At least one MIME type must be marked as primary")
         self.assertFalse(FileType.objects.filter(short_name="TST").exists())
 
-    def test_multiple_extensions_none_primary_fails(self):
+    def test_multiple_extensions_none_primary_fails(self) -> None:
         """Multiple extensions with none marked primary must fail validation."""
         response = self._post_filetype(
             mime_types=[{"mime_type": "application/tst", "is_primary": True}],
@@ -546,7 +553,7 @@ class FileTypePrimaryValidationTests(TestCase):
     # Multiple primaries — validation error instead of IntegrityError
     # ------------------------------------------------------------------
 
-    def test_multiple_primary_mime_types_shows_validation_error(self):
+    def test_multiple_primary_mime_types_shows_validation_error(self) -> None:
         """Multiple MIME types all marked primary must produce a validation error."""
         response = self._post_filetype(
             mime_types=[
@@ -558,7 +565,7 @@ class FileTypePrimaryValidationTests(TestCase):
         self.assertContains(response, "Only one MIME type may be marked as primary")
         self.assertFalse(FileType.objects.filter(short_name="TST").exists())
 
-    def test_multiple_primary_extensions_shows_validation_error(self):
+    def test_multiple_primary_extensions_shows_validation_error(self) -> None:
         """Multiple extensions all marked primary must produce a validation error."""
         response = self._post_filetype(
             mime_types=[{"mime_type": "application/tst", "is_primary": True}],
@@ -575,7 +582,7 @@ class FileTypePrimaryValidationTests(TestCase):
     # Successful saves
     # ------------------------------------------------------------------
 
-    def test_with_primary_set_saves_successfully(self):
+    def test_with_primary_set_saves_successfully(self) -> None:
         """FileType with at least one primary mime type and extension should save."""
         response = self._post_filetype(
             mime_types=[{"mime_type": "application/tst", "is_primary": True}],
@@ -584,14 +591,14 @@ class FileTypePrimaryValidationTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(FileType.objects.filter(short_name="TST").exists())
 
-    def test_only_extensions_no_mime_types_fails(self):
+    def test_only_extensions_no_mime_types_fails(self) -> None:
         """FileType with only file extensions (no MIME types) must fail validation."""
         response = self._post_filetype(extensions=[{"extension": "tst", "is_primary": True}])
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "A file type must have at least one MIME type")
         self.assertFalse(FileType.objects.filter(short_name="TST").exists())
 
-    def test_only_mime_types_no_extensions_fails(self):
+    def test_only_mime_types_no_extensions_fails(self) -> None:
         """FileType with only MIME types (no file extensions) must fail validation."""
         response = self._post_filetype(mime_types=[{"mime_type": "application/tst", "is_primary": True}])
         self.assertEqual(response.status_code, 200)
@@ -602,7 +609,7 @@ class FileTypePrimaryValidationTests(TestCase):
     # At-least-one independent requirement
     # ------------------------------------------------------------------
 
-    def test_no_mime_or_extension_fails_validation(self):
+    def test_no_mime_or_extension_fails_validation(self) -> None:
         """Saving a FileType with no MIME types and no extensions must fail."""
         response = self._post_filetype()
         self.assertEqual(response.status_code, 200)
@@ -620,10 +627,12 @@ class FileTypePrimaryValidationTests(TestCase):
 class ServeFileViewTests(TestCase):
     """Tests for the DBStoredFile serve-file admin view."""
 
-    def _stored_file(self, filename="served.txt", content=b"Hello attachment content"):
+    def _stored_file(self, filename: str = "served.txt", content: bytes = b"Hello attachment content") -> DBStoredFile:
         return DBStoredFile.objects.create(filename=filename, content=content)
 
-    def _stored_file_owned_by_attachment(self, filename="served.txt", content=b"Hello attachment content"):
+    def _stored_file_owned_by_attachment(
+        self, filename: str = "served.txt", content: bytes = b"Hello attachment content"
+    ) -> DBStoredFile:
         fy = FinancialYear.objects.create(year=2024)
         item = Item.objects.create(year=fy, title="Owned Item", order=1)
         attachment = Attachment.objects.create(
@@ -634,7 +643,7 @@ class ServeFileViewTests(TestCase):
         stored_file_pk = database_storage._name_to_pk(attachment.file.name)
         return DBStoredFile.objects.get(pk=stored_file_pk)
 
-    def _staff_client(self, username, *permission_codenames):
+    def _staff_client(self, username: str, *permission_codenames: str) -> Client:
         user = User.objects.create_user(username, f"{username}@example.com", "pass")
         user.is_staff = True
         user.save()
@@ -644,7 +653,7 @@ class ServeFileViewTests(TestCase):
         client.force_login(user)
         return client
 
-    def test_serve_file_view(self):
+    def test_serve_file_view(self) -> None:
         """The serve_file_view should return the correct file content."""
         User.objects.create_superuser("admin", "a@b.com", "pass")
         client = Client()
@@ -659,12 +668,12 @@ class ServeFileViewTests(TestCase):
         self.assertEqual(response.content, content)
         self.assertIn("served.txt", response.get("Content-Disposition", ""))
 
-    def _get_as_superuser(self, obj):
+    def _get_as_superuser(self, obj: DBStoredFile) -> TestResponse:
         client = Client()
         client.force_login(User.objects.create_superuser(f"admin{obj.pk}"))
         return client.get(reverse("admin:core_dbstoredfile_serve_file", args=[obj.pk]))
 
-    def test_safe_types_are_served_inline(self):
+    def test_safe_types_are_served_inline(self) -> None:
         for filename, content_type in [
             ("doc.pdf", "application/pdf"),
             ("photo.jpg", "image/jpeg"),
@@ -682,7 +691,7 @@ class ServeFileViewTests(TestCase):
                 )
                 self.assertEqual(response["X-Content-Type-Options"], "nosniff")
 
-    def test_types_that_can_run_script_are_downloaded(self):
+    def test_types_that_can_run_script_are_downloaded(self) -> None:
         """An HTML or SVG attachment must never render as a page on the admin
         origin, where its script would run with the viewer's session."""
         for filename in [
@@ -707,7 +716,7 @@ class ServeFileViewTests(TestCase):
                     "sandbox; default-src 'none'",
                 )
 
-    def test_compressed_files_are_downloaded_as_bytes(self):
+    def test_compressed_files_are_downloaded_as_bytes(self) -> None:
         """ "x.txt.gz" guesses as text/plain with gzip encoding; showing it as
         text would show the compressed bytes."""
         for filename in ["notes.txt.gz", "doc.pdf.bz2", "page.html.xz"]:
@@ -719,7 +728,7 @@ class ServeFileViewTests(TestCase):
                     response["Content-Disposition"],
                 )
 
-    def test_inline_images_and_text_are_sandboxed(self):
+    def test_inline_images_and_text_are_sandboxed(self) -> None:
         for filename in ["photo.png", "notes.txt"]:
             with self.subTest(filename=filename):
                 response = self._get_as_superuser(self._stored_file(filename))
@@ -728,19 +737,19 @@ class ServeFileViewTests(TestCase):
                     "sandbox; default-src 'none'",
                 )
 
-    def test_pdf_is_not_sandboxed(self):
+    def test_pdf_is_not_sandboxed(self) -> None:
         """Browsers' PDF viewers won't run in a sandboxed document."""
         response = self._get_as_superuser(self._stored_file("doc.pdf"))
         self.assertNotIn("Content-Security-Policy", response)
 
-    def test_filename_is_escaped_in_header(self):
+    def test_filename_is_escaped_in_header(self) -> None:
         response = self._get_as_superuser(self._stored_file('a"b\\c é.html'))
         self.assertEqual(
             response["Content-Disposition"],
             'attachment; filename="a\\"b\\\\c .html"; filename*=UTF-8\'\'a%22b%5Cc%20%C3%A9.html',
         )
 
-    def test_serve_file_view_requires_login(self):
+    def test_serve_file_view_requires_login(self) -> None:
         """Unauthenticated requests to the serve view should redirect to login."""
         obj = self._stored_file("secret.pdf", b"secret pdf bytes")
         url = reverse("admin:core_dbstoredfile_serve_file", args=[obj.pk])
@@ -749,14 +758,14 @@ class ServeFileViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/login/", response["Location"])
 
-    def test_serve_file_view_requires_owner_model_view_permission(self):
+    def test_serve_file_view_requires_owner_model_view_permission(self) -> None:
         obj = self._stored_file_owned_by_attachment("owned.pdf", b"owned")
         url = reverse("admin:core_dbstoredfile_serve_file", args=[obj.pk])
         client = self._staff_client("staff-no-view")
         response = client.get(url)
         self.assertEqual(response.status_code, 403)
 
-    def test_serve_file_view_allows_owner_model_view_permission(self):
+    def test_serve_file_view_allows_owner_model_view_permission(self) -> None:
         content = b"owned content"
         obj = self._stored_file_owned_by_attachment("owned.pdf", content)
         url = reverse("admin:core_dbstoredfile_serve_file", args=[obj.pk])
@@ -765,7 +774,7 @@ class ServeFileViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, content)
 
-    def test_serve_file_view_received_document_attachment(self):
+    def test_serve_file_view_received_document_attachment(self) -> None:
         """A received document's attachment is checked through Attachment's admin."""
         fy = FinancialYear.objects.create(year=2024)
         doc = ReceivedDocument.objects.create(year=fy, title="Assessment")
@@ -787,56 +796,56 @@ class ServeFileViewTests(TestCase):
 class DatabaseStorageTests(TestCase):
     """Tests for the DatabaseStorage custom storage backend."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.storage = DatabaseStorage()
 
-    def test_open_annotations_evaluate(self):
+    def test_open_annotations_evaluate(self) -> None:
         # ContentFile[bytes] only works at runtime because settings.py calls django_stubs_ext.monkeypatch().
         self.assertEqual(typing.get_type_hints(DatabaseStorage._open)["return"], ContentFile[bytes])
 
-    def test_dbstoredfile_str(self):
+    def test_dbstoredfile_str(self) -> None:
         obj = DBStoredFile.objects.create(filename="report.pdf", content=b"data")
         self.assertEqual(str(obj), "report.pdf")
 
-    def test_save_and_open_round_trip(self):
+    def test_save_and_open_round_trip(self) -> None:
         name = self.storage.save("report.pdf", ContentFile(b"hello world"))
         self.assertTrue(name.startswith("db/"))
         self.assertTrue(name.endswith("/report.pdf"))
         with self.storage.open(name) as f:
             self.assertEqual(f.read(), b"hello world")
 
-    def test_exists_true_for_saved_file(self):
+    def test_exists_true_for_saved_file(self) -> None:
         name = self.storage.save("a.txt", ContentFile(b"x"))
         self.assertTrue(self.storage.exists(name))
 
-    def test_exists_false_for_missing_pk(self):
+    def test_exists_false_for_missing_pk(self) -> None:
         self.assertFalse(self.storage.exists("db/999999/missing.txt"))
 
-    def test_exists_false_for_malformed_name(self):
+    def test_exists_false_for_malformed_name(self) -> None:
         self.assertFalse(self.storage.exists("not-a-db-path"))
 
-    def test_size(self):
+    def test_size(self) -> None:
         name = self.storage.save("sized.txt", ContentFile(b"0123456789"))
         self.assertEqual(self.storage.size(name), 10)
 
-    def test_size_missing_pk_raises(self):
+    def test_size_missing_pk_raises(self) -> None:
         with self.assertRaises(DBStoredFile.DoesNotExist):
             self.storage.size("db/999999/missing.txt")
 
-    def test_delete_removes_stored_file(self):
+    def test_delete_removes_stored_file(self) -> None:
         name = self.storage.save("deleteme.txt", ContentFile(b"bye"))
         self.storage.delete(name)
         self.assertFalse(self.storage.exists(name))
 
-    def test_delete_malformed_name_is_a_no_op(self):
+    def test_delete_malformed_name_is_a_no_op(self) -> None:
         # Should not raise even though the name can't be parsed into a pk.
         self.storage.delete("not-a-db-path")
 
-    def test_delete_missing_pk_is_a_no_op(self):
+    def test_delete_missing_pk_is_a_no_op(self) -> None:
         # Valid path shape but no matching row — filter().delete() is a no-op.
         self.storage.delete("db/999999/missing.txt")
 
-    def test_url(self):
+    def test_url(self) -> None:
         name = self.storage.save("linked.txt", ContentFile(b"y"))
         pk = DBStoredFile.objects.get().pk
         self.assertEqual(
@@ -844,39 +853,39 @@ class DatabaseStorageTests(TestCase):
             reverse("admin:core_dbstoredfile_serve_file", args=[pk]),
         )
 
-    def test_get_available_name_short_name_unchanged(self):
+    def test_get_available_name_short_name_unchanged(self) -> None:
         self.assertEqual(self.storage.get_available_name("short.txt", max_length=100), "short.txt")
 
-    def test_get_available_name_truncates_long_stem(self):
+    def test_get_available_name_truncates_long_stem(self) -> None:
         # Room is left for "db/<pk>/" with a 19-digit pk, the most a BigAutoField can have.
         result = self.storage.get_available_name("a" * 90 + ".txt", max_length=100)
         self.assertEqual(result, "a" * 73 + ".txt")
         self.assertEqual(len(f"db/{(1 << 63) - 1}/{result}"), 100)
 
-    def test_get_available_name_truncates_hard_when_suffix_too_long(self):
+    def test_get_available_name_truncates_hard_when_suffix_too_long(self) -> None:
         # allowed <= 0: suffix alone exceeds the room left, so we hard-truncate.
         name = "a." + "b" * 100
         result = self.storage.get_available_name(name, max_length=100)
         self.assertEqual(result, name[:77])
 
-    def test_get_available_name_rejects_max_length_without_room_for_prefix(self):
+    def test_get_available_name_rejects_max_length_without_room_for_prefix(self) -> None:
         with self.assertRaises(SuspiciousFileOperation):
             self.storage.get_available_name("short.txt", max_length=23)
 
-    def test_save_name_fits_max_length(self):
+    def test_save_name_fits_max_length(self) -> None:
         name = self.storage.save("a" * 200 + ".pdf", ContentFile(b"x"), max_length=100)
         self.assertLessEqual(len(name), 100)
         self.assertTrue(name.endswith(".pdf"))
 
-    def test_name_to_pk_rejects_non_str(self):
+    def test_name_to_pk_rejects_non_str(self) -> None:
         with self.assertRaises(ValueError):
             self.storage._name_to_pk(123)
 
-    def test_name_to_pk_rejects_missing_prefix(self):
+    def test_name_to_pk_rejects_missing_prefix(self) -> None:
         with self.assertRaises(ValueError):
             self.storage._name_to_pk("other/1/file.txt")
 
-    def test_name_to_pk_rejects_non_integer_pk(self):
+    def test_name_to_pk_rejects_non_integer_pk(self) -> None:
         with self.assertRaises(ValueError):
             self.storage._name_to_pk("db/notanumber/file.txt")
 
@@ -885,10 +894,10 @@ class AtLeastOnePrimaryFormSetTests(TestCase):
     """Direct unit tests for base-class branches not reachable through the
     concrete MimeTypeFormSet/FileExtensionFormSet subclasses used in the admin."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.ft = FileType.objects.create(short_name="TST", full_name="Test Type")
 
-    def test_field_errors_short_circuit_formset_clean(self):
+    def test_field_errors_short_circuit_formset_clean(self) -> None:
         """An invalid mime_type value should short-circuit clean() via
         any(self.errors)."""
         FormSet = inlineformset_factory(
@@ -912,7 +921,7 @@ class AtLeastOnePrimaryFormSetTests(TestCase):
         self.assertFalse(fs.is_valid())
         self.assertTrue(any(fs.errors))
 
-    def test_no_nonempty_error_returns_when_no_rows(self):
+    def test_no_nonempty_error_returns_when_no_rows(self) -> None:
         """When a subclass leaves _nonempty_error unset, clean() is a no-op for
         an empty formset instead of raising."""
 
@@ -939,12 +948,12 @@ class AtLeastOnePrimaryFormSetTests(TestCase):
 class FileTypeAdminDisplayTests(TestCase):
     """Tests for FileTypeAdmin's primary_mime_type/primary_extension columns."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "a@b.com", "pass")
         self.client = Client()
         self.client.login(username="admin", password="pass")
 
-    def test_changelist_shows_primary_mime_type_and_extension(self):
+    def test_changelist_shows_primary_mime_type_and_extension(self) -> None:
         ft = FileType.objects.create(short_name="PDF", full_name="PDF Document")
         MimeType.objects.create(file_type=ft, mime_type="application/pdf", is_primary=True)
         FileExtension.objects.create(file_type=ft, extension="pdf", is_primary=True)
@@ -954,7 +963,7 @@ class FileTypeAdminDisplayTests(TestCase):
         self.assertContains(response, "application/pdf")
         self.assertContains(response, "pdf")
 
-    def test_changelist_shows_placeholder_when_no_primary(self):
+    def test_changelist_shows_placeholder_when_no_primary(self) -> None:
         FileType.objects.create(short_name="NOP", full_name="No Primary")
 
         response = self.client.get(reverse("admin:core_filetype_changelist"))
@@ -966,10 +975,10 @@ class DBStoredFileAdminPermissionTests(TestCase):
     """DBStoredFileAdmin exists only to host the serve-file view; every
     permission check should always deny."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.admin = DBStoredFileAdmin(DBStoredFile, admin.site)
 
-    def test_permissions_all_denied(self):
+    def test_permissions_all_denied(self) -> None:
         request = RequestFactory().get("/")
         self.assertFalse(self.admin.has_add_permission(request))
         self.assertFalse(self.admin.has_change_permission(request))
@@ -980,7 +989,7 @@ class ServeFileViewMimeTypeFallbackTests(TestCase):
     """serve_file_view should fall back to application/octet-stream for
     filenames with no guessable MIME type."""
 
-    def test_unknown_extension_falls_back_to_octet_stream(self):
+    def test_unknown_extension_falls_back_to_octet_stream(self) -> None:
         User.objects.create_superuser("admin", "a@b.com", "pass")
         client = Client()
         client.login(username="admin", password="pass")
@@ -997,15 +1006,15 @@ class ProjectEntryPointTests(TestCase):
     itself (a real deployment imports them from outside the project), so
     nothing else exercises them."""
 
-    def test_wsgi_application_is_importable(self):
+    def test_wsgi_application_is_importable(self) -> None:
         self.assertTrue(callable(wsgi_application))
 
-    def test_asgi_application_is_importable(self):
+    def test_asgi_application_is_importable(self) -> None:
         self.assertTrue(callable(asgi_application))
 
 
 class RootRedirectTests(TestCase):
-    def test_root_redirects_to_admin_index(self):
+    def test_root_redirects_to_admin_index(self) -> None:
         response = Client().get("/")
         self.assertRedirects(
             response,
@@ -1018,18 +1027,18 @@ class RootRedirectTests(TestCase):
 class RequestTimingTests(TestCase):
     PAGE_TIME = re.compile(r'<p class="lt-page-time">Page generated in \d+\.\d{3} seconds</p>')
 
-    def setUp(self):
+    def setUp(self) -> None:
         User.objects.create_superuser("admin", "admin@example.com", "password")
         self.client.login(username="admin", password="password")
 
-    def assert_footer_shows_time(self, url):
+    def assert_footer_shows_time(self, url: str) -> None:
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         self.assertRegex(content, self.PAGE_TIME)
         self.assertIn(".lt-page-time {", content)
 
-    def test_admin_pages_show_generation_time_in_footer(self):
+    def test_admin_pages_show_generation_time_in_footer(self) -> None:
         year = FinancialYear.objects.create(year=2024)
         for url in [
             reverse("admin:index"),
@@ -1043,15 +1052,15 @@ class RequestTimingTests(TestCase):
             with self.subTest(url=url):
                 self.assert_footer_shows_time(url)
 
-    def test_login_page_shows_generation_time_in_footer(self):
+    def test_login_page_shows_generation_time_in_footer(self) -> None:
         self.client.logout()
         self.assert_footer_shows_time(reverse("admin:login"))
 
-    def test_server_timing_header(self):
+    def test_server_timing_header(self) -> None:
         response = Client().get("/")
         self.assertRegex(response.headers["Server-Timing"], r"^app;dur=\d+\.\d$")
 
-    def test_tag_measures_from_request_start(self):
+    def test_tag_measures_from_request_start(self) -> None:
         request = RequestFactory().get("/")
         template = Template("{% load page_timing %}{% page_generation_time %}")
         with mock.patch("time.perf_counter", return_value=12.5):
@@ -1059,7 +1068,7 @@ class RequestTimingTests(TestCase):
             rendered = template.render(Context({"request": request}))
         self.assertEqual(rendered, "2.500")
 
-    def test_tag_is_empty_without_middleware_or_request(self):
+    def test_tag_is_empty_without_middleware_or_request(self) -> None:
         template = Template("{% load page_timing %}{% page_generation_time %}")
         self.assertEqual(template.render(Context({})), "")
         request = RequestFactory().get("/")
@@ -1069,7 +1078,7 @@ class RequestTimingTests(TestCase):
 class AdminSiteHeaderTests(TestCase):
     COMMIT_ID = "0123abc456def7890123abc456def7890123abcd"
 
-    def test_includes_commit_link_and_instance_name(self):
+    def test_includes_commit_link_and_instance_name(self) -> None:
         self.assertEqual(
             str(
                 _build_admin_site_header(
@@ -1089,7 +1098,7 @@ class AdminSiteHeaderTests(TestCase):
             ),
         )
 
-    def test_omits_commit_link_when_no_commit_id(self):
+    def test_omits_commit_link_when_no_commit_id(self) -> None:
         self.assertEqual(
             str(
                 _build_admin_site_header(
@@ -1103,11 +1112,11 @@ class AdminSiteHeaderTests(TestCase):
             f'Life Tracker <code style="{_TEXT_STYLE}">instance.local</code>',
         )
 
-    def test_uses_site_name_color(self):
+    def test_uses_site_name_color(self) -> None:
         # The other tests compare against the constant, so pin its value here.
         self.assertEqual(_TEXT_STYLE, "color: var(--header-branding-color);")
 
-    def test_accepts_base_url_without_trailing_slash(self):
+    def test_accepts_base_url_without_trailing_slash(self) -> None:
         self.assertEqual(
             str(
                 _build_admin_site_header(
@@ -1127,7 +1136,7 @@ class AdminSiteHeaderTests(TestCase):
             ),
         )
 
-    def test_omits_commit_link_when_not_linking_commit(self):
+    def test_omits_commit_link_when_not_linking_commit(self) -> None:
         self.assertEqual(
             str(
                 _build_admin_site_header(
@@ -1144,7 +1153,7 @@ class AdminSiteHeaderTests(TestCase):
             ),
         )
 
-    def test_escapes_site_name(self):
+    def test_escapes_site_name(self) -> None:
         self.assertEqual(
             str(
                 _build_admin_site_header(
@@ -1168,10 +1177,10 @@ class AdminSiteHeaderTests(TestCase):
 class AdminSitePerRequestHeaderTests(TestCase):
     COMMIT_URL = f"https://example.invalid/commit/{AdminSiteHeaderTests.COMMIT_ID}"
 
-    def test_admin_site_is_lifetracker_admin_site(self):
+    def test_admin_site_is_lifetracker_admin_site(self) -> None:
         self.assertIsInstance(admin.site, LifetrackerAdminSite)
 
-    def test_logged_out_uses_unauthenticated_name_without_commit_link(self):
+    def test_logged_out_uses_unauthenticated_name_without_commit_link(self) -> None:
         response = Client().get(reverse("admin:login"))
         self.assertContains(response, "<title>Log in | Example Site</title>", html=True)
         self.assertContains(
@@ -1183,7 +1192,7 @@ class AdminSitePerRequestHeaderTests(TestCase):
         self.assertNotContains(response, self.COMMIT_URL)
         self.assertNotContains(response, "Life Tracker")
 
-    def test_logged_in_uses_site_name_with_commit_link(self):
+    def test_logged_in_uses_site_name_with_commit_link(self) -> None:
         client = Client()
         client.force_login(User.objects.create_superuser("admin", "", "pw"))
         response = client.get(reverse("admin:index"))
@@ -1199,24 +1208,24 @@ class AdminSiteFlyMachineLinkTests(TestCase):
     URL = "https://fly.io/apps/example-app/machines/0123456789abcd"
     LINK = f'<a href="{URL}" target="_blank" rel="noopener noreferrer">Fly Machine</a>'
 
-    def _index(self, user):
+    def _index(self, user: User) -> TestResponse:
         client = Client()
         client.force_login(user)
         return client.get(reverse("admin:index"))
 
     @override_settings(LIFETRACKER_FLY_MACHINE_URL=URL)
-    def test_top_bar_links_to_fly_machine_for_superusers(self):
+    def test_top_bar_links_to_fly_machine_for_superusers(self) -> None:
         response = self._index(User.objects.create_superuser("admin", "", "pw"))
         self.assertContains(response, self.LINK, html=True)
 
     @override_settings(LIFETRACKER_FLY_MACHINE_URL=URL)
-    def test_no_link_for_staff_or_logged_out(self):
+    def test_no_link_for_staff_or_logged_out(self) -> None:
         staff = User.objects.create_user("staff", "", "pw", is_staff=True)
         self.assertNotContains(self._index(staff), self.URL)
         self.assertNotContains(Client().get(reverse("admin:login")), self.URL)
 
     @override_settings(LIFETRACKER_FLY_MACHINE_URL="")
-    def test_no_link_when_not_on_fly(self):
+    def test_no_link_when_not_on_fly(self) -> None:
         response = self._index(User.objects.create_superuser("admin", "", "pw"))
         self.assertNotContains(response, "Fly Machine")
 
@@ -1232,7 +1241,9 @@ class _SettingsSubprocessMixin:
     REPO_ROOT = Path(__file__).resolve().parent.parent.parent
     SRC_DIR = REPO_ROOT / "src"
 
-    def _run(self, home, extra_env=None, expr="s.SECRET_KEY"):
+    def _run(
+        self, home: str | Path, extra_env: dict[str, str] | None = None, expr: str = "s.SECRET_KEY"
+    ) -> subprocess.CompletedProcess[str]:
         env = {
             "HOME": str(home),
             "PATH": os.environ.get("PATH", ""),
@@ -1261,7 +1272,7 @@ class _SettingsSubprocessMixin:
 class SettingsSecretKeyTests(_SettingsSubprocessMixin, TestCase):
     """SECRET_KEY is read from (or generated into) a file under $HOME."""
 
-    def test_fresh_install_generates_and_persists_a_key(self):
+    def test_fresh_install_generates_and_persists_a_key(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             proc = self._run(home)
             self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -1272,7 +1283,7 @@ class SettingsSecretKeyTests(_SettingsSubprocessMixin, TestCase):
             self.assertEqual(key_file.read_text().strip(), printed_key)
             self.assertEqual(key_file.stat().st_mode & 0o777, 0o600)
 
-    def test_old_taxtracker_key_is_copied_forward(self):
+    def test_old_taxtracker_key_is_copied_forward(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             old_dir = Path(home) / ".config" / "taxtracker"
             old_dir.mkdir(parents=True)
@@ -1285,7 +1296,7 @@ class SettingsSecretKeyTests(_SettingsSubprocessMixin, TestCase):
             new_key_file = Path(home) / ".config" / "lifetracker" / "secret_key"
             self.assertEqual(new_key_file.read_text().strip(), "legacy-secret-key-content")
 
-    def test_fresh_install_does_not_require_chmod(self):
+    def test_fresh_install_does_not_require_chmod(self) -> None:
         with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as patch_dir:
             (Path(patch_dir) / "sitecustomize.py").write_text(
                 "from pathlib import Path\n"
@@ -1300,7 +1311,7 @@ class SettingsSecretKeyTests(_SettingsSubprocessMixin, TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertTrue(proc.stdout.strip())
 
-    def test_unreadable_old_key_falls_back_to_fresh_key(self):
+    def test_unreadable_old_key_falls_back_to_fresh_key(self) -> None:
         """An OSError while reading the legacy key must not be fatal — it
         should just skip the migration and generate a fresh key instead."""
         with tempfile.TemporaryDirectory() as home:
@@ -1317,7 +1328,7 @@ class SettingsSecretKeyTests(_SettingsSubprocessMixin, TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertNotEqual(proc.stdout.strip(), "legacy-secret-key-content")
 
-    def test_migration_write_failure_is_swallowed_and_falls_through(self):
+    def test_migration_write_failure_is_swallowed_and_falls_through(self) -> None:
         """If the new key's directory can't be created during migration, that
         failure is swallowed — but the identical failure then hits again
         during fresh-key generation, which is fatal."""
@@ -1332,7 +1343,7 @@ class SettingsSecretKeyTests(_SettingsSubprocessMixin, TestCase):
             self.assertEqual(proc.returncode, 1)
             self.assertIn("Could not write secret key file", proc.stderr)
 
-    def test_unreadable_existing_key_file_raises(self):
+    def test_unreadable_existing_key_file_raises(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             new_dir = Path(home) / ".config" / "lifetracker"
             new_dir.mkdir(parents=True)
@@ -1347,7 +1358,7 @@ class SettingsSecretKeyTests(_SettingsSubprocessMixin, TestCase):
             self.assertEqual(proc.returncode, 1)
             self.assertIn("Could not read secret key file", proc.stderr)
 
-    def test_unwritable_key_directory_raises(self):
+    def test_unwritable_key_directory_raises(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             config_dir = Path(home) / ".config"
             config_dir.mkdir(parents=True)
@@ -1360,7 +1371,7 @@ class SettingsSecretKeyTests(_SettingsSubprocessMixin, TestCase):
             self.assertEqual(proc.returncode, 1)
             self.assertIn("Could not write secret key file", proc.stderr)
 
-    def test_override_env_var_skips_migration(self):
+    def test_override_env_var_skips_migration(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             old_dir = Path(home) / ".config" / "taxtracker"
             old_dir.mkdir(parents=True)
@@ -1380,7 +1391,7 @@ class SettingsDataDirTests(_SettingsSubprocessMixin, TestCase):
 
     EXPR = "(str(s.DATABASES['default']['NAME']), str(s._key_file))"
 
-    def test_paths_default_to_the_data_dir(self):
+    def test_paths_default_to_the_data_dir(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             # A legacy key under $HOME must not be copied into the data dir.
             old_dir = Path(home) / ".config" / "taxtracker"
@@ -1403,7 +1414,7 @@ class SettingsDataDirTests(_SettingsSubprocessMixin, TestCase):
             self.assertEqual((data_dir / "secret_key").read_text().strip(), key)
             self.assertFalse((Path(home) / ".config" / "lifetracker").exists())
 
-    def test_explicit_paths_take_precedence(self):
+    def test_explicit_paths_take_precedence(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             data_dir = Path(home) / "data"
             db_path = Path(home) / "elsewhere" / "db.sqlite3"
@@ -1422,7 +1433,7 @@ class SettingsDataDirTests(_SettingsSubprocessMixin, TestCase):
             self.assertEqual(ast.literal_eval(proc.stdout.strip()), (str(db_path), str(key_path)))
             self.assertFalse(data_dir.exists())
 
-    def test_config_dir_takes_precedence_over_data_dir(self):
+    def test_config_dir_takes_precedence_over_data_dir(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             # A legacy key under $HOME must not be copied into the config dir.
             old_dir = Path(home) / ".config" / "taxtracker"
@@ -1447,7 +1458,7 @@ class SettingsDataDirTests(_SettingsSubprocessMixin, TestCase):
             self.assertNotEqual(key, "legacy-secret-key-content")
             self.assertFalse(data_dir.exists())
 
-    def test_without_data_dir_db_defaults_to_repo_root(self):
+    def test_without_data_dir_db_defaults_to_repo_root(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             proc = self._run(home, expr=f"{self.EXPR} + (str(s.LIFETRACKER_CONFIG_DIR),)")
             self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -1466,23 +1477,23 @@ class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
         " s.SESSION_COOKIE_SECURE, s.CSRF_COOKIE_SECURE, s.SECURE_HSTS_SECONDS > 0)"
     )
 
-    def _settings(self, **env):
+    def _settings(self, **env: str) -> typing.Any:
         with tempfile.TemporaryDirectory() as home:
             proc = self._run(home, extra_env=env, expr=self.EXPR)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return ast.literal_eval(proc.stdout.strip())
 
-    def _error(self, **env):
+    def _error(self, **env: str) -> str:
         with tempfile.TemporaryDirectory() as home:
             proc = self._run(home, extra_env=env, expr=self.EXPR)
         self.assertEqual(proc.returncode, 1)
         self.assertIn("ImproperlyConfigured", proc.stderr)
         return proc.stderr
 
-    def test_defaults_are_local_development(self):
+    def test_defaults_are_local_development(self) -> None:
         self.assertEqual(self._settings(), (True, [], [], None, False, False, False))
 
-    def test_debug_off_with_hosts(self):
+    def test_debug_off_with_hosts(self) -> None:
         self.assertEqual(
             self._settings(
                 LIFETRACKER_DEBUG="0",
@@ -1499,25 +1510,25 @@ class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
             ),
         )
 
-    def test_debug_off_without_hosts_refuses_to_start(self):
+    def test_debug_off_without_hosts_refuses_to_start(self) -> None:
         stderr = self._error(LIFETRACKER_DEBUG="false")
         self.assertIn("LIFETRACKER_ALLOWED_HOSTS must be set", stderr)
 
-    def test_invalid_bool_is_rejected(self):
+    def test_invalid_bool_is_rejected(self) -> None:
         stderr = self._error(LIFETRACKER_DEBUG="yes")
         self.assertIn("LIFETRACKER_DEBUG must be 1/true or 0/false", stderr)
 
-    def test_bool_is_case_insensitive(self):
+    def test_bool_is_case_insensitive(self) -> None:
         self.assertTrue(self._settings(LIFETRACKER_DEBUG="TRUE")[0])
         self.assertFalse(self._settings(LIFETRACKER_DEBUG="False", LIFETRACKER_ALLOWED_HOSTS="example.com")[0])
 
-    def test_hosts_default_from_fly_app_name(self):
+    def test_hosts_default_from_fly_app_name(self) -> None:
         self.assertEqual(
             self._settings(LIFETRACKER_DEBUG="0", FLY_APP_NAME="example-app")[1],
             ["example-app.fly.dev"],
         )
 
-    def test_explicit_hosts_override_fly_app_name(self):
+    def test_explicit_hosts_override_fly_app_name(self) -> None:
         self.assertEqual(
             self._settings(
                 LIFETRACKER_DEBUG="0",
@@ -1527,7 +1538,7 @@ class SettingsEnvTests(_SettingsSubprocessMixin, TestCase):
             ["tax.example.com"],
         )
 
-    def test_proxy_settings(self):
+    def test_proxy_settings(self) -> None:
         debug, _, origins, proxy_header, _, _, hsts_on = self._settings(
             LIFETRACKER_DEBUG="true",
             LIFETRACKER_CSRF_TRUSTED_ORIGINS="https://tax.example.com",
@@ -1545,20 +1556,20 @@ class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
         " s.LIFETRACKER_BACKUP_HOSTNAME, s.LIFETRACKER_UNAUTHENTICATED_SITE_NAME)"
     )
 
-    def _settings(self, **env):
+    def _settings(self, **env: str) -> typing.Any:
         with tempfile.TemporaryDirectory() as home:
             proc = self._run(home, extra_env=env, expr=self.EXPR)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return ast.literal_eval(proc.stdout.strip())
 
-    def test_defaults(self):
+    def test_defaults(self) -> None:
         commit_url_base, commit_id, backup_hostname, unauthenticated_name = self._settings()
         self.assertEqual(commit_url_base, "https://github.com/skissane/taxtracker/commit/")
         self.assertEqual(commit_id, "")
         self.assertTrue(backup_hostname)
         self.assertEqual(unauthenticated_name, "Life Tracker")
 
-    def test_reads_commit_values_from_environment(self):
+    def test_reads_commit_values_from_environment(self) -> None:
         self.assertEqual(
             self._settings(
                 LIFETRACKER_COMMIT_URL_BASE="https://example.invalid/commit/",
@@ -1574,16 +1585,16 @@ class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
             ),
         )
 
-    def test_blank_unauthenticated_site_name_uses_default(self):
+    def test_blank_unauthenticated_site_name_uses_default(self) -> None:
         self.assertEqual(
             self._settings(LIFETRACKER_UNAUTHENTICATED_SITE_NAME="  ")[3],
             "Life Tracker",
         )
 
-    def test_backup_hostname_defaults_from_fly_app_name(self):
+    def test_backup_hostname_defaults_from_fly_app_name(self) -> None:
         self.assertEqual(self._settings(FLY_APP_NAME="example-app")[2], "example-app.fly.dev")
 
-    def test_explicit_backup_hostname_overrides_fly_app_name(self):
+    def test_explicit_backup_hostname_overrides_fly_app_name(self) -> None:
         self.assertEqual(
             self._settings(LIFETRACKER_BACKUP_HOSTNAME="test-instance", FLY_APP_NAME="example-app")[2],
             "test-instance",
@@ -1591,16 +1602,16 @@ class SettingsAdminHeaderEnvTests(_SettingsSubprocessMixin, TestCase):
 
 
 class FlyMachineUrlTests(SimpleTestCase):
-    def test_built_from_app_name_and_machine_id(self):
+    def test_built_from_app_name_and_machine_id(self) -> None:
         self.assertEqual(
             fly_machine_url(" example-app ", "0123456789abcd "),
             "https://fly.io/apps/example-app/machines/0123456789abcd",
         )
 
-    def test_values_are_url_quoted(self):
+    def test_values_are_url_quoted(self) -> None:
         self.assertEqual(fly_machine_url("a/b", "c?d"), "https://fly.io/apps/a%2Fb/machines/c%3Fd")
 
-    def test_empty_unless_both_are_set(self):
+    def test_empty_unless_both_are_set(self) -> None:
         for app_name, machine_id in [
             ("", ""),
             ("example-app", ""),
@@ -1613,13 +1624,13 @@ class FlyMachineUrlTests(SimpleTestCase):
 
 
 class SettingsFlyMachineUrlTests(_SettingsSubprocessMixin, TestCase):
-    def _url(self, **env):
+    def _url(self, **env: str) -> typing.Any:
         with tempfile.TemporaryDirectory() as home:
             proc = self._run(home, extra_env=env, expr="repr(s.LIFETRACKER_FLY_MACHINE_URL)")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return ast.literal_eval(proc.stdout.strip())
 
-    def test_read_from_fly_environment_variables(self):
+    def test_read_from_fly_environment_variables(self) -> None:
         self.assertEqual(
             self._url(FLY_APP_NAME="example-app", FLY_MACHINE_ID="0123456789abcd"),
             "https://fly.io/apps/example-app/machines/0123456789abcd",
@@ -1635,16 +1646,16 @@ class SettingsGoogleSSOEnvTests(_SettingsSubprocessMixin, TestCase):
         " s.LIFETRACKER_GOOGLE_SSO_ALLOWED_EMAILS)"
     )
 
-    def _settings(self, **env):
+    def _settings(self, **env: str) -> typing.Any:
         with tempfile.TemporaryDirectory() as home:
             proc = self._run(home, extra_env=env, expr=self.EXPR)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return ast.literal_eval(proc.stdout.strip())
 
-    def test_defaults_disabled(self):
+    def test_defaults_disabled(self) -> None:
         self.assertEqual(self._settings(), (False, "", "", "", None, []))
 
-    def test_reads_lifetracker_variables(self):
+    def test_reads_lifetracker_variables(self) -> None:
         self.assertEqual(
             self._settings(
                 LIFETRACKER_GOOGLE_SSO_CLIENT_ID=" id ",
@@ -1663,7 +1674,7 @@ class SettingsGoogleSSOEnvTests(_SettingsSubprocessMixin, TestCase):
             ),
         )
 
-    def test_enabled_needs_both_id_and_secret(self):
+    def test_enabled_needs_both_id_and_secret(self) -> None:
         for env in (
             {"LIFETRACKER_GOOGLE_SSO_CLIENT_ID": "id"},
             {"LIFETRACKER_GOOGLE_SSO_CLIENT_SECRET": "secret"},
@@ -1671,7 +1682,7 @@ class SettingsGoogleSSOEnvTests(_SettingsSubprocessMixin, TestCase):
             with self.subTest(env=env):
                 self.assertFalse(self._settings(**env)[0])
 
-    def test_ignores_unprefixed_variables(self):
+    def test_ignores_unprefixed_variables(self) -> None:
         self.assertEqual(
             self._settings(
                 GOOGLE_SSO_CLIENT_ID="id",
@@ -1688,7 +1699,7 @@ class LoggingTests(TestCase):
     DEBUG is (tests run with it off, as production does), so they reach the
     Fly logs."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         # Both loggers share the one handler, which writes to stderr.
         (handler,) = logging.getLogger("django").handlers
         self.assertEqual(logging.getLogger("lifetracker").handlers, [handler])
@@ -1696,7 +1707,7 @@ class LoggingTests(TestCase):
         self.stream = io.StringIO()
         self.addCleanup(handler.setStream, handler.setStream(self.stream))
 
-    def test_unhandled_exception_traceback_is_logged(self):
+    def test_unhandled_exception_traceback_is_logged(self) -> None:
         client = Client(raise_request_exception=False)
         client.force_login(User.objects.create_superuser("admin", "", "pw"))
         with mock.patch(
@@ -1710,7 +1721,7 @@ class LoggingTests(TestCase):
         self.assertIn("Traceback (most recent call last):", output)
         self.assertIn("RuntimeError: boom", output)
 
-    def test_app_logger_logs_info(self):
+    def test_app_logger_logs_info(self) -> None:
         logging.getLogger("lifetracker.core.admin").info("hello")
         self.assertRegex(
             self.stream.getvalue(),
@@ -1718,7 +1729,7 @@ class LoggingTests(TestCase):
             r"INFO lifetracker\.core\.admin: hello\n\Z",
         )
 
-    def test_runserver_request_log_keeps_its_own_handler(self):
+    def test_runserver_request_log_keeps_its_own_handler(self) -> None:
         # Configuring "django" resets its children, so without its own entry
         # runserver's request log would propagate to the plain handler and lose
         # the colours ServerFormatter gives it.
@@ -1736,22 +1747,22 @@ class SettingsLogTimestampsTests(_SettingsSubprocessMixin, TestCase):
 
     EXPR = "s.LOGGING['formatters']['stderr']['format']"
 
-    def _format(self, **env):
+    def _format(self, **env: str) -> str:
         with tempfile.TemporaryDirectory() as home:
             proc = self._run(home, extra_env=env, expr=self.EXPR)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return proc.stdout.strip()
 
-    def test_on_by_default(self):
+    def test_on_by_default(self) -> None:
         self.assertEqual(self._format(), "{asctime} {levelname} {name}: {message}")
 
-    def test_off(self):
+    def test_off(self) -> None:
         self.assertEqual(
             self._format(LIFETRACKER_LOG_TIMESTAMPS="0"),
             "{levelname} {name}: {message}",
         )
 
-    def test_invalid(self):
+    def test_invalid(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             proc = self._run(home, extra_env={"LIFETRACKER_LOG_TIMESTAMPS": "no"}, expr=self.EXPR)
         self.assertEqual(proc.returncode, 1)
@@ -1761,7 +1772,7 @@ class SettingsLogTimestampsTests(_SettingsSubprocessMixin, TestCase):
 class InitialAdminPasswordFileTests(TestCase):
     """Where ensure_superuser looks for the initial admin password file."""
 
-    def _resolve(self, env=None):
+    def _resolve(self, env: dict[str, str] | None = None) -> Path:
         # patch.dict restores the whole environment afterwards, including the
         # pop, so a real LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE can't leak in.
         with (
@@ -1772,16 +1783,16 @@ class InitialAdminPasswordFileTests(TestCase):
             os.environ.update(env or {})
             return _initial_admin_password_file()
 
-    def test_defaults_to_config_dir(self):
+    def test_defaults_to_config_dir(self) -> None:
         self.assertEqual(self._resolve(), Path("/config/initial_admin_password"))
 
-    def test_env_var_overrides(self):
+    def test_env_var_overrides(self) -> None:
         self.assertEqual(
             self._resolve({"LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE": "/elsewhere/pw"}),
             Path("/elsewhere/pw"),
         )
 
-    def test_empty_env_var_is_ignored(self):
+    def test_empty_env_var_is_ignored(self) -> None:
         self.assertEqual(
             self._resolve({"LIFETRACKER_INITIAL_ADMIN_PASSWORD_FILE": ""}),
             Path("/config/initial_admin_password"),
@@ -1791,7 +1802,7 @@ class InitialAdminPasswordFileTests(TestCase):
 class EnsureSuperuserCommandTests(TestCase):
     """Tests for the ensure_superuser management command."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         # Point the initial-admin-password lookup at a file inside a fresh
         # temp dir that doesn't exist unless a test writes to it, so this
         # never picks up a real ~/.config/lifetracker/initial_admin_password.
@@ -1811,13 +1822,13 @@ class EnsureSuperuserCommandTests(TestCase):
         self.addCleanup(env_patcher.stop)
         os.environ.pop("LIFETRACKER_INITIAL_ADMIN_PASSWORD", None)
 
-    def _call(self, **kwargs):
+    def _call(self, **kwargs: typing.Any) -> str:
         """Call ensure_superuser and return captured stdout."""
         out = io.StringIO()
         call_command("ensure_superuser", stdout=out, **kwargs)
         return out.getvalue()
 
-    def test_creates_new_user_with_random_password(self):
+    def test_creates_new_user_with_random_password(self) -> None:
         output = self._call(username="testadmin", email="a@example.com")
         self.assertTrue(User.objects.filter(username="testadmin").exists())
         user = User.objects.get(username="testadmin")
@@ -1831,12 +1842,12 @@ class EnsureSuperuserCommandTests(TestCase):
         self.assertEqual(len(printed_password), 32)
         self.assertTrue(user.check_password(printed_password))
 
-    def test_default_username_is_admin(self):
+    def test_default_username_is_admin(self) -> None:
         output = self._call()
         self.assertTrue(User.objects.filter(username="admin").exists())
         self.assertIn("admin", output)
 
-    def test_creates_new_user_with_password_from_file(self):
+    def test_creates_new_user_with_password_from_file(self) -> None:
         self.password_file.parent.mkdir(parents=True, exist_ok=True)
         self.password_file.write_text("from-the-file\n")
         output = self._call(username="admin")
@@ -1846,7 +1857,7 @@ class EnsureSuperuserCommandTests(TestCase):
         self.assertNotIn("from-the-file", output)
         self.assertIn(str(self.password_file), output)
 
-    def test_creates_new_user_with_password_from_env(self):
+    def test_creates_new_user_with_password_from_env(self) -> None:
         os.environ["LIFETRACKER_INITIAL_ADMIN_PASSWORD"] = " from-the-env\n"
         output = self._call(username="admin")
         user = User.objects.get(username="admin")
@@ -1854,14 +1865,14 @@ class EnsureSuperuserCommandTests(TestCase):
         self.assertNotIn("from-the-env", output)
         self.assertIn("$LIFETRACKER_INITIAL_ADMIN_PASSWORD", output)
 
-    def test_env_password_takes_precedence_over_file(self):
+    def test_env_password_takes_precedence_over_file(self) -> None:
         self.password_file.write_text("from-the-file\n")
         os.environ["LIFETRACKER_INITIAL_ADMIN_PASSWORD"] = "from-the-env"
         self._call(username="admin")
         user = User.objects.get(username="admin")
         self.assertTrue(user.check_password("from-the-env"))
 
-    def test_blank_env_password_falls_back_to_file(self):
+    def test_blank_env_password_falls_back_to_file(self) -> None:
         self.password_file.write_text("from-the-file\n")
         os.environ["LIFETRACKER_INITIAL_ADMIN_PASSWORD"] = "  "
         output = self._call(username="admin")
@@ -1869,14 +1880,14 @@ class EnsureSuperuserCommandTests(TestCase):
         self.assertTrue(user.check_password("from-the-file"))
         self.assertIn(str(self.password_file), output)
 
-    def test_env_password_ignored_for_existing_user(self):
+    def test_env_password_ignored_for_existing_user(self) -> None:
         User.objects.create_superuser("admin", "", "existingpassword")
         os.environ["LIFETRACKER_INITIAL_ADMIN_PASSWORD"] = "from-the-env"
         self._call(username="admin")
         user = User.objects.get(username="admin")
         self.assertTrue(user.check_password("existingpassword"))
 
-    def test_empty_password_file_falls_back_to_random_password(self):
+    def test_empty_password_file_falls_back_to_random_password(self) -> None:
         self.password_file.parent.mkdir(parents=True, exist_ok=True)
         self.password_file.write_text("   \n")
         output = self._call(username="admin")
@@ -1886,7 +1897,7 @@ class EnsureSuperuserCommandTests(TestCase):
         self.assertEqual(len(printed_password), 32)
         self.assertTrue(user.check_password(printed_password))
 
-    def test_existing_user_no_change_when_already_superuser_with_password(self):
+    def test_existing_user_no_change_when_already_superuser_with_password(self) -> None:
         User.objects.create_superuser("admin", "", "existingpassword")
         output = self._call(username="admin")
         # No password should be printed when user already has one
@@ -1894,7 +1905,7 @@ class EnsureSuperuserCommandTests(TestCase):
         user = User.objects.get(username="admin")
         self.assertTrue(user.check_password("existingpassword"))
 
-    def test_existing_user_flags_repaired(self):
+    def test_existing_user_flags_repaired(self) -> None:
         user = User.objects.create_user("admin", "", "existingpassword")
         user.is_active = False
         user.is_staff = False
@@ -1908,7 +1919,7 @@ class EnsureSuperuserCommandTests(TestCase):
         # Password unchanged — existing password should still work
         self.assertTrue(user.check_password("existingpassword"))
 
-    def test_existing_user_password_left_alone_when_unusable(self):
+    def test_existing_user_password_left_alone_when_unusable(self) -> None:
         user = User.objects.create_superuser("admin", "", "tmp")
         user.set_unusable_password()
         user.save()
@@ -1966,7 +1977,13 @@ class DockerEntrypointTests(TestCase):
         ),
     }
 
-    def _run_entrypoint(self, *args, env=None, returncode=0, fakes=None):
+    def _run_entrypoint(
+        self,
+        *args: str,
+        env: dict[str, str] | None = None,
+        returncode: int = 0,
+        fakes: dict[str, str] | None = None,
+    ) -> tuple[subprocess.CompletedProcess[str], list[str], str]:
         """Run the entrypoint with fake `python`, `envoy` and `gunicorn` on PATH.
 
         Returns the completed process, the logged lines and the path the
@@ -2009,19 +2026,19 @@ class DockerEntrypointTests(TestCase):
         return result, log_lines, str(temp_path / "lifetracker-envoy.yaml")
 
     @staticmethod
-    def _envoy_config_command(config_path, host="0.0.0.0", port=8000, upstream=8001):
+    def _envoy_config_command(config_path: str, host: str = "0.0.0.0", port: int = 8000, upstream: int = 8001) -> str:
         return (
             f"python manage.py envoy_config envoy/envoy.yaml {config_path}"
             f" --listen-host {host} --listen-port {port} --upstream-port {upstream}"
         )
 
-    def test_entrypoint_runs_startup_commands_before_execing_arguments(self):
+    def test_entrypoint_runs_startup_commands_before_execing_arguments(self) -> None:
         result, log_lines, _ = self._run_entrypoint("sh", "-c", "printf ready")
 
         self.assertEqual(result.stdout, "ready")
         self.assertEqual(log_lines, [*self.STARTUP, "python manage.py ensure_jwt_key"])
 
-    def test_entrypoint_starts_envoy_and_gunicorn_by_default(self):
+    def test_entrypoint_starts_envoy_and_gunicorn_by_default(self) -> None:
         _, log_lines, envoy_config_path = self._run_entrypoint()
 
         self.assertEqual(
@@ -2037,7 +2054,7 @@ class DockerEntrypointTests(TestCase):
             ],
         )
 
-    def test_entrypoint_settings_come_from_env(self):
+    def test_entrypoint_settings_come_from_env(self) -> None:
         _, log_lines, envoy_config_path = self._run_entrypoint(
             env={
                 "LIFETRACKER_GUNICORN_PORT": "9001",
@@ -2060,7 +2077,7 @@ class DockerEntrypointTests(TestCase):
             self._envoy_config_command(envoy_config_path, "127.0.0.1", 9000, 9001),
         )
 
-    def test_entrypoint_stops_gunicorn_when_envoy_keeps_failing(self):
+    def test_entrypoint_stops_gunicorn_when_envoy_keeps_failing(self) -> None:
         # Envoy exits at once every time. Gunicorn waits (up to 20 seconds)
         # for SIGTERM, then logs whether the failure file exists.
         result, log_lines, envoy_config_path = self._run_entrypoint(
@@ -2094,7 +2111,7 @@ class DockerEntrypointTests(TestCase):
             result.stderr,
         )
 
-    def test_entrypoint_stops_if_envoy_config_fails(self):
+    def test_entrypoint_stops_if_envoy_config_fails(self) -> None:
         _, log_lines, envoy_config_path = self._run_entrypoint(
             fakes={"python": self.LOG_COMMAND + '[ "$2" != envoy_config ] || exit 1\n'},
             returncode=1,
@@ -2109,7 +2126,7 @@ class SQLiteFileDatabaseTests(TestCase):
     open a separate connection to a temporary file with the same settings.
     """
 
-    def setUp(self):
+    def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.db_path = Path(tmp.name) / "db.sqlite3"
@@ -2117,12 +2134,12 @@ class SQLiteFileDatabaseTests(TestCase):
         self.addCleanup(handler.close_all)
         self.connection = handler["default"]
 
-    def test_journal_mode_is_wal(self):
+    def test_journal_mode_is_wal(self) -> None:
         with self.connection.cursor() as cursor:
             cursor.execute("PRAGMA journal_mode")
             self.assertEqual(cursor.fetchone(), ("wal",))
 
-    def test_backup_database_includes_uncheckpointed_wal(self):
+    def test_backup_database_includes_uncheckpointed_wal(self) -> None:
         with self.connection.cursor() as cursor:
             # Stop SQLite copying the WAL back into the main file on commit,
             # so the row exists only in db.sqlite3-wal.
@@ -2138,13 +2155,13 @@ class SQLiteFileDatabaseTests(TestCase):
         self.addCleanup(copy.close)
         self.assertEqual(copy.execute("SELECT v FROM t").fetchall(), [("in the wal",)])
 
-    def test_backup_database_refuses_inside_transaction(self):
+    def test_backup_database_refuses_inside_transaction(self) -> None:
         with mock.patch("lifetracker.core.backup.connections", {"default": self.connection}):
             with mock.patch.object(self.connection, "in_atomic_block", True):
                 with self.assertRaisesMessage(RuntimeError, "Can't back up the database inside a transaction."):
                     backup_database()
 
-    def test_backup_database_leaves_no_file_behind(self):
+    def test_backup_database_leaves_no_file_behind(self) -> None:
         with mock.patch("lifetracker.core.backup.connections", {"default": self.connection}):
             backup_file = backup_database()
         with backup_file:
@@ -2153,15 +2170,15 @@ class SQLiteFileDatabaseTests(TestCase):
 
 
 class CloudBackupStatusModelTests(TestCase):
-    def test_str_never_backed_up(self):
+    def test_str_never_backed_up(self) -> None:
         self.assertEqual(str(CloudBackupStatus()), "Cloud backup status: never backed up")
 
-    def test_str_with_last_backup(self):
+    def test_str_with_last_backup(self) -> None:
         backup_time = datetime.datetime(2026, 1, 2, 3, 4, 5, tzinfo=datetime.UTC)
         status = CloudBackupStatus(last_backup_at=backup_time)
         self.assertEqual(str(status), f"Cloud backup status: last backup at {backup_time}")
 
-    def test_only_singleton_pk_allowed(self):
+    def test_only_singleton_pk_allowed(self) -> None:
         CloudBackupStatus.objects.create(pk=CLOUD_BACKUP_STATUS_PK)
         with self.assertRaises(IntegrityError), transaction.atomic():
             CloudBackupStatus.objects.create(pk=CLOUD_BACKUP_STATUS_PK + 1)
@@ -2174,15 +2191,17 @@ def _session_key(session: SessionBase) -> str:
     return key
 
 
-def _record_uploads(mock_client):
+def _record_uploads(mock_client: mock.MagicMock) -> list[dict[str, typing.Any]]:
     """Make *mock_client*'s ``upload_fileobj`` read each file it's given.
 
     Returns a list it appends each upload to, as a dict of its arguments with
     the file's content as ``Body``, since the file is closed after the upload.
     """
-    uploads = []
+    uploads: list[dict[str, typing.Any]] = []
 
-    def upload_fileobj(fileobj, bucket, key, ExtraArgs=None):
+    def upload_fileobj(
+        fileobj: typing.BinaryIO, bucket: str, key: str, ExtraArgs: dict[str, typing.Any] | None = None
+    ) -> None:
         uploads.append(
             {
                 "Body": fileobj.read(),
@@ -2199,16 +2218,16 @@ def _record_uploads(mock_client):
 class BackupAdminViewTests(TransactionTestCase):
     # Not TestCase: backup_database() refuses to run inside a transaction.
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "admin@example.com", "password")
         self.client = Client()
         self.client.login(username="admin", password="password")
 
-    def test_admin_index_links_to_backups_for_superusers(self):
+    def test_admin_index_links_to_backups_for_superusers(self) -> None:
         response = self.client.get(reverse("admin:index"))
         self.assertContains(response, reverse("admin:core_cloudbackupstatus_changelist"))
 
-    def test_admin_index_hides_backups_from_non_superusers(self):
+    def test_admin_index_hides_backups_from_non_superusers(self) -> None:
         non_super = User.objects.create_user("regular0", "r0@example.com", "pass")
         non_super.is_staff = True
         non_super.save()
@@ -2217,11 +2236,11 @@ class BackupAdminViewTests(TransactionTestCase):
         response = client.get(reverse("admin:index"))
         self.assertNotContains(response, reverse("admin:core_cloudbackupstatus_changelist"))
 
-    def test_backups_page_links_to_db_download(self):
+    def test_backups_page_links_to_db_download(self) -> None:
         response = self.client.get(reverse("admin:core_cloudbackupstatus_changelist"))
         self.assertContains(response, reverse("admin:core_cloudbackupstatus_download_db_backup"))
 
-    def test_download_db_backup_view(self):
+    def test_download_db_backup_view(self) -> None:
         url = reverse("admin:core_cloudbackupstatus_download_db_backup")
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
@@ -2235,7 +2254,7 @@ class BackupAdminViewTests(TransactionTestCase):
         self.assertTrue(content.startswith(b"SQLite format 3\x00"))
         self.assertEqual(int(response["Content-Length"]), len(content))
 
-    def test_download_db_backup_requires_superuser(self):
+    def test_download_db_backup_requires_superuser(self) -> None:
         non_super = User.objects.create_user("regular", "r@example.com", "pass")
         non_super.is_staff = True
         non_super.save()
@@ -2245,7 +2264,7 @@ class BackupAdminViewTests(TransactionTestCase):
         response = client.get(url)
         self.assertEqual(response.status_code, 403)
 
-    def test_download_db_backup_rejects_non_sqlite_engine(self):
+    def test_download_db_backup_rejects_non_sqlite_engine(self) -> None:
         url = reverse("admin:core_cloudbackupstatus_download_db_backup")
         with pytest.warns(UserWarning, match="Overriding setting DATABASES"):
             with override_settings(
@@ -2260,7 +2279,7 @@ class BackupAdminViewTests(TransactionTestCase):
         self.assertRedirects(response, reverse("admin:core_cloudbackupstatus_changelist"))
         self.assertContains(response, "DB backup is only available for SQLite databases.")
 
-    def test_download_db_backup_failure_shows_error(self):
+    def test_download_db_backup_failure_shows_error(self) -> None:
         url = reverse("admin:core_cloudbackupstatus_download_db_backup")
         with mock.patch(
             "lifetracker.core.admin.backup_database",
@@ -2276,7 +2295,7 @@ class BackupAdminViewTests(TransactionTestCase):
         LIFETRACKER_BACKUP_S3_REGION_NAME="auto",
         LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
     )
-    def test_cloud_backup_status_view(self):
+    def test_cloud_backup_status_view(self) -> None:
         url = reverse("admin:core_cloudbackupstatus_changelist")
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
@@ -2286,7 +2305,7 @@ class BackupAdminViewTests(TransactionTestCase):
         self.assertContains(response, "<code>test-host.local</code>", html=True)
         self.assertContains(response, "Never")
 
-    def test_cloud_backup_status_view_shows_time_since_last_backup(self):
+    def test_cloud_backup_status_view_shows_time_since_last_backup(self) -> None:
         CloudBackupStatus.objects.create(
             pk=CLOUD_BACKUP_STATUS_PK,
             last_backup_at=timezone.now() - datetime.timedelta(days=4, hours=3),
@@ -2299,7 +2318,7 @@ class BackupAdminViewTests(TransactionTestCase):
         self.assertNotContains(response, "hours")
         self.assertContains(response, "<td>3.0\xa0MB</td>", html=True)
 
-    def test_cloud_backup_status_requires_superuser(self):
+    def test_cloud_backup_status_requires_superuser(self) -> None:
         non_super = User.objects.create_user("regular2", "r2@example.com", "pass")
         non_super.is_staff = True
         non_super.save()
@@ -2318,7 +2337,7 @@ class BackupAdminViewTests(TransactionTestCase):
         LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
     )
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_cloud_backup_status_view_run_backup_updates_status(self, mock_client):
+    def test_cloud_backup_status_view_run_backup_updates_status(self, mock_client: mock.MagicMock) -> None:
         uploads = _record_uploads(mock_client)
         url = reverse("admin:core_cloudbackupstatus_changelist")
         response = self.client.post(url, follow=True)
@@ -2353,7 +2372,7 @@ class BackupAdminViewTests(TransactionTestCase):
         LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="",
     )
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_cloud_backup_post_with_missing_settings_shows_error(self, mock_client):
+    def test_cloud_backup_post_with_missing_settings_shows_error(self, mock_client: mock.MagicMock) -> None:
         url = reverse("admin:core_cloudbackupstatus_changelist")
         response = self.client.post(url)
         self.assertEqual(response.status_code, 200)
@@ -2370,7 +2389,7 @@ class BackupAdminViewTests(TransactionTestCase):
         LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
         LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
     )
-    def test_run_cloud_backup_rejects_missing_settings(self):
+    def test_run_cloud_backup_rejects_missing_settings(self) -> None:
         with self.assertRaisesMessage(RuntimeError, "Missing: LIFETRACKER_BACKUP_S3_BUCKET_NAME."):
             run_cloud_backup()
 
@@ -2379,7 +2398,7 @@ class BackupAdminViewTests(TransactionTestCase):
         LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="",
         LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="",
     )
-    def test_run_cloud_backup_checks_engine_before_settings(self):
+    def test_run_cloud_backup_checks_engine_before_settings(self) -> None:
         with pytest.warns(UserWarning, match="Overriding setting DATABASES"):
             with override_settings(
                 DATABASES={
@@ -2398,7 +2417,7 @@ class BackupAdminViewTests(TransactionTestCase):
         LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
     )
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_cloud_backup_rejects_non_sqlite_engine(self, mock_client):
+    def test_cloud_backup_rejects_non_sqlite_engine(self, mock_client: mock.MagicMock) -> None:
         url = reverse("admin:core_cloudbackupstatus_changelist")
         with pytest.warns(UserWarning, match="Overriding setting DATABASES"):
             with override_settings(
@@ -2422,7 +2441,7 @@ class BackupAdminViewTests(TransactionTestCase):
         LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
         LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
     )
-    def test_cloud_backup_invalid_endpoint_shows_error(self):
+    def test_cloud_backup_invalid_endpoint_shows_error(self) -> None:
         # Uses the real boto3.client, which raises ValueError for this endpoint.
         url = reverse("admin:core_cloudbackupstatus_changelist")
         response = self.client.post(url)
@@ -2438,7 +2457,7 @@ class BackupAdminViewTests(TransactionTestCase):
         LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
     )
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_cloud_backup_upload_error_shows_error(self, mock_client):
+    def test_cloud_backup_upload_error_shows_error(self, mock_client: mock.MagicMock) -> None:
         mock_client.return_value.upload_fileobj.side_effect = ClientError(
             {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
             "PutObject",
@@ -2455,7 +2474,7 @@ class BackupAdminViewTests(TransactionTestCase):
         LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
     )
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_cloud_backup_status_write_failure_shows_warning(self, mock_client):
+    def test_cloud_backup_status_write_failure_shows_warning(self, mock_client: mock.MagicMock) -> None:
         url = reverse("admin:core_cloudbackupstatus_changelist")
         with mock.patch.object(
             CloudBackupStatus.objects,
@@ -2472,23 +2491,25 @@ class BackupAdminViewTests(TransactionTestCase):
             f"Cloud backup uploaded successfully as {key}, but failed to record backup status.",
         )
 
-    def test_cloud_backup_status_links_to_list(self):
+    def test_cloud_backup_status_links_to_list(self) -> None:
         url = reverse("admin:core_cloudbackupstatus_changelist")
         response = self.client.get(url)
         self.assertContains(response, reverse("admin:core_cloudbackupstatus_list"))
 
-    def _mock_bucket_listing(self, mock_client, folders, objects):
+    def _mock_bucket_listing(
+        self, mock_client: mock.MagicMock, folders: list[str], objects: list[dict[str, typing.Any]]
+    ) -> mock.MagicMock:
         """Make the mocked S3 client's paginator return *folders* for the
         delimited top-level listing and *objects* (split across two pages)
         for the prefixed one."""
 
-        def paginate(**kwargs):
+        def paginate(**kwargs: typing.Any) -> list[dict[str, typing.Any]]:
             if kwargs.get("Delimiter") == "/":
                 return [{"CommonPrefixes": [{"Prefix": f} for f in folders]}, {}]
             matching = [o for o in objects if o["Key"].startswith(kwargs["Prefix"])]
             return [{"Contents": matching[:1]}, {"Contents": matching[1:]}]
 
-        paginator = mock_client.return_value.get_paginator.return_value
+        paginator: mock.MagicMock = mock_client.return_value.get_paginator.return_value
         paginator.paginate.side_effect = paginate
         return paginator
 
@@ -2501,7 +2522,7 @@ class BackupAdminViewTests(TransactionTestCase):
         LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
     )
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_cloud_backup_list_defaults_to_own_hostname(self, mock_client):
+    def test_cloud_backup_list_defaults_to_own_hostname(self, mock_client: mock.MagicMock) -> None:
         utc = datetime.UTC
         paginator = self._mock_bucket_listing(
             mock_client,
@@ -2570,7 +2591,7 @@ class BackupAdminViewTests(TransactionTestCase):
         LIFETRACKER_BACKUP_HOSTNAME="test-host.local",
     )
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_cloud_backup_list_all_prefixes(self, mock_client):
+    def test_cloud_backup_list_all_prefixes(self, mock_client: mock.MagicMock) -> None:
         utc = datetime.UTC
         paginator = self._mock_bucket_listing(
             mock_client,
@@ -2599,7 +2620,7 @@ class BackupAdminViewTests(TransactionTestCase):
         LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="",
     )
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_cloud_backup_list_with_missing_settings(self, mock_client):
+    def test_cloud_backup_list_with_missing_settings(self, mock_client: mock.MagicMock) -> None:
         url = reverse("admin:core_cloudbackupstatus_list")
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
@@ -2614,7 +2635,7 @@ class BackupAdminViewTests(TransactionTestCase):
         LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
     )
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_cloud_backup_list_s3_error_shows_message(self, mock_client):
+    def test_cloud_backup_list_s3_error_shows_message(self, mock_client: mock.MagicMock) -> None:
         paginator = mock_client.return_value.get_paginator.return_value
         paginator.paginate.side_effect = ClientError(
             {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
@@ -2632,7 +2653,7 @@ class BackupAdminViewTests(TransactionTestCase):
         LIFETRACKER_BACKUP_S3_ACCESS_KEY_ID="access-key",
         LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="secret-key",
     )
-    def test_cloud_backup_list_invalid_endpoint_shows_message(self):
+    def test_cloud_backup_list_invalid_endpoint_shows_message(self) -> None:
         # Uses the real boto3.client, which raises ValueError for this endpoint.
         url = reverse("admin:core_cloudbackupstatus_list")
         response = self.client.get(url)
@@ -2641,7 +2662,7 @@ class BackupAdminViewTests(TransactionTestCase):
             "Failed to list cloud backups: Invalid S3 configuration: Invalid endpoint: not a url",
         )
 
-    def test_cloud_backup_list_requires_superuser(self):
+    def test_cloud_backup_list_requires_superuser(self) -> None:
         non_super = User.objects.create_user("regular3", "r3@example.com", "pass")
         non_super.is_staff = True
         non_super.save()
@@ -2665,14 +2686,14 @@ class CloudBackupCommandTests(TransactionTestCase):
 
     """Tests for the cloud_backup management command."""
 
-    def call(self):
+    def call(self) -> str:
         """Call cloud_backup and return captured stdout."""
         out = io.StringIO()
         call_command("cloud_backup", stdout=out)
         return out.getvalue()
 
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_uploads_and_records_status(self, mock_client):
+    def test_uploads_and_records_status(self, mock_client: mock.MagicMock) -> None:
         uploads = _record_uploads(mock_client)
         output = self.call()
         [upload] = uploads
@@ -2689,7 +2710,7 @@ class CloudBackupCommandTests(TransactionTestCase):
         LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="",
     )
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_missing_settings_fail(self, mock_client):
+    def test_missing_settings_fail(self, mock_client: mock.MagicMock) -> None:
         with self.assertRaisesMessage(
             CommandError,
             "Cloud backup failed: Cloud backup settings are incomplete. Missing: "
@@ -2700,7 +2721,7 @@ class CloudBackupCommandTests(TransactionTestCase):
         mock_client.assert_not_called()
 
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_upload_error_fails(self, mock_client):
+    def test_upload_error_fails(self, mock_client: mock.MagicMock) -> None:
         mock_client.return_value.upload_fileobj.side_effect = ClientError(
             {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
             "PutObject",
@@ -2710,14 +2731,14 @@ class CloudBackupCommandTests(TransactionTestCase):
         self.assertFalse(CloudBackupStatus.objects.exists())
 
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_upload_error_closes_backup_file(self, mock_client):
+    def test_upload_error_closes_backup_file(self, mock_client: mock.MagicMock) -> None:
         mock_client.return_value.upload_fileobj.side_effect = ClientError(
             {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
             "PutObject",
         )
         backup_files = []
 
-        def backup_database_spy():
+        def backup_database_spy() -> typing.IO[bytes]:
             backup_files.append(backup_database())
             return backup_files[-1]
 
@@ -2728,7 +2749,7 @@ class CloudBackupCommandTests(TransactionTestCase):
         self.assertTrue(backup_file.closed)
 
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_backup_copy_error_fails(self, mock_client):
+    def test_backup_copy_error_fails(self, mock_client: mock.MagicMock) -> None:
         with mock.patch(
             "lifetracker.core.backup.backup_database",
             side_effect=sqlite3.OperationalError("database or disk is full"),
@@ -2739,7 +2760,7 @@ class CloudBackupCommandTests(TransactionTestCase):
         self.assertFalse(CloudBackupStatus.objects.exists())
 
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_status_update_error_fails_naming_uploaded_key(self, mock_client):
+    def test_status_update_error_fails_naming_uploaded_key(self, mock_client: mock.MagicMock) -> None:
         with mock.patch.object(
             CloudBackupStatus.objects,
             "update_or_create",
@@ -2756,7 +2777,7 @@ class CloudBackupCommandTests(TransactionTestCase):
         self.assertIsInstance(cm.exception.__cause__.__cause__, IntegrityError)
 
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_if_changed_skips_unchanged_database(self, mock_client):
+    def test_if_changed_skips_unchanged_database(self, mock_client: mock.MagicMock) -> None:
         out = io.StringIO()
         with mock.patch(
             "lifetracker.core.management.commands.cloud_backup.database_changed",
@@ -2770,7 +2791,7 @@ class CloudBackupCommandTests(TransactionTestCase):
         mock_client.assert_not_called()
 
     @mock.patch("lifetracker.core.backup.boto3.client")
-    def test_if_changed_backs_up_changed_database(self, mock_client):
+    def test_if_changed_backs_up_changed_database(self, mock_client: mock.MagicMock) -> None:
         uploads = _record_uploads(mock_client)
         out = io.StringIO()
         # The tests' in-memory database always counts as changed.
@@ -2789,7 +2810,7 @@ class BackupStateTests(TestCase):
     """database_changed() after run_cloud_backup(), backing up a file-backed
     database (the tests' own is in memory)."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.path = Path(tmp.name) / "db.sqlite3"
@@ -2806,16 +2827,16 @@ class BackupStateTests(TestCase):
         self.mock_client = client_patcher.start()
         self.addCleanup(client_patcher.stop)
 
-    def other_connection(self):
+    def other_connection(self) -> sqlite3.Connection:
         """A connection like another process's (e.g. a web request's)."""
         conn = sqlite3.connect(self.path, isolation_level=None)
         self.addCleanup(conn.close)
         return conn
 
-    def test_changed_without_a_backup(self):
+    def test_changed_without_a_backup(self) -> None:
         self.assertTrue(database_changed())
 
-    def test_unchanged_after_backup(self):
+    def test_unchanged_after_backup(self) -> None:
         run_cloud_backup()
 
         self.assertFalse(database_changed())
@@ -2823,7 +2844,7 @@ class BackupStateTests(TestCase):
         key = self.mock_client.return_value.upload_fileobj.call_args.args[2]
         self.assertEqual(state["object_key"], key)
 
-    def test_reads_dont_count(self):
+    def test_reads_dont_count(self) -> None:
         run_cloud_backup()
         other = self.other_connection()
         other.execute("SELECT * FROM t").fetchall()
@@ -2831,7 +2852,7 @@ class BackupStateTests(TestCase):
 
         self.assertFalse(database_changed())
 
-    def test_commit_counts_in_log_and_after_checkpoint(self):
+    def test_commit_counts_in_log_and_after_checkpoint(self) -> None:
         run_cloud_backup()
         other = self.other_connection()
         other.execute("INSERT INTO t VALUES ('new')")
@@ -2842,10 +2863,10 @@ class BackupStateTests(TestCase):
         self.assertEqual(Path(f"{self.path}-wal").stat().st_size, 0)
         self.assertTrue(database_changed())
 
-    def test_commit_during_backup_records_nothing(self):
+    def test_commit_during_backup_records_nothing(self) -> None:
         run_cloud_backup()
 
-        def upload_fileobj(*args, **kwargs):
+        def upload_fileobj(*args: typing.Any, **kwargs: typing.Any) -> None:
             # e.g. a web request, while the upload runs.
             self.other_connection().execute("INSERT INTO t VALUES ('new')")
 
@@ -2855,7 +2876,7 @@ class BackupStateTests(TestCase):
         self.assertFalse(settings.LIFETRACKER_BACKUP_STATE_FILE.exists())
         self.assertTrue(database_changed())
 
-    def test_new_destination_counts(self):
+    def test_new_destination_counts(self) -> None:
         run_cloud_backup()
 
         with override_settings(LIFETRACKER_BACKUP_S3_BUCKET_NAME="other-bucket"):
@@ -2863,13 +2884,13 @@ class BackupStateTests(TestCase):
         with override_settings(LIFETRACKER_BACKUP_HOSTNAME="other-host"):
             self.assertTrue(database_changed())
 
-    def test_unreadable_state_counts_as_changed(self):
+    def test_unreadable_state_counts_as_changed(self) -> None:
         run_cloud_backup()
         settings.LIFETRACKER_BACKUP_STATE_FILE.write_text("[]")
 
         self.assertTrue(database_changed())
 
-    def test_state_write_failure_is_logged(self):
+    def test_state_write_failure_is_logged(self) -> None:
         with (
             override_settings(LIFETRACKER_BACKUP_STATE_FILE=Path("/nonexistent/state.json")),
             self.assertLogs("lifetracker.core.backup", "WARNING") as logs,
@@ -2878,7 +2899,7 @@ class BackupStateTests(TestCase):
 
         self.assertIn("Couldn't record the backup state", logs.output[0])
 
-    def test_signature(self):
+    def test_signature(self) -> None:
         # setUp's commits are still in the log.
         self.assertIsNone(database_signature())
         with self.connection.cursor() as cursor:
@@ -2890,7 +2911,7 @@ class BackupStateTests(TestCase):
         self.other_connection().execute("INSERT INTO t VALUES ('new')")
         self.assertIsNone(database_signature())
 
-    def test_signature_without_log(self):
+    def test_signature_without_log(self) -> None:
         with self.connection.cursor() as cursor:
             cursor.execute("SELECT 1")
         # The last connection to close deletes the log.
@@ -2899,7 +2920,7 @@ class BackupStateTests(TestCase):
 
         self.assertIsNotNone(database_signature())
 
-    def test_unremovable_state_is_logged(self):
+    def test_unremovable_state_is_logged(self) -> None:
         # A directory where the state file should be can't be replaced or
         # removed.
         settings.LIFETRACKER_BACKUP_STATE_FILE.mkdir()
@@ -2912,14 +2933,14 @@ class BackupStateTests(TestCase):
 
 
 class InMemoryBackupStateTests(SimpleTestCase):
-    def test_in_memory_database_has_no_signature(self):
+    def test_in_memory_database_has_no_signature(self) -> None:
         self.assertIsNone(database_signature())
 
 
 class RestoreDatabaseTests(TestCase):
     """restore_database() and check_backup_file(), on file-backed databases."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
@@ -2940,7 +2961,7 @@ class RestoreDatabaseTests(TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def make_backup(self, *statements, name="backup.sqlite3"):
+    def make_backup(self, *statements: str, name: str = "backup.sqlite3") -> Path:
         path = self.tmp / name
         conn = sqlite3.connect(path)
         for statement in statements:
@@ -2949,12 +2970,13 @@ class RestoreDatabaseTests(TestCase):
         conn.close()
         return path
 
-    def live_rows(self):
+    def live_rows(self) -> list[tuple[typing.Any, ...]]:
         with self.connection.cursor() as cursor:
             cursor.execute("SELECT v FROM t")
-            return cursor.fetchall()
+            rows: list[tuple[typing.Any, ...]] = cursor.fetchall()
+            return rows
 
-    def test_restore_replaces_contents_and_keeps_wal(self):
+    def test_restore_replaces_contents_and_keeps_wal(self) -> None:
         path = self.make_backup(
             "CREATE TABLE t (v TEXT)",
             "INSERT INTO t VALUES ('restored')",
@@ -2975,27 +2997,27 @@ class RestoreDatabaseTests(TestCase):
             cursor.execute("PRAGMA journal_mode")
             self.assertEqual(cursor.fetchone(), ("wal",))
 
-    def test_restore_refuses_different_page_size(self):
+    def test_restore_refuses_different_page_size(self) -> None:
         path = self.make_backup("PRAGMA page_size = 8192", "CREATE TABLE t (v TEXT)")
         with self.assertRaisesMessage(RuntimeError, "page size (8192 bytes)"):
             restore_database(path)
         self.assertEqual(self.live_rows(), [("old",)])
 
-    def test_restore_refuses_inside_transaction(self):
+    def test_restore_refuses_inside_transaction(self) -> None:
         path = self.make_backup("CREATE TABLE t (v TEXT)")
         with mock.patch.object(self.connection, "in_atomic_block", True):
             with self.assertRaisesMessage(RuntimeError, "Can't restore the database inside a transaction."):
                 restore_database(path)
         self.assertEqual(self.live_rows(), [("old",)])
 
-    def test_check_accepts_django_database(self):
+    def test_check_accepts_django_database(self) -> None:
         check_backup_file(self.make_backup("CREATE TABLE django_migrations (id)"))
 
-    def test_check_rejects_database_without_migrations(self):
+    def test_check_rejects_database_without_migrations(self) -> None:
         with self.assertRaisesMessage(RuntimeError, "The backup has no django_migrations table."):
             check_backup_file(self.make_backup("CREATE TABLE t (v TEXT)"))
 
-    def test_check_rejects_corrupt_database(self):
+    def test_check_rejects_corrupt_database(self) -> None:
         path = self.make_backup(
             "CREATE TABLE django_migrations (id)",
             "CREATE TABLE t (v TEXT)",
@@ -3009,7 +3031,7 @@ class RestoreDatabaseTests(TestCase):
         with self.assertRaisesMessage(RuntimeError, "The backup failed SQLite's integrity check: "):
             check_backup_file(path)
 
-    def test_check_rejects_non_database(self):
+    def test_check_rejects_non_database(self) -> None:
         path = self.tmp / "junk.sqlite3"
         path.write_bytes(b"not a database" * 100)
         with self.assertRaisesMessage(RuntimeError, "The backup isn't a valid database"):
@@ -3035,7 +3057,7 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
 
     KEY = "other-host/db-backup.2026-10-01.00.00.00.sqlite3"
 
-    def setUp(self):
+    def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         path = Path(tmp.name) / "backup.sqlite3"
@@ -3050,14 +3072,14 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
         self.uploads = _record_uploads(self.mock_client)
         self.downloads: list[tuple[str, str]] = []
 
-        def download_fileobj(bucket, key, fileobj):
+        def download_fileobj(bucket: str, key: str, fileobj: typing.BinaryIO) -> None:
             self.downloads.append((bucket, key))
             fileobj.write(self.backup_bytes)
 
         self.mock_client.return_value.download_fileobj.side_effect = download_fileobj
         self.restored: list[bytes] = []
 
-        def fake_restore(path):
+        def fake_restore(path: str | Path) -> None:
             self.restored.append(Path(path).read_bytes())
             # As restoring would, replace the status row with the backup's.
             CloudBackupStatus.objects.update_or_create(
@@ -3079,12 +3101,12 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
         self.mock_migrate = migrate_patcher.start()
         self.addCleanup(migrate_patcher.stop)
 
-    def call(self, *args):
+    def call(self, *args: str) -> str:
         out = io.StringIO()
         call_command("restore_cloud_backup", self.KEY, *args, stdout=out)
         return out.getvalue()
 
-    def test_backs_up_then_restores(self):
+    def test_backs_up_then_restores(self) -> None:
         output = self.call("--no-input")
         self.assertEqual(self.downloads, [("test-bucket", self.KEY)])
         [upload] = self.uploads
@@ -3101,13 +3123,13 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
             output,
         )
 
-    def test_confirmed(self):
+    def test_confirmed(self) -> None:
         with mock.patch("builtins.input", return_value="yes") as mock_input:
             self.call()
         mock_input.assert_called_once()
         self.assertEqual(len(self.restored), 1)
 
-    def test_cancelled(self):
+    def test_cancelled(self) -> None:
         cases: list[dict[str, typing.Any]] = [{"return_value": "no"}, {"side_effect": EOFError}]
         for kwargs in cases:
             with self.subTest(**kwargs):
@@ -3117,7 +3139,7 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
         self.assertEqual(self.uploads, [])
         self.assertEqual(self.restored, [])
 
-    def test_download_error_changes_nothing(self):
+    def test_download_error_changes_nothing(self) -> None:
         self.mock_client.return_value.download_fileobj.side_effect = ClientError(
             {"Error": {"Code": "404", "Message": "Not Found"}}, "HeadObject"
         )
@@ -3127,7 +3149,7 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
         self.assertEqual(self.restored, [])
 
     @override_settings(LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="")
-    def test_missing_settings_fail(self):
+    def test_missing_settings_fail(self) -> None:
         with self.assertRaisesMessage(
             CommandError,
             f"Downloading {self.KEY} failed: Cloud backup settings are incomplete. "
@@ -3136,14 +3158,14 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
             self.call("--no-input")
         self.mock_client.assert_not_called()
 
-    def test_invalid_backup_changes_nothing(self):
+    def test_invalid_backup_changes_nothing(self) -> None:
         self.backup_bytes = b"not a database" * 100
         with self.assertRaisesMessage(CommandError, f"Not restoring {self.KEY}: The backup isn't a valid"):
             self.call("--no-input")
         self.assertEqual(self.uploads, [])
         self.assertEqual(self.restored, [])
 
-    def test_backup_error_changes_nothing(self):
+    def test_backup_error_changes_nothing(self) -> None:
         self.mock_client.return_value.upload_fileobj.side_effect = ClientError(
             {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}},
             "PutObject",
@@ -3152,7 +3174,7 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
             self.call("--no-input")
         self.assertEqual(self.restored, [])
 
-    def test_restores_when_only_recording_backup_status_fails(self):
+    def test_restores_when_only_recording_backup_status_fails(self) -> None:
         with (
             mock.patch.object(
                 CloudBackupStatus.objects,
@@ -3169,7 +3191,7 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
         self.assertIn(f"Backed up the current database as {upload['Key']}.", output)
         self.assertEqual(self.restored, [self.backup_bytes])
 
-    def test_restore_error_reported(self):
+    def test_restore_error_reported(self) -> None:
         with mock.patch(
             "lifetracker.core.management.commands.restore_cloud_backup.restore_database",
             side_effect=RuntimeError("page sizes differ"),
@@ -3191,17 +3213,17 @@ class CloudBackupStatusMoveMigrationTests(TransactionTestCase):
         ("taxtracker", "0004_move_cloudbackupstatus_to_core"),
     ]
 
-    def _migrate(self, targets):
+    def _migrate(self, targets: list[tuple[str, str]]) -> typing.Any:
         executor = MigrationExecutor(connection)
         executor.loader.build_graph()
         executor.migrate(targets)
         return executor.loader.project_state(targets).apps
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         # Leave the schema fully migrated for the tests that follow.
         call_command("migrate", verbosity=0)
 
-    def test_forwards_and_backwards(self):
+    def test_forwards_and_backwards(self) -> None:
         backup_time = datetime.datetime(2026, 1, 2, 3, 4, 5, tzinfo=datetime.UTC)
         row = {
             "pk": CLOUD_BACKUP_STATUS_PK,
@@ -3230,96 +3252,96 @@ class CloudBackupStatusMoveMigrationTests(TransactionTestCase):
 
 
 class ExtractDateFromFilenameTests(TestCase):
-    def test_extract_iso_date(self):
+    def test_extract_iso_date(self) -> None:
         self.assertEqual(
             extract_date_from_filename("statement-2026-01-15.pdf"),
             datetime.date(2026, 1, 15),
         )
 
-    def test_extract_compact_date_no_separator(self):
+    def test_extract_compact_date_no_separator(self) -> None:
         self.assertEqual(
             extract_date_from_filename("report20260115.pdf"),
             datetime.date(2026, 1, 15),
         )
 
-    def test_extract_date_followed_by_digits(self):
+    def test_extract_date_followed_by_digits(self) -> None:
         """DD may be followed by digits – the match is still valid."""
         self.assertEqual(
             extract_date_from_filename("20260101123.pdf"),
             datetime.date(2026, 1, 1),
         )
 
-    def test_year_preceded_by_non_digit_allowed(self):
+    def test_year_preceded_by_non_digit_allowed(self) -> None:
         """Year preceded by a non-digit character (e.g. '-') is valid."""
         self.assertEqual(
             extract_date_from_filename("123-2026-01-01.pdf"),
             datetime.date(2026, 1, 1),
         )
 
-    def test_year_preceded_by_digit_rejected(self):
+    def test_year_preceded_by_digit_rejected(self) -> None:
         """Year directly preceded by another digit must not be matched."""
         self.assertIsNone(extract_date_from_filename("1232026-01-01.pdf"))
 
-    def test_invalid_calendar_date_skipped(self):
+    def test_invalid_calendar_date_skipped(self) -> None:
         """A pattern that is not a real date (e.g. month 13) must be ignored."""
         self.assertIsNone(extract_date_from_filename("2026-13-45.pdf"))
 
-    def test_returns_first_valid_date(self):
+    def test_returns_first_valid_date(self) -> None:
         """When multiple date patterns exist, the first valid one is returned."""
         self.assertEqual(
             extract_date_from_filename("2026-13-45_2025-06-30.txt"),
             datetime.date(2025, 6, 30),
         )
 
-    def test_no_date_in_filename(self):
+    def test_no_date_in_filename(self) -> None:
         self.assertIsNone(extract_date_from_filename("nodatehere.pdf"))
 
 
 class FileTypeForFilenameTests(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.pdf = FileType.objects.create(short_name="PDF", full_name="PDF Document")
         FileExtension.objects.create(file_type=self.pdf, extension="pdf")
 
-    def test_matches_extension_case_insensitively(self):
+    def test_matches_extension_case_insensitively(self) -> None:
         self.assertEqual(file_type_for_filename("Statement.PDF"), self.pdf)
 
-    def test_unknown_extension(self):
+    def test_unknown_extension(self) -> None:
         self.assertIsNone(file_type_for_filename("notes.xyz"))
 
-    def test_no_extension(self):
+    def test_no_extension(self) -> None:
         self.assertIsNone(file_type_for_filename("README"))
 
 
 class FlexibleDateFieldTests(TestCase):
     """Tests for FlexibleDateField and the extra English date-input formats."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.field = FlexibleDateField(required=False)
 
-    def test_iso_format_accepted(self):
+    def test_iso_format_accepted(self) -> None:
         self.assertEqual(self.field.clean("2023-07-20"), datetime.date(2023, 7, 20))
 
-    def test_day_month_year_full_name(self):
+    def test_day_month_year_full_name(self) -> None:
         """'20 July 2023' should parse to 2023-07-20."""
         self.assertEqual(self.field.clean("20 July 2023"), datetime.date(2023, 7, 20))
 
-    def test_month_day_comma_year_full_name(self):
+    def test_month_day_comma_year_full_name(self) -> None:
         """'June 30, 2023' should parse to 2023-06-30."""
         self.assertEqual(self.field.clean("June 30, 2023"), datetime.date(2023, 6, 30))
 
-    def test_day_month_year_abbreviated(self):
+    def test_day_month_year_abbreviated(self) -> None:
         """'20 Jul 2023' should parse to 2023-07-20."""
         self.assertEqual(self.field.clean("20 Jul 2023"), datetime.date(2023, 7, 20))
 
-    def test_month_day_comma_year_abbreviated(self):
+    def test_month_day_comma_year_abbreviated(self) -> None:
         """'Jun 30, 2023' should parse to 2023-06-30."""
         self.assertEqual(self.field.clean("Jun 30, 2023"), datetime.date(2023, 6, 30))
 
-    def test_invalid_date_string_raises(self):
+    def test_invalid_date_string_raises(self) -> None:
         with self.assertRaises(ValidationError):
             self.field.clean("not a date")
 
-    def test_empty_string_returns_none(self):
+    def test_empty_string_returns_none(self) -> None:
         self.assertIsNone(self.field.clean(""))
 
 
@@ -3330,7 +3352,7 @@ class PurgeOrphanedFilesTests(TestCase):
     file fields are found across apps.
     """
 
-    def setUp(self):
+    def setUp(self) -> None:
         item = Item.objects.create(year=FinancialYear.objects.create(year=2024), title="Item", order=1)
         self.attachment = Attachment.objects.create(item=item, file=ContentFile(b"kept", name="kept.pdf"))
         self.task_attachment = TaskAttachment.objects.create(
@@ -3344,19 +3366,19 @@ class PurgeOrphanedFilesTests(TestCase):
         ]
         self.orphan_pks = [orphan.pk for orphan in self.orphans]
 
-    def call(self, *args):
+    def call(self, *args: str) -> str:
         """Call purge_orphaned_files and return captured stdout."""
         out = io.StringIO()
         call_command("purge_orphaned_files", *args, stdout=out)
         return out.getvalue()
 
-    def referenced_pks(self):
+    def referenced_pks(self) -> set[int | None]:
         return {database_storage._name_to_pk(att.file.name) for att in (self.attachment, self.task_attachment)}
 
-    def test_finds_only_unreferenced_files(self):
+    def test_finds_only_unreferenced_files(self) -> None:
         self.assertEqual(orphaned_stored_file_pks(), self.orphan_pks)
 
-    def test_ignores_rows_without_a_file_or_with_an_unparseable_name(self):
+    def test_ignores_rows_without_a_file_or_with_an_unparseable_name(self) -> None:
         # Neither refers to a stored file, so neither keeps one.
         Attachment.objects.filter(pk=self.attachment.pk).update(file="")
         TaskAttachment.objects.filter(pk=self.task_attachment.pk).update(file="not-a-db-path.pdf")
@@ -3365,7 +3387,7 @@ class PurgeOrphanedFilesTests(TestCase):
             sorted(self.orphan_pks + list(self.referenced_pks())),
         )
 
-    def test_dry_run_reports_without_deleting(self):
+    def test_dry_run_reports_without_deleting(self) -> None:
         output = self.call()
         self.assertEqual(
             output,
@@ -3373,7 +3395,7 @@ class PurgeOrphanedFilesTests(TestCase):
         )
         self.assertEqual(DBStoredFile.objects.count(), 4)
 
-    def test_delete_removes_only_orphans(self):
+    def test_delete_removes_only_orphans(self) -> None:
         output = self.call("--delete")
         self.assertEqual(output, "Deleted 2 orphaned stored file(s), 8 bytes.\n")
         self.assertEqual(
@@ -3383,13 +3405,13 @@ class PurgeOrphanedFilesTests(TestCase):
         self.attachment.refresh_from_db()
         self.assertEqual(self.attachment.file.read(), b"kept")
 
-    def test_nothing_orphaned(self):
+    def test_nothing_orphaned(self) -> None:
         DBStoredFile.objects.filter(pk__in=self.orphan_pks).delete()
         self.assertEqual(self.call("--delete"), "Deleted 0 orphaned stored file(s), 0 bytes.\n")
         self.assertEqual(DBStoredFile.objects.count(), 2)
 
     @mock.patch("lifetracker.core.management.commands.purge_orphaned_files._BATCH_SIZE", 1)
-    def test_deletes_in_batches(self):
+    def test_deletes_in_batches(self) -> None:
         self.assertEqual(self.call("--delete"), "Deleted 2 orphaned stored file(s), 8 bytes.\n")
         self.assertFalse(DBStoredFile.objects.filter(pk__in=self.orphan_pks).exists())
 
@@ -3412,7 +3434,7 @@ _PROC_NET_TCP6 = """\
 
 
 class IdleWatchdogConfigTests(SimpleTestCase):
-    def test_defaults(self):
+    def test_defaults(self) -> None:
         config = idle_watchdog.config_from_env({})
 
         self.assertEqual(
@@ -3427,7 +3449,7 @@ class IdleWatchdogConfigTests(SimpleTestCase):
             ),
         )
 
-    def test_blank_values_use_defaults(self):
+    def test_blank_values_use_defaults(self) -> None:
         config = idle_watchdog.config_from_env(
             {
                 "LIFETRACKER_IDLE_STOP": " ",
@@ -3439,7 +3461,7 @@ class IdleWatchdogConfigTests(SimpleTestCase):
 
         self.assertEqual(config, idle_watchdog.config_from_env({}))
 
-    def test_auto_backup(self):
+    def test_auto_backup(self) -> None:
         for env, expected in [
             ({}, None),
             ({"LIFETRACKER_AUTO_BACKUP": " "}, None),
@@ -3457,7 +3479,7 @@ class IdleWatchdogConfigTests(SimpleTestCase):
                 config = idle_watchdog.config_from_env(env)
                 self.assertEqual(config.auto_backup_interval_seconds, expected)
 
-    def test_invalid_auto_backup_settings(self):
+    def test_invalid_auto_backup_settings(self) -> None:
         for env, message in [
             ({"LIFETRACKER_AUTO_BACKUP": "yes"}, "LIFETRACKER_AUTO_BACKUP must be"),
             (
@@ -3469,12 +3491,12 @@ class IdleWatchdogConfigTests(SimpleTestCase):
                 with self.assertRaisesMessage(ValueError, message):
                     idle_watchdog.config_from_env(env)
 
-    def test_default_ports_follow_gunicorn_port(self):
+    def test_default_ports_follow_gunicorn_port(self) -> None:
         config = idle_watchdog.config_from_env({"PORT": "9000"})
 
         self.assertEqual(config.ports, (9000, 22))
 
-    def test_settings_from_env(self):
+    def test_settings_from_env(self) -> None:
         config = idle_watchdog.config_from_env(
             {
                 "LIFETRACKER_IDLE_STOP": "Stop",
@@ -3498,7 +3520,7 @@ class IdleWatchdogConfigTests(SimpleTestCase):
             ),
         )
 
-    def test_uptime_dir(self):
+    def test_uptime_dir(self) -> None:
         for env, expected in [
             ({}, None),
             ({"LIFETRACKER_DATA_DIR": "/data"}, Path("/data/uptime")),
@@ -3515,7 +3537,7 @@ class IdleWatchdogConfigTests(SimpleTestCase):
             with self.subTest(env=env):
                 self.assertEqual(idle_watchdog.config_from_env(env).uptime_dir, expected)
 
-    def test_invalid_values_raise(self):
+    def test_invalid_values_raise(self) -> None:
         for name, value, message in [
             ("LIFETRACKER_IDLE_STOP", "on", "must be one of off, monitor, stop"),
             ("LIFETRACKER_IDLE_STOP_MINUTES", "0", "must be a positive number"),
@@ -3531,14 +3553,14 @@ class IdleWatchdogConfigTests(SimpleTestCase):
 
 
 class IdleWatchdogConnectionTests(SimpleTestCase):
-    def test_established_local_ports(self):
+    def test_established_local_ports(self) -> None:
         self.assertEqual(
             list(idle_watchdog.established_local_ports(_PROC_NET_TCP)),
             [8000, 0xA2C4],
         )
         self.assertEqual(list(idle_watchdog.established_local_ports(_PROC_NET_TCP6)), [22, 22])
 
-    def test_count_connections_reads_ipv4_and_ipv6(self):
+    def test_count_connections_reads_ipv4_and_ipv6(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             tcp = Path(tempdir) / "tcp"
             tcp6 = Path(tempdir) / "tcp6"
@@ -3549,7 +3571,7 @@ class IdleWatchdogConnectionTests(SimpleTestCase):
 
         self.assertEqual(counts, {8000: 1, 22: 2, 443: 0})
 
-    def test_count_connections_skips_missing_table(self):
+    def test_count_connections_skips_missing_table(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             tcp = Path(tempdir) / "tcp"
             tcp.write_text(_PROC_NET_TCP)
@@ -3559,7 +3581,7 @@ class IdleWatchdogConnectionTests(SimpleTestCase):
         self.assertEqual(counts, {8000: 1, 22: 0})
 
 
-def _watchdog_config(mode="stop", status_file=Path("/nonexistent/status.json")):
+def _watchdog_config(mode: str = "stop", status_file: Path = Path("/nonexistent/status.json")) -> idle_watchdog.Config:
     return idle_watchdog.Config(
         mode=mode,
         idle_seconds=60,
@@ -3573,20 +3595,20 @@ def _watchdog_config(mode="stop", status_file=Path("/nonexistent/status.json")):
 class IdleWatchdogStateTests(SimpleTestCase):
     START = 1_800_000_000  # 2027-01-15T08:00:00Z
 
-    def test_idle_time_counts_from_startup(self):
+    def test_idle_time_counts_from_startup(self) -> None:
         watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1, self.START)
 
         self.assertFalse(watchdog.check(self.START + 59, {8000: 0, 22: 0}, None))
         self.assertTrue(watchdog.check(self.START + 60, {8000: 0, 22: 0}, None))
 
-    def test_connection_resets_idle_time(self):
+    def test_connection_resets_idle_time(self) -> None:
         watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1, self.START)
 
         self.assertFalse(watchdog.check(self.START + 50, {8000: 0, 22: 1}, None))
         self.assertFalse(watchdog.check(self.START + 100, {8000: 0, 22: 0}, None))
         self.assertTrue(watchdog.check(self.START + 110, {8000: 0, 22: 0}, None))
 
-    def test_request_resets_idle_time(self):
+    def test_request_resets_idle_time(self) -> None:
         watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1, self.START)
         idle = {8000: 0, 22: 0}
 
@@ -3596,12 +3618,12 @@ class IdleWatchdogStateTests(SimpleTestCase):
         self.assertTrue(watchdog.check(self.START + 105, idle, self.START + 45))
         self.assertEqual(watchdog.status()["last_request_at"], "2027-01-15T08:00:45+00:00")
 
-    def test_request_before_startup_is_ignored(self):
+    def test_request_before_startup_is_ignored(self) -> None:
         watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1, self.START)
 
         self.assertTrue(watchdog.check(self.START + 60, {8000: 0, 22: 0}, self.START - 3600))
 
-    def test_request_time_in_future_counts_as_now(self):
+    def test_request_time_in_future_counts_as_now(self) -> None:
         watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1, self.START)
         idle = {8000: 0, 22: 0}
 
@@ -3609,7 +3631,7 @@ class IdleWatchdogStateTests(SimpleTestCase):
 
         self.assertEqual(watchdog.idle_since, self.START + 10)
 
-    def test_status(self):
+    def test_status(self) -> None:
         watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1234, self.START)
         watchdog.check(self.START + 10, {8000: 2, 22: 0}, None)
         watchdog.check(self.START + 20, {8000: 0, 22: 0}, None)
@@ -3640,7 +3662,7 @@ class IdleWatchdogStateTests(SimpleTestCase):
             },
         )
 
-    def test_status_state(self):
+    def test_status_state(self) -> None:
         watchdog = idle_watchdog.Watchdog(_watchdog_config(), 1, self.START)
         self.assertEqual(watchdog.status()["checked_at"], None)
 
@@ -3653,7 +3675,7 @@ class IdleWatchdogStateTests(SimpleTestCase):
         watchdog.stopping = True
         self.assertEqual(watchdog.status()["state"], "stopping")
 
-    def test_write_status_replaces_file(self):
+    def test_write_status_replaces_file(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             path = Path(tempdir) / "status.json"
             path.write_text("old")
@@ -3664,7 +3686,7 @@ class IdleWatchdogStateTests(SimpleTestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o644)
             self.assertEqual(os.listdir(tempdir), ["status.json"])
 
-    def test_write_status_removes_temp_file_on_failure(self):
+    def test_write_status_removes_temp_file_on_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             path = Path(tempdir) / "status.json"
 
@@ -3677,7 +3699,14 @@ class IdleWatchdogStateTests(SimpleTestCase):
 class IdleWatchdogRunTests(SimpleTestCase):
     MASTER_PID = 4321
 
-    def _run(self, mode, counts, *, getppid=None, status_file=None):
+    def _run(
+        self,
+        mode: str,
+        counts: typing.Iterable[dict[int, int]],
+        *,
+        getppid: typing.Callable[[], int] | None = None,
+        status_file: Path | None = None,
+    ) -> tuple[int, mock.Mock, str, typing.Any]:
         """Run the loop with a fake clock that advances 10s per sleep, and
         fake connection counts taken from ``counts`` in turn."""
         now = [1_800_000_000.0]
@@ -3699,7 +3728,7 @@ class IdleWatchdogRunTests(SimpleTestCase):
             status = json.loads(config.status_file.read_text()) if config.status_file.exists() else None
         return result, kill, stderr.getvalue(), status
 
-    def test_stop_mode_sends_sigterm_once_idle(self):
+    def test_stop_mode_sends_sigterm_once_idle(self) -> None:
         idle = {8000: 0, 22: 0}
         busy = {8000: 0, 22: 1}
 
@@ -3711,7 +3740,7 @@ class IdleWatchdogRunTests(SimpleTestCase):
         self.assertEqual(status["state"], "stopping")
         self.assertEqual(status["checked_at"], "2027-01-15T08:01:00+00:00")
 
-    def test_monitor_mode_reports_but_never_stops(self):
+    def test_monitor_mode_reports_but_never_stops(self) -> None:
         idle = {8000: 0, 22: 0}
         busy = {8000: 1, 22: 0}
         ppids = iter([self.MASTER_PID] * 16 + [1])
@@ -3727,7 +3756,7 @@ class IdleWatchdogRunTests(SimpleTestCase):
         self.assertIn("gunicorn master 4321 has exited, exiting", stderr)
         self.assertEqual(status["state"], "idle")
 
-    def test_status_write_failure_is_logged_and_ignored(self):
+    def test_status_write_failure_is_logged_and_ignored(self) -> None:
         result, kill, stderr, status = self._run(
             "stop",
             [{8000: 0, 22: 0}] * 7,
@@ -3744,29 +3773,31 @@ class FakeBackupProcess:
     """A ``Popen`` for a backup that finishes with ``exit_status`` after
     ``polls`` polls."""
 
-    def __init__(self, polls=0, exit_status=0):
+    def __init__(self, polls: int = 0, exit_status: int = 0) -> None:
         self.polls = polls
         self.exit_status = exit_status
         self.killed = False
 
-    def poll(self):
+    def poll(self) -> int | None:
         if self.killed or self.polls <= 0:
             return self.exit_status
         self.polls -= 1
         return None
 
-    def kill(self):
+    def kill(self) -> None:
         self.killed = True
         self.exit_status = -9
 
-    def wait(self):
+    def wait(self) -> int:
         return self.exit_status
 
 
 class AutoBackupTests(SimpleTestCase):
     START = 1_800_000_000
 
-    def _backup(self, *processes, environ=None):
+    def _backup(
+        self, *processes: FakeBackupProcess | Exception, environ: dict[str, str] | None = None
+    ) -> auto_backup.AutoBackup:
         self.messages: list[str] = []
         self.popen = mock.Mock(side_effect=list(processes))
         return auto_backup.AutoBackup(
@@ -3777,7 +3808,7 @@ class AutoBackupTests(SimpleTestCase):
             popen=self.popen,
         )
 
-    def test_backs_up_at_startup_then_every_interval(self):
+    def test_backs_up_at_startup_then_every_interval(self) -> None:
         backup = self._backup(FakeBackupProcess(), FakeBackupProcess())
 
         backup.tick(self.START)
@@ -3797,7 +3828,7 @@ class AutoBackupTests(SimpleTestCase):
             ],
         )
 
-    def test_runs_cloud_backup_if_changed_with_settings_module(self):
+    def test_runs_cloud_backup_if_changed_with_settings_module(self) -> None:
         backup = self._backup(FakeBackupProcess(), environ={"PATH": "/bin"})
 
         backup.tick(self.START)
@@ -3807,7 +3838,7 @@ class AutoBackupTests(SimpleTestCase):
             env={"DJANGO_SETTINGS_MODULE": "lifetracker.settings", "PATH": "/bin"},
         )
 
-    def test_one_at_a_time(self):
+    def test_one_at_a_time(self) -> None:
         backup = self._backup(FakeBackupProcess(polls=10))
 
         backup.tick(self.START)
@@ -3817,7 +3848,7 @@ class AutoBackupTests(SimpleTestCase):
         self.assertEqual(backup.reason, "at startup")
         self.assertEqual(backup.wake_time(self.START + 1), self.START + 6)
 
-    def test_failure_is_logged(self):
+    def test_failure_is_logged(self) -> None:
         backup = self._backup(FakeBackupProcess(exit_status=1))
 
         backup.tick(self.START)
@@ -3828,7 +3859,7 @@ class AutoBackupTests(SimpleTestCase):
         # Not retried until the next one's due.
         self.assertEqual(backup.wake_time(self.START + 5), self.START + 3600)
 
-    def test_hung_backup_is_killed(self):
+    def test_hung_backup_is_killed(self) -> None:
         process = FakeBackupProcess(polls=10**6)
         backup = self._backup(process)
 
@@ -3845,7 +3876,7 @@ class AutoBackupTests(SimpleTestCase):
             self.messages,
         )
 
-    def test_start_failure_is_logged(self):
+    def test_start_failure_is_logged(self) -> None:
         backup = self._backup(OSError("no such file"))
 
         backup.tick(self.START)
@@ -3854,7 +3885,7 @@ class AutoBackupTests(SimpleTestCase):
         self.assertIsNone(backup.last_exit_status)
         self.assertIn("couldn't start automatic backup: no such file", self.messages)
 
-    def test_status(self):
+    def test_status(self) -> None:
         backup = self._backup(FakeBackupProcess(polls=1))
         backup.tick(self.START)
 
@@ -3875,7 +3906,9 @@ class AutoBackupTests(SimpleTestCase):
 class IdleWatchdogAutoBackupRunTests(SimpleTestCase):
     MASTER_PID = 4321
 
-    def _run(self, mode, counts, processes):
+    def _run(
+        self, mode: str, counts: typing.Iterable[dict[int, int]], processes: list[FakeBackupProcess]
+    ) -> tuple[int, mock.Mock, mock.Mock, str, list[typing.Any]]:
         """Run the loop with backups every hour, a fake clock that each sleep
         advances by what was asked, fake connection counts from ``counts`` (one
         per check, every 10 seconds), and fake backup processes."""
@@ -3891,7 +3924,7 @@ class IdleWatchdogAutoBackupRunTests(SimpleTestCase):
             )
             real_write_status = idle_watchdog.write_status
 
-            def write_status(path, status):
+            def write_status(path: Path, status: typing.Any) -> None:
                 statuses.append(status)
                 real_write_status(path, status)
 
@@ -3912,7 +3945,7 @@ class IdleWatchdogAutoBackupRunTests(SimpleTestCase):
                 )
         return result, kill, popen, stderr.getvalue(), statuses
 
-    def test_backs_up_before_stopping(self):
+    def test_backs_up_before_stopping(self) -> None:
         idle = {8000: 0, 22: 0}
         # The pre-stop backup takes three polls (5 seconds apart).
         result, kill, popen, stderr, statuses = self._run(
@@ -3950,7 +3983,7 @@ class IdleWatchdogAutoBackupRunTests(SimpleTestCase):
         )
         self.assertEqual(statuses[-1]["auto_backup"]["reason"], "before stopping")
 
-    def test_waits_for_running_backup_then_backs_up_again(self):
+    def test_waits_for_running_backup_then_backs_up_again(self) -> None:
         idle = {8000: 0, 22: 0}
         # The startup backup is still running when the idle timeout is reached.
         result, kill, popen, stderr, statuses = self._run(
@@ -3961,7 +3994,7 @@ class IdleWatchdogAutoBackupRunTests(SimpleTestCase):
         kill.assert_called_once()
         self.assertIn("starting automatic backup (before stopping)", stderr)
 
-    def test_failed_backup_still_stops(self):
+    def test_failed_backup_still_stops(self) -> None:
         idle = {8000: 0, 22: 0}
         result, kill, popen, stderr, statuses = self._run(
             "stop",
@@ -3972,7 +4005,7 @@ class IdleWatchdogAutoBackupRunTests(SimpleTestCase):
         kill.assert_called_once()
         self.assertIn("automatic backup (before stopping) failed", stderr)
 
-    def test_activity_calls_off_the_stop(self):
+    def test_activity_calls_off_the_stop(self) -> None:
         idle = {8000: 0, 22: 0}
         busy = {8000: 1, 22: 0}
         # Activity while the pre-stop backup runs; idle again for another
@@ -3989,7 +4022,7 @@ class IdleWatchdogAutoBackupRunTests(SimpleTestCase):
         self.assertEqual(statuses[7]["state"], "active")
         kill.assert_called_once()
 
-    def test_monitor_mode_never_backs_up_before_stopping(self):
+    def test_monitor_mode_never_backs_up_before_stopping(self) -> None:
         idle = {8000: 0, 22: 0}
         ppids = iter([self.MASTER_PID] * 30 + [1])
         now = [1_800_000_000.0]
@@ -4011,13 +4044,13 @@ class IdleWatchdogAutoBackupRunTests(SimpleTestCase):
         popen.assert_called_once()
         self.assertNotIn("before stopping", stderr.getvalue())
 
-    def test_backups_alone(self):
+    def test_backups_alone(self) -> None:
         # Neither idle checks nor uptime: it wakes for the backups alone.
         ppids = iter([self.MASTER_PID] * 4 + [1])
         now = [1_800_000_000.0]
         sleeps = []
 
-        def sleep(seconds):
+        def sleep(seconds: float) -> None:
             sleeps.append(seconds)
             now[0] += seconds
 
@@ -4038,13 +4071,13 @@ class IdleWatchdogAutoBackupRunTests(SimpleTestCase):
 
 
 class IdleWatchdogSpawnTests(SimpleTestCase):
-    def test_off_by_default(self):
+    def test_off_by_default(self) -> None:
         with mock.patch("subprocess.Popen") as popen:
             self.assertIsNone(idle_watchdog.spawn(99, {}))
 
         popen.assert_not_called()
 
-    def test_invalid_config_is_logged_not_raised(self):
+    def test_invalid_config_is_logged_not_raised(self) -> None:
         with (
             mock.patch("subprocess.Popen") as popen,
             mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
@@ -4054,7 +4087,7 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
         popen.assert_not_called()
         self.assertIn("idle-watchdog: not starting: LIFETRACKER_IDLE_STOP", stderr.getvalue())
 
-    def test_not_started_without_proc_net(self):
+    def test_not_started_without_proc_net(self) -> None:
         with (
             mock.patch("subprocess.Popen") as popen,
             mock.patch.object(idle_watchdog, "PROC_NET_TCP_FILES", (Path("/nonexistent/tcp"),)),
@@ -4065,7 +4098,7 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
         popen.assert_not_called()
         self.assertIn("/nonexistent/tcp is missing", stderr.getvalue())
 
-    def test_starts_for_uptime_alone(self):
+    def test_starts_for_uptime_alone(self) -> None:
         env = {"LIFETRACKER_DATA_DIR": "/data"}
         with (
             mock.patch("subprocess.Popen") as popen,
@@ -4073,7 +4106,7 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
         ):
             self.assertIs(idle_watchdog.spawn(99, env), popen.return_value)
 
-    def test_starts_for_auto_backup_alone(self):
+    def test_starts_for_auto_backup_alone(self) -> None:
         env = {"LIFETRACKER_AUTO_BACKUP": "on"}
         with (
             mock.patch("subprocess.Popen") as popen,
@@ -4081,7 +4114,7 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
         ):
             self.assertIs(idle_watchdog.spawn(99, env), popen.return_value)
 
-    def test_starts_module_with_master_pid(self):
+    def test_starts_module_with_master_pid(self) -> None:
         env = {"LIFETRACKER_IDLE_STOP": "stop"}
         with (
             mock.patch("subprocess.Popen") as popen,
@@ -4091,7 +4124,7 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
 
         popen.assert_called_once_with([sys.executable, "-m", "lifetracker.core.idle_watchdog", "99"], env=env)
 
-    def test_request_file_from_env(self):
+    def test_request_file_from_env(self) -> None:
         for env, expected in [
             ({}, None),
             ({"LIFETRACKER_IDLE_STOP": "bogus"}, None),
@@ -4110,7 +4143,7 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
             with self.subTest(env=env):
                 self.assertEqual(idle_watchdog.request_file_from_env(env), expected)
 
-    def test_record_request_touches_file(self):
+    def test_record_request_touches_file(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             path = Path(tempdir) / "last-request"
             self.assertIsNone(idle_watchdog.last_request_time(path))
@@ -4125,11 +4158,11 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
             assert later is not None
             self.assertGreaterEqual(later, first)
 
-    def test_record_request_never_raises(self):
+    def test_record_request_never_raises(self) -> None:
         idle_watchdog.record_request(None)
         idle_watchdog.record_request(Path("/nonexistent/last-request"))
 
-    def test_gunicorn_post_request_records_request(self):
+    def test_gunicorn_post_request_records_request(self) -> None:
         path = Path("/run/last-request")
         with (
             mock.patch.object(gunicorn_conf, "_REQUEST_FILE", path),
@@ -4139,7 +4172,7 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
 
         record_request.assert_called_once_with(path)
 
-    def test_gunicorn_access_log_shows_fly_client_ip(self):
+    def test_gunicorn_access_log_shows_fly_client_ip(self) -> None:
         # Gunicorn takes any module-level name in its config module that's a
         # setting's name as that setting.
         cfg = gunicorn.config.Config()
@@ -4154,12 +4187,12 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
         }
         resp = mock.Mock(status="200 OK", sent=42, headers=[])
 
-        def logged(headers):
+        def logged(headers: list[tuple[str, str]]) -> str:
             req = mock.Mock(headers=headers)
             with mock.patch.object(logger.access_log, "info") as info:
                 logger.access(resp, req, environ, datetime.timedelta(0))
             fmt, atoms = info.call_args.args
-            return fmt % atoms
+            return str(fmt % atoms)
 
         line = logged([("FLY-CLIENT-IP", "203.0.113.7")])
         self.assertRegex(
@@ -4168,7 +4201,7 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
         )
         self.assertRegex(logged([]), r"^- 172\.16\.1\.2 ")
 
-    def test_gunicorn_on_exit_exits_1_if_envoy_failed(self):
+    def test_gunicorn_on_exit_exits_1_if_envoy_failed(self) -> None:
         server = mock.Mock()
         with tempfile.TemporaryDirectory() as tempdir:
             path = Path(tempdir) / "envoy-failed"
@@ -4182,12 +4215,12 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
         self.assertEqual(cm.exception.code, 1)
         server.log.error.assert_called_once_with("Exiting with status 1, as Envoy kept failing")
 
-    def test_gunicorn_on_exit_without_envoy_failed_file_setting(self):
+    def test_gunicorn_on_exit_without_envoy_failed_file_setting(self) -> None:
         with mock.patch.dict(os.environ):
             os.environ.pop("LIFETRACKER_ENVOY_FAILED_FILE", None)
             gunicorn_conf.on_exit(mock.Mock())
 
-    def test_gunicorn_when_ready_spawns_for_master(self):
+    def test_gunicorn_when_ready_spawns_for_master(self) -> None:
         server = mock.Mock(pid=1234)
         with (
             mock.patch.object(idle_watchdog, "spawn") as spawn,
@@ -4198,13 +4231,13 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
         spawn.assert_called_once_with(1234)
         spawn_collector.assert_called_once_with(1234)
 
-    def test_main_usage(self):
+    def test_main_usage(self) -> None:
         with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
             self.assertEqual(idle_watchdog.main([]), 2)
 
         self.assertIn("usage:", stderr.getvalue())
 
-    def test_main_invalid_config(self):
+    def test_main_invalid_config(self) -> None:
         with (
             mock.patch.dict(os.environ, {"LIFETRACKER_IDLE_STOP_MINUTES": "x"}),
             mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
@@ -4214,7 +4247,7 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
 
         self.assertIn("LIFETRACKER_IDLE_STOP_MINUTES", stderr.getvalue())
 
-    def test_main_runs_watchdog_for_master_pid(self):
+    def test_main_runs_watchdog_for_master_pid(self) -> None:
         with (
             mock.patch.dict(os.environ, {"LIFETRACKER_IDLE_STOP": "monitor"}),
             mock.patch("signal.signal") as set_handler,
@@ -4230,13 +4263,13 @@ class IdleWatchdogSpawnTests(SimpleTestCase):
             ]
         )
 
-    def test_exit_quietly_exits_zero(self):
+    def test_exit_quietly_exits_zero(self) -> None:
         with self.assertRaises(SystemExit) as raised:
             idle_watchdog._exit_quietly(signal.SIGTERM, None)
 
         self.assertEqual(raised.exception.code, 0)
 
-    def test_real_process_stops_its_parent(self):
+    def test_real_process_stops_its_parent(self) -> None:
         """End to end: a shell stands in for gunicorn's master, starts the
         watchdog as its child, and is sent SIGTERM once it's been idle."""
         with tempfile.TemporaryDirectory() as tempdir:
@@ -4277,7 +4310,15 @@ class IdleWatchdogUptimeRunTests(SimpleTestCase):
     MASTER_PID = 4321
     START = 1_800_000_000.25  # 2027-01-15T08:00:00.25Z
 
-    def _run(self, mode, *, ticks, uptime_dir, booted=None, clock_step=None):
+    def _run(
+        self,
+        mode: str,
+        *,
+        ticks: int,
+        uptime_dir: Path,
+        booted: float | None = None,
+        clock_step: typing.Callable[[int], float] | None = None,
+    ) -> tuple[int, list[float], str]:
         """Run the loop for ``ticks`` wakes (then the master "exits"), with a
         fake clock that each sleep advances by what was asked plus
         ``clock_step`` (a function of the wake number), if given."""
@@ -4285,7 +4326,7 @@ class IdleWatchdogUptimeRunTests(SimpleTestCase):
         ppids = iter([self.MASTER_PID] * ticks + [1])
         sleeps = []
 
-        def sleep(seconds):
+        def sleep(seconds: float) -> None:
             sleeps.append(seconds)
             now[0] += seconds + (clock_step(len(sleeps)) if clock_step else 0)
 
@@ -4304,7 +4345,7 @@ class IdleWatchdogUptimeRunTests(SimpleTestCase):
             )
         return result, sleeps, stderr.getvalue()
 
-    def _up_seconds(self, uptime_dir):
+    def _up_seconds(self, uptime_dir: Path) -> list[int]:
         data = uptime_log.read_day(uptime_dir, uptime_log.day_of(self.START))
         assert data is not None
         bits = int.from_bytes(data, "big")
@@ -4314,7 +4355,7 @@ class IdleWatchdogUptimeRunTests(SimpleTestCase):
             if bits >> (uptime_log.SECONDS_PER_DAY - 1 - second) & 1
         ]
 
-    def test_records_every_second(self):
+    def test_records_every_second(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             result, sleeps, stderr = self._run("off", ticks=5, uptime_dir=Path(tempdir))
             up = self._up_seconds(Path(tempdir))
@@ -4326,7 +4367,7 @@ class IdleWatchdogUptimeRunTests(SimpleTestCase):
         self.assertIn(f"recording uptime in {tempdir}", stderr)
         self.assertNotIn("started in", stderr)
 
-    def test_nothing_to_do_exits_at_once(self):
+    def test_nothing_to_do_exits_at_once(self) -> None:
         # e.g. run by hand with both off: without the early return the loop
         # would have nothing to wake for, and time.sleep(inf) raises.
         sleep = mock.Mock()
@@ -4336,7 +4377,7 @@ class IdleWatchdogUptimeRunTests(SimpleTestCase):
         self.assertEqual(result, 0)
         sleep.assert_not_called()
 
-    def test_checks_still_every_interval(self):
+    def test_checks_still_every_interval(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             status_file = Path(tempdir) / "status.json"
             config = dataclasses.replace(
@@ -4364,7 +4405,7 @@ class IdleWatchdogUptimeRunTests(SimpleTestCase):
         self.assertEqual(count.call_count, 3)
         self.assertEqual(status["checked_at"], "2027-01-15T08:00:20+00:00")
 
-    def test_uptime_alone_still_syncs_every_interval(self):
+    def test_uptime_alone_still_syncs_every_interval(self) -> None:
         with (
             tempfile.TemporaryDirectory() as tempdir,
             mock.patch.object(uptime_log.UptimeLog, "sync") as sync,
@@ -4375,7 +4416,7 @@ class IdleWatchdogUptimeRunTests(SimpleTestCase):
         # every 10s interval: the wakes 11 and 21 seconds in, of 25.
         self.assertEqual(sync.call_count, 3)
 
-    def test_short_gaps_are_filled_long_ones_not(self):
+    def test_short_gaps_are_filled_long_ones_not(self) -> None:
         # The 2nd sleep oversleeps by 2s, the 4th by 10s.
         with tempfile.TemporaryDirectory() as tempdir:
             self._run(
@@ -4388,26 +4429,26 @@ class IdleWatchdogUptimeRunTests(SimpleTestCase):
 
         self.assertEqual(up, [28800, 28801, 28802, 28803, 28804, 28805, 28816, 28817])
 
-    def test_fresh_boot_is_backfilled(self):
+    def test_fresh_boot_is_backfilled(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             self._run("off", ticks=1, uptime_dir=Path(tempdir), booted=3.5)
             up = self._up_seconds(Path(tempdir))
 
         self.assertEqual(up, [28796, 28797, 28798, 28799, 28800])
 
-    def test_long_uptime_is_not_backfilled(self):
+    def test_long_uptime_is_not_backfilled(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             self._run("off", ticks=1, uptime_dir=Path(tempdir), booted=3600)
             up = self._up_seconds(Path(tempdir))
 
         self.assertEqual(up, [28800])
 
-    def test_write_failure_is_logged_once_and_retried(self):
+    def test_write_failure_is_logged_once_and_retried(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             blocker = Path(tempdir) / "uptime"
             blocker.write_text("not a directory")
 
-            def unblock(n):
+            def unblock(n: int) -> int:
                 if n == 3:
                     blocker.unlink()
                 return 0
@@ -4426,7 +4467,7 @@ class UptimeLogTests(SimpleTestCase):
     DAY = 20_748  # 2026-10-22
     MIDNIGHT = DAY * uptime_log.SECONDS_PER_DAY
 
-    def test_file_layout(self):
+    def test_file_layout(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             log = uptime_log.UptimeLog(Path(tempdir))
             log.record(self.MIDNIGHT + 0.9)
@@ -4441,7 +4482,7 @@ class UptimeLogTests(SimpleTestCase):
         self.assertEqual(data[-1], 0x01)
         self.assertEqual(uptime_log.active_seconds(data), 3)
 
-    def test_leaving_a_day_syncs_it(self):
+    def test_leaving_a_day_syncs_it(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             log = uptime_log.UptimeLog(Path(tempdir))
             log.record(self.MIDNIGHT - 1)
@@ -4450,7 +4491,7 @@ class UptimeLogTests(SimpleTestCase):
 
         fsync.assert_called_once()
 
-    def test_reopening_keeps_earlier_seconds(self):
+    def test_reopening_keeps_earlier_seconds(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             uptime_log.UptimeLog(Path(tempdir)).record(self.MIDNIGHT + 1)
             uptime_log.UptimeLog(Path(tempdir)).record(self.MIDNIGHT + 2)
@@ -4459,7 +4500,7 @@ class UptimeLogTests(SimpleTestCase):
         assert data is not None
         self.assertEqual(data[0], 0x60)
 
-    def test_range_across_midnight(self):
+    def test_range_across_midnight(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             log = uptime_log.UptimeLog(Path(tempdir))
             log.record(self.MIDNIGHT + 1, since=self.MIDNIGHT - 2)
@@ -4473,7 +4514,7 @@ class UptimeLogTests(SimpleTestCase):
         self.assertEqual(after[0], 0xC0)
         self.assertEqual(first, self.DAY - 1)
 
-    def test_missing_and_short_files(self):
+    def test_missing_and_short_files(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             self.assertIsNone(uptime_log.read_day(Path(tempdir), self.DAY))
             self.assertIsNone(uptime_log.first_recorded_day(Path(tempdir)))
@@ -4487,7 +4528,7 @@ class UptimeLogTests(SimpleTestCase):
         self.assertEqual(uptime_log.active_seconds(data), 8)
         self.assertEqual(first, self.DAY)
 
-    def test_start_count(self):
+    def test_start_count(self) -> None:
         data = bytearray(10_800)
         data[0] = 0b1100_1000  # up at midnight, then a start at second 4
         data[1] = 0b0000_0001  # ... and at second 15
@@ -4496,7 +4537,7 @@ class UptimeLogTests(SimpleTestCase):
         self.assertEqual(uptime_log.start_count(bytes(data)), 3)
         self.assertEqual(uptime_log.start_count(bytes(10_800)), 0)
 
-    def test_up_periods(self):
+    def test_up_periods(self) -> None:
         data = bytearray(10_800)
         data[0] = 0b1100_1000  # up at midnight, then a start at second 4
         data[1] = 0b0000_0001  # ... and at second 15
@@ -4517,7 +4558,7 @@ class UptimeLogTests(SimpleTestCase):
             [(0, 86_399)],
         )
 
-    def test_day_periods_across_midnight(self):
+    def test_day_periods_across_midnight(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             log = uptime_log.UptimeLog(Path(tempdir))
             # Up from 23:00 the day before until 01:00, then 02:00 to the end
@@ -4545,7 +4586,7 @@ class UptimeLogTests(SimpleTestCase):
         self.assertEqual(empty_after.periods, [])
         self.assertTrue(empty_after.today)
 
-    def test_day_periods_midnight_without_neighbours(self):
+    def test_day_periods_midnight_without_neighbours(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             uptime_log.UptimeLog(Path(tempdir)).record(self.MIDNIGHT + 86_399, since=self.MIDNIGHT)
             result = uptime_log.day_periods(Path(tempdir), self.DAY, self.MIDNIGHT + 2 * 86_400)
@@ -4555,7 +4596,7 @@ class UptimeLogTests(SimpleTestCase):
         self.assertFalse(result.from_previous_day)
         self.assertFalse(result.into_next_day)
 
-    def test_day_periods_ongoing_today(self):
+    def test_day_periods_ongoing_today(self) -> None:
         now = self.MIDNIGHT + 3600.5
         with tempfile.TemporaryDirectory() as tempdir:
             log = uptime_log.UptimeLog(Path(tempdir))
@@ -4570,7 +4611,7 @@ class UptimeLogTests(SimpleTestCase):
         self.assertTrue(ongoing.ongoing)
         self.assertFalse(stopped.ongoing)
 
-    def test_day_periods_no_data(self):
+    def test_day_periods_no_data(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             empty = uptime_log.day_periods(Path(tempdir), self.DAY, self.MIDNIGHT)
             uptime_log.UptimeLog(Path(tempdir)).record(self.MIDNIGHT)
@@ -4584,7 +4625,7 @@ class UptimeLogTests(SimpleTestCase):
 class UptimeReportCommandTests(SimpleTestCase):
     NOW = 20_748 * 86_400 + 43_199.5  # 2026-10-22T11:59:59.5Z
 
-    def _report(self, env, days=None):
+    def _report(self, env: dict[str, str], days: int | None = None) -> str:
         out = io.StringIO()
         kwargs = {} if days is None else {"days": days}
         with (
@@ -4594,7 +4635,7 @@ class UptimeReportCommandTests(SimpleTestCase):
             call_command("uptime_report", stdout=out, **kwargs)
         return out.getvalue()
 
-    def test_report(self):
+    def test_report(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             log = uptime_log.UptimeLog(Path(tempdir))
             # Half of 2026-10-20, none of the 21st, a quarter of today so far.
@@ -4612,7 +4653,7 @@ class UptimeReportCommandTests(SimpleTestCase):
             ],
         )
 
-    def test_errors(self):
+    def test_errors(self) -> None:
         with (
             mock.patch.dict(os.environ, {"LIFETRACKER_UPTIME_DIR": "off"}),
             self.assertRaisesMessage(CommandError, "Uptime isn't recorded"),
@@ -4622,7 +4663,7 @@ class UptimeReportCommandTests(SimpleTestCase):
             self._report({"LIFETRACKER_UPTIME_DIR": "/nonexistent"}, days=0)
 
 
-def _table_rows(response: HttpResponse) -> list[list[str]]:
+def _table_rows(response: TestResponse) -> list[list[str]]:
     """The cells of each row of the page's table body."""
     return [
         [cell.strip() for cell in re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)]
@@ -4638,7 +4679,7 @@ class UptimeReportAdminViewTests(TestCase):
     URL = "/admin/uptime/"
     NOW = UptimeReportCommandTests.NOW
 
-    def setUp(self):
+    def setUp(self) -> None:
         User.objects.create_superuser("admin", "admin@example.com", "password")
         self.client.login(username="admin", password="password")
         tempdir = tempfile.TemporaryDirectory()
@@ -4651,13 +4692,13 @@ class UptimeReportAdminViewTests(TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def _rows(self, response):
+    def _rows(self, response: TestResponse) -> list[list[str]]:
         return _table_rows(response)
 
-    def test_url(self):
+    def test_url(self) -> None:
         self.assertEqual(reverse("admin:uptime_report"), self.URL)
 
-    def test_top_bar_links_to_page_for_superusers_only(self):
+    def test_top_bar_links_to_page_for_superusers_only(self) -> None:
         link = f'<a href="{self.URL}">Uptime</a>'
         self.assertContains(self.client.get(reverse("admin:index")), link, html=True)
 
@@ -4669,7 +4710,7 @@ class UptimeReportAdminViewTests(TestCase):
         self.assertNotContains(client.get(reverse("admin:index")), self.URL)
         self.assertEqual(client.get(self.URL).status_code, 403)
 
-    def test_page_requires_login(self):
+    def test_page_requires_login(self) -> None:
         response = Client().get(self.URL)
 
         self.assertRedirects(
@@ -4678,7 +4719,7 @@ class UptimeReportAdminViewTests(TestCase):
             fetch_redirect_response=False,
         )
 
-    def test_page_shows_report(self):
+    def test_page_shows_report(self) -> None:
         log = uptime_log.UptimeLog(self.directory)
         # As in UptimeReportCommandTests.test_report.
         log.record(20_746 * 86_400 + 43_199, since=20_746 * 86_400)
@@ -4706,13 +4747,13 @@ class UptimeReportAdminViewTests(TestCase):
         self.assertEqual(rows[2][3], "12\xa0hours of 1\xa0day")
         self.assertIn('<meter min="0" max="100" value="50.00">', rows[2][2])
 
-    def test_default_days(self):
+    def test_default_days(self) -> None:
         response = self.client.get(self.URL)
 
         self.assertEqual(len(self._rows(response)), 7)
         self.assertNotContains(response, "errornote")
 
-    def test_bad_days(self):
+    def test_bad_days(self) -> None:
         for days in ("0", "367", "x"):
             with self.subTest(days=days):
                 response = self.client.get(self.URL, {"days": days})
@@ -4720,14 +4761,14 @@ class UptimeReportAdminViewTests(TestCase):
                 self.assertContains(response, "Days must be a whole number from 1 to 366")
                 self.assertEqual(len(self._rows(response)), 7)
 
-    def test_not_recorded(self):
+    def test_not_recorded(self) -> None:
         with mock.patch.dict(os.environ, {"LIFETRACKER_UPTIME_DIR": "off"}):
             response = self.client.get(self.URL)
 
         self.assertContains(response, "Uptime isn't recorded")
         self.assertNotContains(response, 'lt-uptime"')
 
-    def test_today_start_in_local_time(self):
+    def test_today_start_in_local_time(self) -> None:
         response = self.client.get(self.URL)
 
         self.assertContains(response, "/static/core/local_times.js")
@@ -4742,7 +4783,7 @@ class UptimeDayAdminViewTests(TestCase):
     NOW = UptimeReportCommandTests.NOW  # 2026-10-22T11:59:59.5Z
     URL = "/admin/uptime/2026-10-20/"
 
-    def setUp(self):
+    def setUp(self) -> None:
         User.objects.create_superuser("admin", "admin@example.com", "password")
         self.client.login(username="admin", password="password")
         tempdir = tempfile.TemporaryDirectory()
@@ -4755,7 +4796,7 @@ class UptimeDayAdminViewTests(TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def _rows(self, response):
+    def _rows(self, response: TestResponse) -> list[list[str]]:
         """The table's cells, as for the uptime page, but as text: the local
         times' ``<time>`` elements hold the UTC time until ``local_times.js``
         replaces it."""
@@ -4763,7 +4804,7 @@ class UptimeDayAdminViewTests(TestCase):
             [re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", cell)).strip() for cell in row] for row in _table_rows(response)
         ]
 
-    def _record(self):
+    def _record(self) -> None:
         log = uptime_log.UptimeLog(self.directory)
         midnight = 20_746 * 86_400  # 2026-10-20
         # From 23:30 the day before to 00:30, 09:05:03 for 2 hours, and the
@@ -4773,10 +4814,10 @@ class UptimeDayAdminViewTests(TestCase):
         log.record(midnight + 86_399)
         log.record(self.NOW, since=self.NOW - 59.5)
 
-    def test_url(self):
+    def test_url(self) -> None:
         self.assertEqual(reverse("admin:uptime_day", args=["2026-10-20"]), self.URL)
 
-    def test_superusers_only(self):
+    def test_superusers_only(self) -> None:
         staff = User.objects.create_user("staff", "s@example.com", "pass")
         staff.is_staff = True
         staff.save()
@@ -4789,7 +4830,7 @@ class UptimeDayAdminViewTests(TestCase):
             fetch_redirect_response=False,
         )
 
-    def test_report_links_starts(self):
+    def test_report_links_starts(self) -> None:
         self._record()
 
         response = self.client.get("/admin/uptime/", {"days": "5"})
@@ -4800,7 +4841,7 @@ class UptimeDayAdminViewTests(TestCase):
         self.assertContains(response, "No data")
         self.assertNotContains(response, "/admin/uptime/2026-10-18/")
 
-    def test_page_lists_periods(self):
+    def test_page_lists_periods(self) -> None:
         self._record()
 
         response = self.client.get(self.URL, {"days": "4"})
@@ -4835,7 +4876,7 @@ class UptimeDayAdminViewTests(TestCase):
         self.assertContains(response, 'href="/admin/uptime/2026-10-19/?days=4"')
         self.assertContains(response, 'href="/admin/uptime/2026-10-21/?days=4"')
 
-    def test_today(self):
+    def test_today(self) -> None:
         self._record()
 
         response = self.client.get("/admin/uptime/2026-10-22/")
@@ -4856,7 +4897,7 @@ class UptimeDayAdminViewTests(TestCase):
         self.assertNotContains(response, "2026-10-23")
         self.assertContains(response, 'href="/admin/uptime/"')
 
-    def test_continues_into_next_day(self):
+    def test_continues_into_next_day(self) -> None:
         uptime_log.UptimeLog(self.directory).record(20_747 * 86_400 + 10, since=20_747 * 86_400 - 10)
 
         response = self.client.get("/admin/uptime/2026-10-20/")
@@ -4873,7 +4914,7 @@ class UptimeDayAdminViewTests(TestCase):
             ],
         )
 
-    def test_local_times(self):
+    def test_local_times(self) -> None:
         self._record()
 
         response = self.client.get(self.URL)
@@ -4896,7 +4937,7 @@ class UptimeDayAdminViewTests(TestCase):
             '2026-10-20T23:59:59Z">2026-10-20T23:59:59Z</time>',
         )
 
-    def test_first_possible_date_local_range(self):
+    def test_first_possible_date_local_range(self) -> None:
         uptime_log.UptimeLog(self.directory).record(self.NOW)
 
         response = self.client.get("/admin/uptime/0001-01-01/")
@@ -4904,7 +4945,7 @@ class UptimeDayAdminViewTests(TestCase):
         self.assertEqual(response.context["day_start"], "0001-01-01T00:00:00Z")
         self.assertEqual(response.context["day_end"], "0001-01-01T23:59:59Z")
 
-    def test_no_periods_and_no_data(self):
+    def test_no_periods_and_no_data(self) -> None:
         uptime_log.UptimeLog(self.directory).record(20_746 * 86_400)
 
         empty = self.client.get("/admin/uptime/2026-10-21/")
@@ -4914,36 +4955,36 @@ class UptimeDayAdminViewTests(TestCase):
         self.assertContains(before, "No data: 2026-10-19 is before the first file")
         self.assertNotContains(before, "<tbody>")
 
-    def test_bad_and_future_dates(self):
+    def test_bad_and_future_dates(self) -> None:
         for date in ("2026-10-23", "2026-13-01", "yesterday"):
             with self.subTest(date=date):
                 self.assertEqual(self.client.get(f"/admin/uptime/{date}/").status_code, 404)
 
-    def test_first_possible_date(self):
+    def test_first_possible_date(self) -> None:
         response = self.client.get("/admin/uptime/0001-01-01/")
 
         self.assertContains(response, "No data: 0001-01-01")
         self.assertContains(response, 'href="/admin/uptime/0001-01-02/"')
         self.assertNotContains(response, "←")
 
-    def test_bad_days_dropped(self):
+    def test_bad_days_dropped(self) -> None:
         response = self.client.get(self.URL, {"days": "0"})
 
         self.assertContains(response, 'href="/admin/uptime/"')
         self.assertNotContains(response, "days=")
 
-    def test_not_recorded(self):
+    def test_not_recorded(self) -> None:
         with mock.patch.dict(os.environ, {"LIFETRACKER_UPTIME_DIR": "off"}):
             response = self.client.get(self.URL)
 
         self.assertContains(response, "Uptime isn't recorded")
 
 
-def _watchdog_status(now, **overrides):
+def _watchdog_status(now: datetime.datetime, **overrides: typing.Any) -> dict[str, typing.Any]:
     """A status file's contents, as ``Watchdog.status`` writes them, with times
     relative to ``now`` (a UTC datetime)."""
 
-    def iso(seconds_ago):
+    def iso(seconds_ago: float) -> str:
         return (now - datetime.timedelta(seconds=seconds_ago)).isoformat()
 
     status = {
@@ -4968,7 +5009,7 @@ def _watchdog_status(now, **overrides):
 
 
 class IdleWatchdogReadTests(SimpleTestCase):
-    def test_read_status(self):
+    def test_read_status(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             path = Path(tempdir) / "status.json"
             self.assertIsNone(idle_watchdog.read_status(path))
@@ -4984,7 +5025,7 @@ class IdleWatchdogReadTests(SimpleTestCase):
             with self.assertRaises(ValueError):
                 idle_watchdog.read_status(path)
 
-    def test_system_uptime(self):
+    def test_system_uptime(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             path = Path(tempdir) / "uptime"
             self.assertIsNone(idle_watchdog.system_uptime(path))
@@ -4999,7 +5040,13 @@ class IdleWatchdogReadTests(SimpleTestCase):
 class IdleWatchdogPageContextTests(SimpleTestCase):
     NOW = datetime.datetime(2027, 1, 15, 8, 0, tzinfo=datetime.UTC)
 
-    def _context(self, status=None, env=None, raw=None, last_request=None):
+    def _context(
+        self,
+        status: dict[str, typing.Any] | None = None,
+        env: dict[str, str] | None = None,
+        raw: str | None = None,
+        last_request: float | None = None,
+    ) -> dict[str, typing.Any]:
         with tempfile.TemporaryDirectory() as tempdir:
             status_file = Path(tempdir) / "status.json"
             request_file = Path(tempdir) / "last-request"
@@ -5024,7 +5071,7 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
             ):
                 return idle_watchdog_page_context(now=self.NOW)
 
-    def test_format_duration(self):
+    def test_format_duration(self) -> None:
         for seconds, expected in [
             (-5, "0 seconds"),
             (1, "1 second"),
@@ -5035,7 +5082,7 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
             with self.subTest(seconds=seconds):
                 self.assertEqual(_format_duration(seconds), expected)
 
-    def test_status(self):
+    def test_status(self) -> None:
         # The request file is newer than the status file's copy of its time
         # (as just after a request, before the next check), and wins.
         context = self._context(
@@ -5064,7 +5111,7 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
             [(8000, 0, None), (22, 1, "20 seconds")],
         )
 
-    def test_auto_backup(self):
+    def test_auto_backup(self) -> None:
         context = self._context(
             _watchdog_status(
                 self.NOW,
@@ -5088,19 +5135,19 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
         self.assertEqual(backup["last_exit_status"], 0)
         self.assertEqual(backup["next_run_at"], self.NOW + datetime.timedelta(hours=6, seconds=-90))
 
-    def test_auto_backup_off(self):
+    def test_auto_backup_off(self) -> None:
         context = self._context(_watchdog_status(self.NOW))
 
         self.assertIsNone(context["auto_backup_interval"])
         self.assertIsNone(context["status"]["auto_backup"])
 
-    def test_no_request_file(self):
+    def test_no_request_file(self) -> None:
         # The status file's copy of the time is ignored, even without a file.
         status = self._context(_watchdog_status(self.NOW))["status"]
         self.assertIsNone(status["last_request_at"])
         self.assertIsNone(status["last_request_at_ago"])
 
-    def test_stale(self):
+    def test_stale(self) -> None:
         context = self._context(
             _watchdog_status(
                 self.NOW,
@@ -5110,7 +5157,7 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
 
         self.assertTrue(context["status"]["stale"])
 
-    def test_before_first_check_judged_by_start_time(self):
+    def test_before_first_check_judged_by_start_time(self) -> None:
         for started_seconds_ago, stale in [(10, False), (600, True)]:
             with self.subTest(started_seconds_ago=started_seconds_ago):
                 started_at = self.NOW - datetime.timedelta(seconds=started_seconds_ago)
@@ -5119,25 +5166,25 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
                 self.assertIsNone(context["status"]["checked_ago"])
                 self.assertEqual(context["status"]["stale"], stale)
 
-    def test_no_status_file(self):
+    def test_no_status_file(self) -> None:
         context = self._context()
 
         self.assertIsNone(context["status"])
         self.assertIsNone(context["status_error"])
 
-    def test_invalid_config(self):
+    def test_invalid_config(self) -> None:
         context = self._context(env={"LIFETRACKER_IDLE_STOP": "sometimes"})
 
         self.assertIn("LIFETRACKER_IDLE_STOP must be one of", context["config_error"])
         self.assertIsNone(context["config"])
 
-    def test_unreadable_status(self):
+    def test_unreadable_status(self) -> None:
         context = self._context(raw="not json")
 
         self.assertIn("Couldn't read", context["status_error"])
         self.assertIsNone(context["status"])
 
-    def test_unexpected_status_contents(self):
+    def test_unexpected_status_contents(self) -> None:
         status = _watchdog_status(self.NOW)
         del status["ports"]
 
@@ -5146,7 +5193,7 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
         self.assertIn("Unexpected contents", context["status_error"])
         self.assertIsNone(context["status"])
 
-    def test_status_without_start_time(self):
+    def test_status_without_start_time(self) -> None:
         status = _watchdog_status(self.NOW, started_at=None)
 
         context = self._context(status)
@@ -5159,7 +5206,7 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
 class IdleWatchdogAdminViewTests(TestCase):
     URL = "/admin/idle-watchdog/"
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "admin@example.com", "password")
         self.client.login(username="admin", password="password")
         tempdir = tempfile.TemporaryDirectory()
@@ -5175,10 +5222,10 @@ class IdleWatchdogAdminViewTests(TestCase):
         env.start()
         self.addCleanup(env.stop)
 
-    def test_url(self):
+    def test_url(self) -> None:
         self.assertEqual(reverse("admin:idle_watchdog"), self.URL)
 
-    def test_top_bar_links_to_page_for_superusers_only(self):
+    def test_top_bar_links_to_page_for_superusers_only(self) -> None:
         link = f'<a href="{self.URL}">Idle Watchdog</a>'
         self.assertContains(self.client.get(reverse("admin:index")), link, html=True)
 
@@ -5190,7 +5237,7 @@ class IdleWatchdogAdminViewTests(TestCase):
         self.assertNotContains(client.get(reverse("admin:index")), self.URL)
         self.assertEqual(client.get(self.URL).status_code, 403)
 
-    def test_page_requires_login(self):
+    def test_page_requires_login(self) -> None:
         response = Client().get(self.URL)
 
         self.assertRedirects(
@@ -5199,7 +5246,7 @@ class IdleWatchdogAdminViewTests(TestCase):
             fetch_redirect_response=False,
         )
 
-    def test_page_shows_status(self):
+    def test_page_shows_status(self) -> None:
         idle_watchdog.write_status(
             self.status_file,
             _watchdog_status(timezone.now(), mode="stop", state="idle"),
@@ -5216,7 +5263,7 @@ class IdleWatchdogAdminViewTests(TestCase):
         self.assertContains(response, "<code>22</code>")
         self.assertNotContains(response, "has probably stopped running")
 
-    def test_page_stop_time_by_state_and_mode(self):
+    def test_page_stop_time_by_state_and_mode(self) -> None:
         for mode, state, label, expected in [
             ("stop", "active", "Stops At", "Not while connections are open"),
             ("stop", "stopping", "Stops At", "Now: the idle timeout was reached"),
@@ -5234,7 +5281,7 @@ class IdleWatchdogAdminViewTests(TestCase):
                 self.assertContains(response, label)
                 self.assertContains(response, expected)
 
-    def test_page_shows_auto_backups(self):
+    def test_page_shows_auto_backups(self) -> None:
         now = timezone.now()
         idle_watchdog.write_status(
             self.status_file,
@@ -5262,7 +5309,7 @@ class IdleWatchdogAdminViewTests(TestCase):
         self.assertContains(response, "Before stopping, started 0")
         self.assertContains(response, "Once this one finishes, then")
 
-    def test_page_with_auto_backups_off(self):
+    def test_page_with_auto_backups_off(self) -> None:
         idle_watchdog.write_status(self.status_file, _watchdog_status(timezone.now()))
 
         response = self.client.get(self.URL)
@@ -5270,7 +5317,7 @@ class IdleWatchdogAdminViewTests(TestCase):
         self.assertContains(response, "<code>LIFETRACKER_AUTO_BACKUP</code>")
         self.assertNotContains(response, "Last Automatic Backup")
 
-    def test_page_warns_when_stale(self):
+    def test_page_warns_when_stale(self) -> None:
         stale = timezone.now() - datetime.timedelta(hours=1)
         idle_watchdog.write_status(
             self.status_file,
@@ -5287,24 +5334,24 @@ class IdleWatchdogAdminViewTests(TestCase):
         self.assertContains(response, "Unknown: the watchdog doesn")
         self.assertNotContains(response, "Now: the idle timeout was reached")
 
-    def test_page_without_status(self):
+    def test_page_without_status(self) -> None:
         response = self.client.get(self.URL)
 
         self.assertContains(response, "No status yet: the watchdog writes it")
 
-    def test_page_when_off(self):
+    def test_page_when_off(self) -> None:
         with mock.patch.dict(os.environ, {"LIFETRACKER_IDLE_STOP": "off"}):
             response = self.client.get(self.URL)
 
         self.assertContains(response, "No status yet: the watchdog is off.")
 
-    def test_page_with_invalid_config(self):
+    def test_page_with_invalid_config(self) -> None:
         with mock.patch.dict(os.environ, {"LIFETRACKER_IDLE_STOP_MINUTES": "x"}):
             response = self.client.get(self.URL)
 
         self.assertContains(response, "settings are invalid")
 
-    def test_page_with_unreadable_status(self):
+    def test_page_with_unreadable_status(self) -> None:
         self.status_file.write_text("{")
 
         response = self.client.get(self.URL)
@@ -5312,14 +5359,14 @@ class IdleWatchdogAdminViewTests(TestCase):
         self.assertContains(response, "Couldn&#x27;t read")
 
 
-def _jwks_key(path=None):
+def _jwks_key(path: str | Path | None = None) -> jwt.PyJWK:
     """The public key from the JWKS file, as PyJWT's ``PyJWK``."""
     path = path or settings.LIFETRACKER_JWT_JWKS_FILE
     (key,) = jwt.PyJWKSet.from_json(Path(path).read_text(encoding="utf-8")).keys
     return key
 
 
-def _decode_jwt(token):
+def _decode_jwt(token: str) -> dict[str, typing.Any]:
     """``token``'s claims, checked as the front proxy is to check them."""
     key = _jwks_key()
     header = jwt.get_unverified_header(token)
@@ -5336,7 +5383,7 @@ def _decode_jwt(token):
 class JWTKeyTests(SimpleTestCase):
     """The JWT signing key and the JWKS written for the front proxy."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
         self.dir = Path(temp_dir.name) / "config"
@@ -5349,10 +5396,10 @@ class JWTKeyTests(SimpleTestCase):
         override.enable()
         self.addCleanup(override.disable)
 
-    def _forget_cached_key(self):
+    def _forget_cached_key(self) -> None:
         jwt_auth._keys.pop((self.private_path, self.jwks_path), None)
 
-    def test_creates_private_key_and_jwks(self):
+    def test_creates_private_key_and_jwks(self) -> None:
         key, kid = jwt_auth.signing_key()
         self.assertEqual(self.private_path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(self.jwks_path.stat().st_mode & 0o777, 0o644)
@@ -5373,7 +5420,7 @@ class JWTKeyTests(SimpleTestCase):
             {"a": 1},
         )
 
-    def test_kid_is_rfc_7638_thumbprint(self):
+    def test_kid_is_rfc_7638_thumbprint(self) -> None:
         # RFC 8037 appendix A.3's example key and thumbprint.
         jwk = {
             "kty": "OKP",
@@ -5385,7 +5432,7 @@ class JWTKeyTests(SimpleTestCase):
             "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k",
         )
 
-    def test_reuses_existing_key_and_rewrites_jwks(self):
+    def test_reuses_existing_key_and_rewrites_jwks(self) -> None:
         _, kid = jwt_auth.signing_key()
         pem = self.private_path.read_bytes()
         self.jwks_path.unlink()
@@ -5395,7 +5442,7 @@ class JWTKeyTests(SimpleTestCase):
         self.assertEqual(self.private_path.read_bytes(), pem)
         self.assertEqual(_jwks_key(self.jwks_path).key_id, kid)
 
-    def test_unchanged_jwks_not_rewritten(self):
+    def test_unchanged_jwks_not_rewritten(self) -> None:
         # So a read-only config directory works once both files exist, as with
         # `just docker-run`'s /config.
         _, kid = jwt_auth.signing_key()
@@ -5403,7 +5450,7 @@ class JWTKeyTests(SimpleTestCase):
         with mock.patch.object(tempfile, "mkstemp", side_effect=AssertionError("wrote")):
             self.assertEqual(jwt_auth.signing_key()[1], kid)
 
-    def test_failed_jwks_write_leaves_no_temporary_file(self):
+    def test_failed_jwks_write_leaves_no_temporary_file(self) -> None:
         self.dir.mkdir()
         with (
             mock.patch.object(os, "replace", side_effect=OSError("full")),
@@ -5412,20 +5459,20 @@ class JWTKeyTests(SimpleTestCase):
             jwt_auth._write_jwks({"kty": "OKP"}, self.jwks_path)
         self.assertEqual(list(self.dir.iterdir()), [])
 
-    def test_key_cached_per_process(self):
+    def test_key_cached_per_process(self) -> None:
         first = jwt_auth.signing_key()
         self.private_path.unlink()
         self.assertEqual(jwt_auth.signing_key(), first)
         self.assertFalse(self.private_path.exists())
 
-    def test_create_keeps_key_another_process_wrote_first(self):
+    def test_create_keeps_key_another_process_wrote_first(self) -> None:
         self.dir.mkdir()
         self.private_path.write_bytes(b"theirs")
         self.assertEqual(jwt_auth._create_private_key_file(self.private_path), b"theirs")
         self.assertEqual(self.private_path.read_bytes(), b"theirs")
         self.assertEqual(list(self.dir.iterdir()), [self.private_path])
 
-    def test_rejects_key_of_another_type(self):
+    def test_rejects_key_of_another_type(self) -> None:
         self.dir.mkdir()
         rsa_pem = rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
             serialization.Encoding.PEM,
@@ -5436,7 +5483,7 @@ class JWTKeyTests(SimpleTestCase):
         with self.assertRaisesRegex(ImproperlyConfigured, "isn't an Ed25519"):
             jwt_auth.signing_key()
 
-    def test_ensure_jwt_key_command(self):
+    def test_ensure_jwt_key_command(self) -> None:
         out = io.StringIO()
         call_command("ensure_jwt_key", stdout=out)
         self.assertEqual(out.getvalue(), f"JWKS: {self.jwks_path}\n")
@@ -5447,7 +5494,7 @@ class JWTKeyTests(SimpleTestCase):
 class AuthWhitelistTests(SimpleTestCase):
     """The requests that need no login, shared with the front proxy."""
 
-    def test_matches_exact_paths_and_methods(self):
+    def test_matches_exact_paths_and_methods(self) -> None:
         login = reverse("admin:login")
         logout = reverse("admin:logout")
         for method, path, expected in [
@@ -5476,7 +5523,7 @@ class AuthWhitelistTests(SimpleTestCase):
             with self.subTest(method=method, path=path):
                 self.assertIs(is_whitelisted(method, path), expected)
 
-    def test_command_prints_json(self):
+    def test_command_prints_json(self) -> None:
         out = io.StringIO()
         call_command("auth_whitelist", stdout=out)
         entries = json.loads(out.getvalue())
@@ -5498,7 +5545,7 @@ class WebManifestTests(TestCase):
     url = "/manifest.webmanifest"
 
     @override_settings(LIFETRACKER_UNAUTHENTICATED_SITE_NAME="Notes")
-    def test_manifest(self):
+    def test_manifest(self) -> None:
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/manifest+json")
@@ -5525,16 +5572,16 @@ class WebManifestTests(TestCase):
         )
 
     @override_settings(LIFETRACKER_UNAUTHENTICATED_SITE_NAME="Notes")
-    def test_logged_in_still_gets_unauthenticated_name(self):
+    def test_logged_in_still_gets_unauthenticated_name(self) -> None:
         user = User.objects.create_superuser("admin", "a@example.com", "pw")
         self.client.force_login(user)
         self.assertEqual(self.client.get(self.url).json()["name"], "Notes")
 
-    def test_head_allowed_post_not(self):
+    def test_head_allowed_post_not(self) -> None:
         self.assertEqual(self.client.head(self.url).status_code, 200)
         self.assertEqual(self.client.post(self.url).status_code, 405)
 
-    def test_icon_is_a_static_file(self):
+    def test_icon_is_a_static_file(self) -> None:
         icon = finders.find("core/app_icon.png")
         assert isinstance(icon, str)
         with open(icon, "rb") as f:
@@ -5544,7 +5591,7 @@ class WebManifestTests(TestCase):
         self.assertEqual(header[16:24], (512).to_bytes(4, "big") * 2)
 
     @override_settings(LIFETRACKER_UNAUTHENTICATED_SITE_NAME="Notes")
-    def test_admin_pages_link_it(self):
+    def test_admin_pages_link_it(self) -> None:
         response = self.client.get(reverse("admin:login"))
         self.assertContains(response, '<link rel="manifest" href="/manifest.webmanifest">', html=True)
         self.assertContains(
@@ -5574,19 +5621,19 @@ class HealthCheckTests(TestCase):
     url = "/healthz/"
 
     @override_settings(LIFETRACKER_COMMIT_ID="abc123")
-    def test_healthy(self):
+    def test_healthy(self) -> None:
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok", "commit": "abc123"})
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertNotIn("Set-Cookie", response.headers)
 
-    def test_head_allowed_post_not(self):
+    def test_head_allowed_post_not(self) -> None:
         self.assertEqual(self.client.head(self.url).status_code, 200)
         self.assertEqual(self.client.post(self.url).status_code, 405)
 
     @override_settings(LIFETRACKER_COMMIT_ID="abc123")
-    def test_unapplied_migrations(self):
+    def test_unapplied_migrations(self) -> None:
         migration = mock.Mock(app_label="core", name="0099_new")
         migration.name = "0099_new"
         with (
@@ -5601,7 +5648,7 @@ class HealthCheckTests(TestCase):
         )
         self.assertIn("core.0099_new", logs.output[0])
 
-    def test_database_error(self):
+    def test_database_error(self) -> None:
         with (
             mock.patch.object(
                 MigrationExecutor,
@@ -5616,7 +5663,7 @@ class HealthCheckTests(TestCase):
         self.assertNotIn("disk I/O", response.content.decode())
         self.assertIn("disk I/O error", logs.output[0])
 
-    def test_other_error(self):
+    def test_other_error(self) -> None:
         with (
             mock.patch.object(MigrationExecutor, "__init__", side_effect=RuntimeError("boom")),
             self.assertLogs("lifetracker.core.health", "ERROR") as logs,
@@ -5632,10 +5679,10 @@ class JWTCookieMiddlewareTests(TestCase):
 
     PASSWORD = "correct horse battery staple"
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "", self.PASSWORD)
 
-    def _login(self):
+    def _login(self) -> TestResponse:
         response = self.client.post(
             reverse("admin:login"),
             {
@@ -5647,21 +5694,21 @@ class JWTCookieMiddlewareTests(TestCase):
         self.assertRedirects(response, reverse("admin:index"))
         return response
 
-    def _logged_in_user_id(self):
+    def _logged_in_user_id(self) -> str | None:
         return self.client.session.get("_auth_user_id")
 
-    def _token(self):
+    def _token(self) -> str:
         return self.client.cookies[jwt_auth.JWT_COOKIE_NAME].value
 
-    def _stored(self):
+    def _stored(self) -> typing.Any:
         return self.client.session[jwt_auth.SESSION_KEY]
 
-    def assertCookieDeleted(self, response):
+    def assertCookieDeleted(self, response: TestResponse) -> None:
         cookie = response.cookies[jwt_auth.JWT_COOKIE_NAME]
         self.assertEqual(cookie.value, "")
         self.assertEqual(cookie["max-age"], 0)
 
-    def test_login_issues_cookie(self):
+    def test_login_issues_cookie(self) -> None:
         response = self._login()
         cookie = response.cookies[jwt_auth.JWT_COOKIE_NAME]
         self.assertTrue(cookie["httponly"])
@@ -5682,16 +5729,16 @@ class JWTCookieMiddlewareTests(TestCase):
         self.assertEqual(self._stored(), {"sub": str(self.user.pk)})
 
     @override_settings(SESSION_COOKIE_SECURE=True)
-    def test_cookie_secure_like_session_cookie(self):
+    def test_cookie_secure_like_session_cookie(self) -> None:
         response = self._login()
         self.assertTrue(response.cookies[jwt_auth.JWT_COOKIE_NAME]["secure"])
 
     @override_settings(SESSION_EXPIRE_AT_BROWSER_CLOSE=True)
-    def test_browser_session_cookie_when_session_is(self):
+    def test_browser_session_cookie_when_session_is(self) -> None:
         response = self._login()
         self.assertEqual(response.cookies[jwt_auth.JWT_COOKIE_NAME]["max-age"], "")
 
-    def test_session_without_token_gets_one(self):
+    def test_session_without_token_gets_one(self) -> None:
         # As for a session from before the middleware existed.
         self.client.force_login(self.user)
         response = self.client.get(reverse("admin:index"))
@@ -5701,13 +5748,13 @@ class JWTCookieMiddlewareTests(TestCase):
             str(self.user.pk),
         )
 
-    def test_not_reissued_while_session_unchanged(self):
+    def test_not_reissued_while_session_unchanged(self) -> None:
         self._login()
         response = self.client.get(reverse("admin:index"))
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(jwt_auth.JWT_COOKIE_NAME, response.cookies)
 
-    def test_reissued_when_session_saved(self):
+    def test_reissued_when_session_saved(self) -> None:
         self._login()
         first = self._token()
         with override_settings(SESSION_SAVE_EVERY_REQUEST=True):
@@ -5718,7 +5765,7 @@ class JWTCookieMiddlewareTests(TestCase):
         self.assertGreaterEqual(_decode_jwt(second)["exp"], _decode_jwt(first)["exp"])
         self.assertEqual(self._stored(), {"sub": str(self.user.pk)})
 
-    def test_reissued_on_password_change(self):
+    def test_reissued_on_password_change(self) -> None:
         # update_session_auth_hash() cycles the session key, so it's saved.
         self._login()
         first = self._token()
@@ -5738,7 +5785,7 @@ class JWTCookieMiddlewareTests(TestCase):
         )
         self.assertEqual(self._logged_in_user_id(), str(self.user.pk))
 
-    def test_reissued_when_user_differs(self):
+    def test_reissued_when_user_differs(self) -> None:
         self._login()
         session = self.client.session
         session[jwt_auth.SESSION_KEY] = {**self._stored(), "sub": "someone else"}
@@ -5748,7 +5795,7 @@ class JWTCookieMiddlewareTests(TestCase):
         self.assertIn(jwt_auth.JWT_COOKIE_NAME, response.cookies)
         self.assertEqual(self._stored(), {"sub": str(self.user.pk)})
 
-    def test_concurrently_issued_tokens_all_accepted(self):
+    def test_concurrently_issued_tokens_all_accepted(self) -> None:
         # Two overlapping requests that both re-issue: whichever token the
         # browser keeps, the session (which records neither) accepts it.
         self._login()
@@ -5760,7 +5807,7 @@ class JWTCookieMiddlewareTests(TestCase):
                 self.client.cookies[jwt_auth.JWT_COOKIE_NAME] = token
                 self.assertEqual(self.client.get(reverse("admin:index")).status_code, 200)
 
-    def test_earlier_token_for_session_still_accepted(self):
+    def test_earlier_token_for_session_still_accepted(self) -> None:
         self._login()
         first = self._token()
         with override_settings(SESSION_SAVE_EVERY_REQUEST=True):
@@ -5769,24 +5816,24 @@ class JWTCookieMiddlewareTests(TestCase):
         self.assertEqual(self.client.get(reverse("admin:index")).status_code, 200)
         self.assertEqual(self._logged_in_user_id(), str(self.user.pk))
 
-    def test_logout_clears_cookie(self):
+    def test_logout_clears_cookie(self) -> None:
         self._login()
         response = self.client.post(reverse("admin:logout"))
         self.assertEqual(response.status_code, 200)
         self.assertCookieDeleted(response)
         self.assertIsNone(self._logged_in_user_id())
 
-    def test_cookie_without_session_cleared(self):
+    def test_cookie_without_session_cleared(self) -> None:
         self.client.cookies[jwt_auth.JWT_COOKIE_NAME] = "leftover"
         response = self.client.get(reverse("admin:login"))
         self.assertEqual(response.status_code, 200)
         self.assertCookieDeleted(response)
 
-    def test_no_cookie_set_without_session(self):
+    def test_no_cookie_set_without_session(self) -> None:
         response = self.client.get(reverse("admin:login"))
         self.assertNotIn(jwt_auth.JWT_COOKIE_NAME, response.cookies)
 
-    def test_mismatched_or_missing_cookie_logs_out(self):
+    def test_mismatched_or_missing_cookie_logs_out(self) -> None:
         for cookie in ("tampered", "", None):
             with self.subTest(cookie=cookie):
                 self._login()
@@ -5804,7 +5851,7 @@ class JWTCookieMiddlewareTests(TestCase):
                 if cookie is not None:
                     self.assertCookieDeleted(response)
 
-    def _assert_rejected(self, token, reason):
+    def _assert_rejected(self, token: str, reason: str) -> None:
         self.client.cookies[jwt_auth.JWT_COOKIE_NAME] = token
         with self.assertLogs("lifetracker.core.jwt_auth", "WARNING") as logs:
             response = self.client.get(reverse("admin:index"))
@@ -5812,7 +5859,7 @@ class JWTCookieMiddlewareTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIsNone(self._logged_in_user_id())
 
-    def test_expired_token_rejected(self):
+    def test_expired_token_rejected(self) -> None:
         self._login()
         token = jwt_auth.issue_token(
             self.user,
@@ -5821,7 +5868,7 @@ class JWTCookieMiddlewareTests(TestCase):
         )
         self._assert_rejected(token, "expired")
 
-    def test_token_for_another_user_rejected(self):
+    def test_token_for_another_user_rejected(self) -> None:
         other = User.objects.create_superuser("other", "", self.PASSWORD)
         self._login()
         token = jwt_auth.issue_token(
@@ -5831,20 +5878,20 @@ class JWTCookieMiddlewareTests(TestCase):
         )
         self._assert_rejected(token, "another user")
 
-    def test_token_signed_with_another_key_rejected(self):
+    def test_token_signed_with_another_key_rejected(self) -> None:
         self._login()
         claims = _decode_jwt(self._token())
         token = jwt.encode(claims, Ed25519PrivateKey.generate(), algorithm="EdDSA")
         self._assert_rejected(token, "Signature verification failed")
 
-    def test_token_without_sid_rejected(self):
+    def test_token_without_sid_rejected(self) -> None:
         self._login()
         claims = _decode_jwt(self._token())
         del claims["sid"]
         token = jwt.encode(claims, jwt_auth.signing_key()[0], algorithm="EdDSA")
         self._assert_rejected(token, "sid")
 
-    def test_new_signing_key_logs_out_once(self):
+    def test_new_signing_key_logs_out_once(self) -> None:
         # Nothing rotates the key; a new one only appears if the old file goes.
         self._login()
         temp_dir = tempfile.TemporaryDirectory()
@@ -5857,19 +5904,19 @@ class JWTCookieMiddlewareTests(TestCase):
             self._login()
             self.assertEqual(self.client.get(reverse("admin:index")).status_code, 200)
 
-    def test_token_from_another_session_rejected(self):
+    def test_token_from_another_session_rejected(self) -> None:
         self._login()
         other_token = self._token()
         self.client.logout()
         self._login()
         self._assert_rejected(other_token, "another session")
 
-    def test_whitelisted_paths_need_no_token(self):
+    def test_whitelisted_paths_need_no_token(self) -> None:
         self.assertEqual(self.client.get(reverse("admin:login")).status_code, 200)
         response = self._login()
         self.assertIn(jwt_auth.JWT_COOKIE_NAME, response.cookies)
 
-    def test_mismatched_cookie_logs_out_on_whitelisted_paths_too(self):
+    def test_mismatched_cookie_logs_out_on_whitelisted_paths_too(self) -> None:
         # Otherwise the admin would send it from the login page to the index,
         # which the front proxy would send back to the login page.
         self._login()
@@ -5880,7 +5927,7 @@ class JWTCookieMiddlewareTests(TestCase):
         self.assertIsNone(self._logged_in_user_id())
         self.assertCookieDeleted(response)
 
-    def test_not_issued_on_server_error(self):
+    def test_not_issued_on_server_error(self) -> None:
         # SessionMiddleware doesn't save the session after a 500.
         request = RequestFactory().get("/")
         request.session = SessionStore()

@@ -42,7 +42,7 @@ REPO_ROOT = next(parent for parent in Path(__file__).resolve().parents if (paren
 TEMPLATE = (REPO_ROOT / "envoy" / "envoy.yaml").read_text(encoding="utf-8")
 
 
-def _render(**kwargs):
+def _render(**kwargs: Any) -> str:
     return envoy_config.render(
         TEMPLATE,
         **{
@@ -56,7 +56,7 @@ def _render(**kwargs):
 
 
 class EnvoyConfigRenderTests(SimpleTestCase):
-    def test_fills_in_every_placeholder(self):
+    def test_fills_in_every_placeholder(self) -> None:
         config = _render()
         self.assertNotRegex(config, r"@[A-Z_]+@")
         self.assertIn('address: "0.0.0.0"\n          port_value: 8000\n', config)
@@ -65,16 +65,16 @@ class EnvoyConfigRenderTests(SimpleTestCase):
         self.assertIn(f'audiences: ["{jwt_auth.JWT_AUDIENCE}"]', config)
         self.assertIn(f'from_cookies: ["{jwt_auth.JWT_COOKIE_NAME}"]', config)
 
-    def test_request_log(self):
+    def test_request_log(self) -> None:
         config = _render(request_log=Path("/tmp/requests.jsonl"))
         self.assertIn('path: "/tmp/requests.jsonl"', config)
 
-    def test_jwks_file_comes_from_settings(self):
+    def test_jwks_file_comes_from_settings(self) -> None:
         with override_settings(LIFETRACKER_JWT_JWKS_FILE=Path('/keys/"odd".json')):
             config = _render()
         self.assertIn(r'filename: "/keys/\"odd\".json"', config)
 
-    def test_rules_whitelist_each_path_and_method_then_require_the_jwt(self):
+    def test_rules_whitelist_each_path_and_method_then_require_the_jwt(self) -> None:
         rules = envoy_config.jwt_rules()
         expected = [(entry.path, entry.prefix, method) for entry in auth_whitelist() for method in entry.methods]
         self.assertEqual(
@@ -98,13 +98,13 @@ class EnvoyConfigRenderTests(SimpleTestCase):
         )
         self.assertIn(f"rules: {json.dumps(rules)}\n", _render())
 
-    def test_login_redirect(self):
+    def test_login_redirect(self) -> None:
         self.assertEqual(
             envoy_config.login_redirect(),
             reverse("admin:login") + "?next=%DYNAMIC_METADATA(lifetracker:next)%",
         )
 
-    def test_login_redirect_rejects_percent_in_login_path(self):
+    def test_login_redirect_rejects_percent_in_login_path(self) -> None:
         # It would start a formatter command operator in Envoy's Location.
         with (
             mock.patch.object(envoy_config, "reverse", return_value="/log%20in/"),
@@ -112,7 +112,7 @@ class EnvoyConfigRenderTests(SimpleTestCase):
         ):
             envoy_config.login_redirect()
 
-    def test_rejects_bad_settings(self):
+    def test_rejects_bad_settings(self) -> None:
         cases: list[tuple[dict[str, Any], str]] = [
             ({"listen_host": "localhost"}, "The listen host must be an IP address"),
             ({"listen_host": "0.0.0.0/"}, "The listen host must be an IP address"),
@@ -127,7 +127,7 @@ class EnvoyConfigRenderTests(SimpleTestCase):
             with self.subTest(**kwargs), self.assertRaisesMessage(ValueError, message):
                 _render(**kwargs)
 
-    def test_rejects_unknown_placeholder(self):
+    def test_rejects_unknown_placeholder(self) -> None:
         with self.assertRaisesMessage(ValueError, "@NOPE@"):
             envoy_config.render(
                 "x: @NOPE@\n",
@@ -139,7 +139,7 @@ class EnvoyConfigRenderTests(SimpleTestCase):
 
 
 class EnvoyConfigCommandTests(SimpleTestCase):
-    def test_writes_config_and_creates_key(self):
+    def test_writes_config_and_creates_key(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             temp = Path(tempdir)
             jwks = temp / "jwks.json"
@@ -160,7 +160,7 @@ class EnvoyConfigCommandTests(SimpleTestCase):
             self.assertEqual(output.read_text(), expected)
             self.assertTrue(jwks.exists())
 
-    def test_request_log_when_recording_client_ips(self):
+    def test_request_log_when_recording_client_ips(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             temp = Path(tempdir)
             request_log = temp / "requests.jsonl"
@@ -183,7 +183,7 @@ class EnvoyConfigCommandTests(SimpleTestCase):
             # Deleted, so the collector doesn't count last run's lines again.
             self.assertFalse(request_log.exists())
 
-    def test_reports_bad_settings(self):
+    def test_reports_bad_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             output = Path(tempdir) / "envoy.yaml"
             with self.assertRaisesMessage(CommandError, "The listen and upstream ports must differ: 9000"):
@@ -198,7 +198,7 @@ class EnvoyConfigCommandTests(SimpleTestCase):
             self.assertFalse(output.exists())
 
 
-def _envoy_image():
+def _envoy_image() -> str:
     """The Envoy image the Dockerfile copies Envoy from, so the tests run the
     same version as the container."""
     dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
@@ -208,7 +208,7 @@ def _envoy_image():
     return match.group(1)
 
 
-def _docker():
+def _docker() -> str | None:
     """The docker command, if there is one and its daemon answers."""
     docker = shutil.which("docker")
     if docker is None:
@@ -217,16 +217,17 @@ def _docker():
     return docker if info.returncode == 0 else None
 
 
-def _free_port():
+def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+        port: int = s.getsockname()[1]
+        return port
 
 
 class _EchoHandler(http.server.BaseHTTPRequestHandler):
     """Answers every request with a JSON description of it."""
 
-    def _echo(self):
+    def _echo(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)
         body = json.dumps(
             {
@@ -246,7 +247,7 @@ class _EchoHandler(http.server.BaseHTTPRequestHandler):
 
     do_GET = do_HEAD = do_POST = do_PUT = do_DELETE = do_OPTIONS = _echo
 
-    def log_message(self, format, *args):
+    def log_message(self, format: str, *args: Any) -> None:
         pass
 
 
@@ -259,7 +260,7 @@ class EnvoyAuthTests(SimpleTestCase):
     port: int
 
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls) -> None:
         super().setUpClass()
         envoy = os.environ.get("LIFETRACKER_ENVOY")
         docker = None if envoy else _docker()
@@ -348,7 +349,7 @@ class EnvoyAuthTests(SimpleTestCase):
             text=True,
         )
 
-        def stop():
+        def stop() -> None:
             if docker is not None:
                 subprocess.run([docker, "rm", "-f", container], capture_output=True)
             process.terminate()
@@ -381,7 +382,7 @@ class EnvoyAuthTests(SimpleTestCase):
                 raise RuntimeError(f"Envoy didn't answer within 30 seconds{hint}")
             time.sleep(0.1)
 
-    def _token(self, expires_in=3600, key=None, **claims):
+    def _token(self, expires_in: int = 3600, key: Ed25519PrivateKey | None = None, **claims: Any) -> str:
         """A token as Django issues it, re-signed with ``key`` and ``claims``
         changed if given."""
         expires_at = timezone.now() + datetime.timedelta(seconds=expires_in)
@@ -398,7 +399,15 @@ class EnvoyAuthTests(SimpleTestCase):
             headers={"kid": kid},
         )
 
-    def _request(self, method, path, *, token=None, headers=None, body=None):
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        token: str | None = None,
+        headers: dict[str, str] | None = None,
+        body: str | None = None,
+    ) -> tuple[int, http.client.HTTPMessage, dict[str, Any] | None]:
         """The response's status, headers and, if it got there, the upstream's
         echo (else None)."""
         headers = dict(headers or {})
@@ -416,22 +425,24 @@ class EnvoyAuthTests(SimpleTestCase):
             echoed = json.loads(data) if data else {}
         return response.status, response.headers, echoed
 
-    def assertRedirectsToLogin(self, method, path, next_value, **kwargs):
+    def assertRedirectsToLogin(self, method: str, path: str, next_value: str, **kwargs: Any) -> None:
         status, headers, echoed = self._request(method, path, **kwargs)
         self.assertEqual(status, 302, (method, path))
         self.assertEqual(headers["Location"], f"{reverse('admin:login')}?next={next_value}")
         self.assertIsNone(echoed)
 
-    def assertPassedThrough(self, method, path, upstream_path=None, **kwargs):
+    def assertPassedThrough(
+        self, method: str, path: str, upstream_path: str | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
         status, _, echoed = self._request(method, path, **kwargs)
         self.assertEqual(status, 200, (method, path))
         # The upstream's JSON content type, but no body for a HEAD.
-        self.assertIsNotNone(echoed)
+        assert echoed is not None
         if method != "HEAD":
             self.assertEqual(echoed["path"], upstream_path or path)
         return echoed
 
-    def test_no_jwt_redirects_to_login(self):
+    def test_no_jwt_redirects_to_login(self) -> None:
         self.assertRedirectsToLogin("GET", "/admin/", "/admin/")
         self.assertRedirectsToLogin(
             "POST",
@@ -441,20 +452,20 @@ class EnvoyAuthTests(SimpleTestCase):
         )
         self.assertRedirectsToLogin("GET", "/", "/")
 
-    def test_next_is_percent_encoded_with_query_string(self):
+    def test_next_is_percent_encoded_with_query_string(self) -> None:
         self.assertRedirectsToLogin(
             "GET",
             "/admin/x/?a=1&b=two%20words&c=%2F+",
             "/admin/x/%3Fa%3D1%26b%3Dtwo%2520words%26c%3D%252F%2B",
         )
 
-    def test_valid_jwt_passes_cookie_on(self):
+    def test_valid_jwt_passes_cookie_on(self) -> None:
         token = self._token()
         echoed = self.assertPassedThrough("GET", "/admin/", token=token)
         self.assertEqual(echoed["cookie"], f"other=1; {jwt_auth.JWT_COOKIE_NAME}={token}")
         self.assertPassedThrough("POST", "/admin/taxtracker/item/add/", token=token, body="x=1")
 
-    def test_invalid_jwts_redirect_to_login(self):
+    def test_invalid_jwts_redirect_to_login(self) -> None:
         other_key = Ed25519PrivateKey.generate()
         cases = {
             "garbage": "not-a-jwt",
@@ -472,7 +483,7 @@ class EnvoyAuthTests(SimpleTestCase):
             with self.subTest(name):
                 self.assertRedirectsToLogin("GET", "/admin/", "/admin/", token=token)
 
-    def test_bearer_header(self):
+    def test_bearer_header(self) -> None:
         self.assertPassedThrough("GET", "/admin/", headers={"Authorization": f"Bearer {self._token()}"})
         # Not from a browser, so a 401 rather than a redirect.
         status, headers, echoed = self._request("GET", "/admin/", headers={"Authorization": "Bearer not-a-jwt"})
@@ -480,7 +491,7 @@ class EnvoyAuthTests(SimpleTestCase):
         self.assertNotIn("Location", headers)
         self.assertIsNone(echoed)
 
-    def test_any_invalid_jwt_is_rejected(self):
+    def test_any_invalid_jwt_is_rejected(self) -> None:
         token = self._token()
         self.assertEqual(
             self._request("GET", "/admin/", token=token, headers={"Authorization": "Bearer x"})[0],
@@ -496,7 +507,7 @@ class EnvoyAuthTests(SimpleTestCase):
             401,
         )
 
-    def test_whitelist_needs_no_jwt(self):
+    def test_whitelist_needs_no_jwt(self) -> None:
         for entry in auth_whitelist():
             path = entry.path + ("admin/css/base.css" if entry.prefix else "")
             for method in entry.methods:
@@ -505,16 +516,16 @@ class EnvoyAuthTests(SimpleTestCase):
                     # Nor is a bad one checked.
                     self.assertPassedThrough(method, path, token="not-a-jwt")
 
-    def test_whitelist_ignores_query_string(self):
+    def test_whitelist_ignores_query_string(self) -> None:
         self.assertPassedThrough("GET", "/admin/login/?next=/admin/")
 
-    def test_whitelisted_paths_need_jwt_for_other_methods(self):
+    def test_whitelisted_paths_need_jwt_for_other_methods(self) -> None:
         self.assertRedirectsToLogin("GET", "/admin/logout/", "/admin/logout/")
         self.assertRedirectsToLogin("POST", "/healthz/", "/healthz/")
         self.assertRedirectsToLogin("DELETE", "/admin/login/", "/admin/login/")
         self.assertRedirectsToLogin("POST", "/static/x.css", "/static/x.css")
 
-    def test_whitelist_matches_exactly(self):
+    def test_whitelist_matches_exactly(self) -> None:
         for path in (
             "/admin/login",
             "/admin/login/x",
@@ -526,7 +537,7 @@ class EnvoyAuthTests(SimpleTestCase):
             with self.subTest(path):
                 self.assertEqual(self._request("GET", path)[0], 302)
 
-    def test_path_normalisation_cant_reach_another_view_via_the_whitelist(self):
+    def test_path_normalisation_cant_reach_another_view_via_the_whitelist(self) -> None:
         # Each normalises to a path that needs a JWT.
         for path, normalised in (
             ("/static/../admin/", "/admin/"),
@@ -540,7 +551,7 @@ class EnvoyAuthTests(SimpleTestCase):
             with self.subTest(path):
                 self.assertRedirectsToLogin("GET", path, normalised)
 
-    def test_path_normalisation_is_what_upstream_gets(self):
+    def test_path_normalisation_is_what_upstream_gets(self) -> None:
         for path, normalised in (
             ("//admin//login/", "/admin/login/"),
             ("/admin/x/../login/", "/admin/login/"),
@@ -550,7 +561,7 @@ class EnvoyAuthTests(SimpleTestCase):
             with self.subTest(path):
                 self.assertPassedThrough("GET", path, upstream_path=normalised)
 
-    def test_escaped_slashes_are_rejected(self):
+    def test_escaped_slashes_are_rejected(self) -> None:
         for path in (
             "/static/..%2Fadmin/",
             "/static/..%2fadmin/",
@@ -561,7 +572,7 @@ class EnvoyAuthTests(SimpleTestCase):
                 self.assertEqual(status, 400)
                 self.assertIsNone(echoed)
 
-    def _logged_requests(self, user_agent):
+    def _logged_requests(self, user_agent: str) -> list[client_ips.Request]:
         """The request log's entries for requests with ``user_agent``, once
         Envoy has written them (it flushes every 10 seconds)."""
         deadline = time.monotonic() + 20
@@ -576,7 +587,7 @@ class EnvoyAuthTests(SimpleTestCase):
                 return found
             time.sleep(0.2)
 
-    def test_request_log(self):
+    def test_request_log(self) -> None:
         user_agent = f"test-{uuid.uuid4().hex}"
         headers = {"User-Agent": user_agent, "Fly-Client-IP": "203.0.113.7"}
         self.assertRedirectsToLogin("GET", "/admin/?a=1", "/admin/%3Fa%3D1", headers=headers)

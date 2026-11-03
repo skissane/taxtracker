@@ -8,14 +8,21 @@ gitignored `screenshots/` directory.
 
 import datetime
 import json
+from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Page, sync_playwright
+from pytest_django.fixtures import Settings
+from pytest_django.live_server_helper import LiveServer
 
 from lifetracker.core import client_ips, uptime_log
 from tests.core.mmdb_writer import write_mmdb
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import User
 
 SCREENSHOT_DIR = Path(__file__).resolve().parent.parent / "screenshots"
 
@@ -25,7 +32,7 @@ SCREENSHOT_DIR = Path(__file__).resolve().parent.parent / "screenshots"
 # the test database exists, so it can't share the in-memory SQLite connection,
 # and its request threads open connections that Django never closes.
 @pytest.fixture
-def page(transactional_db, live_server, settings):
+def page(transactional_db: None, live_server: LiveServer, settings: Settings) -> Iterator[Page]:
     # The admin header shows this, which otherwise defaults to the machine's
     # hostname; fix it so screenshots don't vary between machines.
     settings.LIFETRACKER_BACKUP_HOSTNAME = "screenshots.example"
@@ -46,13 +53,13 @@ def page(transactional_db, live_server, settings):
 
 # Each screen is captured in both colour schemes. Switching the emulated scheme
 # re-renders the current page in place, so nothing needs reloading in between.
-def _screenshot(page, name):
+def _screenshot(page: Page, name: str) -> None:
     for color_scheme in ("light", "dark"):
         page.emulate_media(color_scheme=color_scheme)
         page.screenshot(path=SCREENSHOT_DIR / f"{name}-{color_scheme}.png", full_page=True)
 
 
-def test_login(page, settings):
+def test_login(page: Page, settings: Settings) -> None:
     # Enough Google SSO config to show its "Sign in with Google" button; the
     # credentials are fake, so the button itself wouldn't work.
     settings.GOOGLE_SSO_ENABLED = True
@@ -64,7 +71,7 @@ def test_login(page, settings):
 
 # admin_user before page: Django refuses ORM calls while Playwright's event loop
 # is running, so the user must be created before the browser starts.
-def _log_in(page, user):
+def _log_in(page: Page, user: User) -> None:
     page.goto("/admin/login/")
     page.fill("input[name=username]", user.username)
     page.fill("input[name=password]", "password")
@@ -72,18 +79,18 @@ def _log_in(page, user):
     page.wait_for_url("**/admin/")
 
 
-def test_index(admin_user, page):
+def test_index(admin_user: User, page: Page) -> None:
     _log_in(page, admin_user)
     _screenshot(page, "index")
 
 
-def test_backups(admin_user, page):
+def test_backups(admin_user: User, page: Page) -> None:
     _log_in(page, admin_user)
     page.goto("/admin/core/cloudbackupstatus/")
     _screenshot(page, "backups")
 
 
-def test_cloud_backup_list(admin_user, page, settings):
+def test_cloud_backup_list(admin_user: User, page: Page, settings: Settings) -> None:
     # Fake settings and a mocked S3 client, so the page lists made-up backups
     # without touching a real bucket.
     settings.LIFETRACKER_BACKUP_S3_BUCKET_NAME = "screenshots-bucket"
@@ -112,11 +119,11 @@ def test_cloud_backup_list(admin_user, page, settings):
         _screenshot(page, "cloud-backup-list")
 
 
-def test_idle_watchdog(admin_user, page, monkeypatch, tmp_path):
+def test_idle_watchdog(admin_user: User, page: Page, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # A made-up status, as the watchdog would write it mid-SSH-session.
     now = datetime.datetime.now(datetime.UTC).replace(microsecond=0)
 
-    def iso(minutes_ago):
+    def iso(minutes_ago: float) -> str:
         return (now - datetime.timedelta(minutes=minutes_ago)).isoformat()
 
     status_file = tmp_path / "status.json"
@@ -148,7 +155,7 @@ def test_idle_watchdog(admin_user, page, monkeypatch, tmp_path):
     _screenshot(page, "idle-watchdog")
 
 
-def test_uptime(admin_user, page, monkeypatch, tmp_path):
+def test_uptime(admin_user: User, page: Page, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # A made-up week: each earlier day up for a few hours in two spans (so two
     # starts), one day not at all, and today since the start of the UTC day or
     # for the last three hours, whichever is shorter.
@@ -171,7 +178,7 @@ def test_uptime(admin_user, page, monkeypatch, tmp_path):
     _screenshot(page, "uptime-day")
 
 
-def test_client_ips(admin_user, page, monkeypatch, tmp_path):
+def test_client_ips(admin_user: User, page: Page, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # A few made-up IPs (from the documentation ranges): the owner's home and
     # phone networks, logged in, the phone's through iCloud Private Relay, and
     # three scanners Envoy turned away, one over IPv6.
@@ -308,7 +315,7 @@ def test_client_ips(admin_user, page, monkeypatch, tmp_path):
     _screenshot(page, "client-ips")
 
 
-def test_app_icon(admin_user, page):
+def test_app_icon(admin_user: User, page: Page) -> None:
     _log_in(page, admin_user)
     page.goto("/admin/app-icon/")
     _screenshot(page, "app-icon")

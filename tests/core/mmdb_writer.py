@@ -8,11 +8,12 @@ import it before Django is set up.
 import ipaddress
 import struct
 from pathlib import Path
+from typing import Any
 
 _METADATA_MARKER = b"\xab\xcd\xefMaxMind.com"
 
 
-def _control(type_, size):
+def _control(type_: int, size: int) -> bytes:
     extended = type_ > 7
     first = (0 if extended else type_) << 5
     if size < 29:
@@ -32,7 +33,7 @@ class _UInt64(int):
     pass
 
 
-def _encode(value):
+def _encode(value: object) -> bytes:
     if isinstance(value, dict):
         return _control(7, len(value)) + b"".join(_encode(k) + _encode(v) for k, v in value.items())
     if isinstance(value, list):
@@ -49,7 +50,7 @@ def _encode(value):
     raise TypeError(value)
 
 
-def write_mmdb(path, networks, database_type="DBIP-Test"):
+def write_mmdb(path: Path | str, networks: dict[str, dict[str, Any]], database_type: str = "DBIP-Test") -> None:
     """Write ``networks`` ({"203.0.113.0/24": record, ...}) as a MaxMind DB."""
     nodes: list[list[tuple[str, int] | None]] = [[None, None]]
     data = b""
@@ -77,7 +78,7 @@ def write_mmdb(path, networks, database_type="DBIP-Test"):
                 node = child[1]
     count = len(nodes)
 
-    def record_value(entry):
+    def record_value(entry: tuple[str, int] | None) -> int:
         if entry is None:
             return count
         kind, number = entry
@@ -100,7 +101,7 @@ def write_mmdb(path, networks, database_type="DBIP-Test"):
     Path(path).write_bytes(tree + b"\0" * 16 + data + _METADATA_MARKER + _encode(metadata))
 
 
-def write_geoip(directory, month="2026-10"):
+def write_geoip(directory: Path, month: str = "2026-10") -> None:
     directory.mkdir(parents=True, exist_ok=True)
     write_mmdb(
         directory / f"dbip-country-lite-{month}.mmdb",
