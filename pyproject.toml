@@ -34,6 +34,7 @@ dev = [
     "diff-cover>=11.0.0",
     "django-stubs[compatible-mypy]>=6.1.2",
     "djlint>=1.47.0",
+    "exolot>=0.2.0",
     "jactionlint>=2.3.0",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
@@ -45,6 +46,14 @@ dev = [
 screenshots = [
     "playwright>=1.64.1",
 ]
+
+# The policy at the top of the exolot PR comment (see AGENTS.md).
+[tool.exolot]
+preamble = """
+**For information only.** Fix the findings worth fixing; it's fine to ignore the rest, which don't block the PR, \
+and there's no need to suppress them with a rules file, `NOSONAR` or `noqa`. \
+See [AGENTS.md](https://github.com/skissane/taxtracker/blob/master/AGENTS.md) for more.
+"""
 
 [tool.ruff]
 line-length = 120

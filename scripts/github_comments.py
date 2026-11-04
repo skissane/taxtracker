@@ -115,3 +115,51 @@ def upsert_comment(repo: str, pr: int, author: str, marker: str, body: str, toke
             request("DELETE", f"{comments_url}/{comment['id']}", token)
     else:
         request("POST", f"{API_URL}/repos/{repo}/issues/{pr}/comments", token, json_body={"body": body})
+
+
+def graphql(query: str, variables: dict[str, Any], token: str) -> dict[str, Any]:
+    """Run a GraphQL query or mutation and return its data, raising
+    RuntimeError if GitHub reports errors (which it does with HTTP 200)."""
+    result = request("POST", f"{API_URL}/graphql", token, json_body={"query": query, "variables": variables})
+    if result.get("errors"):
+        raise RuntimeError(f"GraphQL errors: {json.dumps(result['errors'])}")
+    data: dict[str, Any] = result["data"]
+    return data
+
+
+_MY_COMMENTS = """
+query($owner: String!, $name: String!, $pr: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $pr) {
+      comments(first: 100, after: $cursor) {
+        nodes { id isMinimized viewerDidAuthor body }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}"""
+
+_MINIMIZE = """
+mutation($id: ID!) {
+  minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { clientMutationId }
+}"""
+
+
+def hide_comments(repo: str, pr: int, marker: str, token: str, *, keep: str | None = None) -> int:
+    """Hide as outdated every comment on pr that token's user posted whose body
+    starts with marker and isn't hidden yet, except the one whose node ID is
+    keep. Matching the author means nobody else's comment can be hidden by
+    copying the marker. Returns how many it hid."""
+    owner, name = repo.split("/", 1)
+    hidden = 0
+    cursor = None
+    while True:
+        variables = {"owner": owner, "name": name, "pr": pr, "cursor": cursor}
+        comments = graphql(_MY_COMMENTS, variables, token)["repository"]["pullRequest"]["comments"]
+        for c in comments["nodes"]:
+            if c["viewerDidAuthor"] and not c["isMinimized"] and c["body"].startswith(marker) and c["id"] != keep:
+                graphql(_MINIMIZE, {"id": c["id"]}, token)
+                hidden += 1
+        if not comments["pageInfo"]["hasNextPage"]:
+            return hidden
+        cursor = comments["pageInfo"]["endCursor"]

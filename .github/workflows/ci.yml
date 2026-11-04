@@ -328,6 +328,129 @@ jobs:
         # GITHUB_TOKEN can't look up its own login, so name it.
         run: just patch-coverage-post "$PR_NUMBER" --commit "$HEAD_SHA" --run-url "$RUN_URL" --author 'github-actions[bot]'
 
+  # Runs exolot on this repo's code, for information only: --exit-zero, so its
+  # findings never fail the job (only a failed analysis does). It reports them
+  # as annotations, in the job summary and, on PRs, through post-exolot as a PR
+  # comment, with the ones on lines the PR changes first. See AGENTS.md.
+  exolot:
+    needs: dependabot-fix
+    if: ${{ always() && (needs.dependabot-fix.result == 'skipped' || needs.dependabot-fix.outputs.pushed_changes == 'false') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      EXOLOT_CACHE_DIR: ${{ github.workspace }}/.exolot-cache
+
+    steps:
+      # The PR's head rather than its merge with the base, so the findings'
+      # line numbers and links match the PR's code. Full history so --diff-base
+      # can find the lines the PR changes.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+
+      - name: Set up Python
+        run: uv python install 3.14.9
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+        with:
+          just-version: "1.58.0"
+
+      - name: Install dependencies
+        run: just sync
+
+      - name: Get pinned server version
+        id: server
+        run: |
+          echo "version=$(uv run --no-sync python -c 'from exolot.server import DEFAULT_SERVER_VERSION as v; print(v)')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache language server
+        uses: actions/cache@v4
+        with:
+          path: .exolot-cache/servers
+          key: exolot-server-${{ runner.os }}-${{ runner.arch }}-${{ steps.server.outputs.version }}
+
+      # On PRs, --diff-base marks the findings on lines the PR changes. The
+      # report links to the checked-out commit and this run, and starts with
+      # the preamble in pyproject.toml's [tool.exolot]. --annotations also
+      # prints the findings on stderr, which the runner shows as annotations
+      # on the PR's diff (changed lines first, as GitHub shows only 10 per type).
+      - name: Analyze with exolot
+        run: |
+          args=(--exit-zero --format github-comment --annotations)
+          if [ -n "$BASE_REF" ]; then
+            args+=(--diff-base "origin/${BASE_REF}")
+          fi
+          just exolot "${args[@]}" > exolot.md
+          cat exolot.md >> "$GITHUB_STEP_SUMMARY"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+
+      # For post-exolot to post to the PR.
+      - name: Upload report
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: exolot
+          path: exolot.md
+          retention-days: 14
+
+  # Posts the exolot job's report to the PR as a new github-actions[bot]
+  # comment, and hides the ones earlier runs posted as outdated. The same
+  # conditions and precautions as post-patch-coverage: only same-repo,
+  # non-Dependabot PRs; queued per PR; posts only if HEAD_SHA is still the PR's
+  # head; runs only the PR's stdlib-only script, without installing the
+  # project, beside its token.
+  post-exolot:
+    needs: exolot
+    # !cancelled() as dependabot-fix, an ancestor, is skipped on most runs.
+    if: ${{ !cancelled() && needs.exolot.result == 'success' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: post-exolot-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+
+      - name: Set up Python
+        run: uv python install 3.14.9
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+        with:
+          just-version: "1.58.0"
+
+      - name: Download report
+        uses: actions/download-artifact@v4
+        with:
+          name: exolot
+
+      - name: Post report to the PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: just exolot-post "$PR_NUMBER" exolot.md --commit "$HEAD_SHA"
+
   # Runs on a Dependabot branch, whose bumped dependency we don't trust, so the
   # write-capable DEPENDABOT_FIX_TOKEN is only exposed to the final push step:
   # checkout doesn't persist credentials, and nothing installs the project or its

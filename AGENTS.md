@@ -12,7 +12,7 @@ Keep to this when editing them: put each new sentence on its own line, don't rew
 
 ## Commands
 
-CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `sentence-per-line-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `mypy`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `coverage`, `patch-coverage`, `patch-coverage-post`, `screenshots`, `screenshots-post`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
+CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `sentence-per-line-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `mypy`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `coverage`, `patch-coverage`, `patch-coverage-post`, `screenshots`, `screenshots-post`, `exolot`, `exolot-post`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
 `just ci` drifts from `ci.yml` if the workflow changes without a matching justfile edit; `run_workflow_local.py` avoids that by parsing the workflow YAML directly and running its `run:` steps as written (see its docstring for what it does and doesn't support).
 After `just coverage` runs, CI uploads `coverage.xml` to Codecov (`codecov/codecov-action`), and also uploads the `junit.xml` test results it writes for Codecov Test Analytics (`report_type: test_results`, even if the tests failed; not `codecov/test-results-action`, which is deprecated); these steps need a `CODECOV_TOKEN` repo secret from codecov.io and are skipped by `run_workflow_local.py` since they're `uses:` steps.
 Codecov works out a PR's comparison with its base commit's report only when the PR's own upload is processed, and never redoes it when the base's report arrives later, so a stacked PR rebased onto `master` as its parent merges (whose CI races `master`'s, which uploads last as it saves the Docker image first) got "Please upload report for BASE".
@@ -20,7 +20,7 @@ So on PRs, the `test` job first runs `scripts/wait_for_base_coverage.py` (stdlib
 It never fails the job, only prints a warning annotation when it gives up, as a broken `master` mustn't fail the required `test` check of the PR fixing it.
 `codecov.yml` sets `if_not_found: failure` on the project status, so then `codecov/project` fails (it passes by default); re-run the PR's `test` job once the base has uploaded.
 That only applies when Codecov knows the base commit but has no report for it; for a commit it has never heard of, Codecov compares with the newest earlier commit on the base branch that passed CI instead (`allow_pseudo_compare`, which despite Codecov's docs affects only its web UI, not the statuses).
-`ci.yml` has eight jobs, `test`, `post-patch-coverage` (see Patch coverage), `screenshots` and `post-screenshots` (see Screenshots), `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment); `run_workflow_local.py` runs the first job in the file unless given `--job`, so keep `test` first.
+`ci.yml` has ten jobs, `test`, `post-patch-coverage` (see Patch coverage), `exolot` and `post-exolot` (see Exolot), `screenshots` and `post-screenshots` (see Screenshots), `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment); `run_workflow_local.py` runs the first job in the file unless given `--job`, so keep `test` first.
 Don't run `--job dependabot-fix`, `--job publish` or `--job deploy` locally: it doesn't evaluate `if:`, so it would push commits to the current branch, push to GHCR or deploy to production.
 
 **PR Fixes:** `.github/workflows/fix.yml` (issue #254) is run by hand (`workflow_dispatch`) on an open PR's branch.
@@ -99,6 +99,12 @@ just screenshots
 
 # Post screenshots/ to PR 123 as a comment, or update it (as gh's logged-in user)
 just screenshots-post 123
+
+# Run exolot on this repo's code (extra arguments go to exolot, e.g. --exit-zero --diff-base origin/master --changed-only)
+just exolot
+
+# Post a `just exolot --format github-comment` report (exolot.md) to PR 123 as a new comment, hiding earlier ones
+just exolot-post 123 exolot.md
 
 # Lint (matches `just lint`/`just fmt-check`, which check the whole repo root)
 uv run ruff check .
@@ -485,6 +491,21 @@ Don't point Fly's `[[http_service.checks]]` at it: each request touches the idle
 On every run, PRs included, the `check-fly` job fails the build unless `FLY_APP` and `FLY_API_TOKEN` are set and `flyctl status -a "$FLY_APP"` succeeds with that token (not `flyctl apps list`, which a deploy token isn't authorised for), and `deploy` also waits on it; it's skipped when `github.actor` is `dependabot[bot]`, whose runs don't get the repo's Actions secrets, but PRs from forks (likewise without them) fail it.
 `fly.toml`'s `[build] image` is `:latest`, so a manual `fly deploy` redeploys master's most recently published image; to deploy local changes, publish them through CI rather than building on Fly.
 Every boot runs `migrate` against the only copy of the data, so run a cloud backup before merging a risky migration (Fly's daily volume snapshots are the only automatic fallback).
+
+## Exolot
+
+CI's `exolot` job runs [exolot](https://github.com/skissane/exolot) (SonarQube for IDE's analysers, no account needed; a dev dependency) on this repo's code: `just exolot --exit-zero --diff-base origin/<base branch>` on PRs, which you can run yourself, adding `--changed-only` to see just the findings on lines you changed (it downloads the language server, about 250 MB, on first run, so `just ci` leaves it out).
+It shows the findings as annotations on the PR's diff (`--annotations`), lists them in its job summary and, on PRs from this repository other than Dependabot's, posts them as a PR comment (made with `--format github-comment`, which starts it with the policy in `pyproject.toml`'s `[tool.exolot]` `preamble`, and posted by the `post-exolot` job, `scripts/post_exolot_findings.py`), with the ones on lines the PR changes first.
+Each run posts a new comment and hides the previous run's as outdated (found by a hidden `<!-- lifetracker-exolot-findings -->` marker and by being authored by the token's user), unlike the patch coverage and screenshot comments, which are edited in place.
+Like them it posts nothing unless `--commit` is still the PR's head, and runs only the stdlib-only script, with `GITHUB_TOKEN` (`pull-requests: write`), installing nothing.
+The `exolot` job checks out the PR's head rather than its merge with the base, so the findings' line numbers and links match the PR's code.
+The findings are for information only: `--exit-zero` means findings never fail the job, though a failed analysis still does.
+
+- Use your judgement: fix a finding when it points at a real bug or a change that makes the code clearer, and ignore the rest, e.g. cognitive-complexity warnings on code that's clear enough as it is.
+- Pay most attention to findings on lines your PR changes.
+  Don't widen a PR to fix findings elsewhere unless asked.
+- A finding you've chosen to ignore doesn't block a PR, and needs no reply or explanation.
+- Don't suppress an ignored finding: no `NOSONAR` or `noqa` comments, and no `--rules` file to turn rules off.
 
 ## Linting config
 

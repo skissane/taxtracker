@@ -138,6 +138,23 @@ screenshots-post *args:
 patch-coverage-post *args:
     uv run --no-project python -m scripts.post_patch_coverage "$@"
 
+# Run exolot on this repo's code; extra args go to exolot, e.g. --exit-zero. Like
+# `just integration` in exolot, it downloads the language server (about 250 MB)
+# on first run, so `just ci` leaves it out; CI's exolot job runs it.
+
+# Analyze this repo's code with exolot
+[positional-arguments]
+exolot *args:
+    uv run --group dev exolot "$@"
+
+# --no-project, like patch-coverage-post, as CI runs it with a write-capable
+# token; the script uses only the stdlib, so the project isn't installed.
+
+# Post a `just exolot --format github-comment` report to a PR, hiding the ones posted before: arguments are the PR number and the report
+[positional-arguments]
+exolot-post *args:
+    uv run --no-project python -m scripts.post_exolot_findings "$@"
+
 # Build the container image
 docker-build:
     docker build --build-arg LIFETRACKER_COMMIT_ID="$(git rev-parse HEAD)" -t lifetracker .
