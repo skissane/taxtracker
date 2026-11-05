@@ -372,11 +372,11 @@ wheels = [
 
 [[package]]
 name = "exolot"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b7/05/c01a223c6b3ec3e89e131aa755e39f402be4493120c2f03e24eee6d3e3f3/exolot-0.2.0.tar.gz", hash = "sha256:d81332b13b168756aa1d97ed16e9774cf8ded719b2a96d8a18a58645abde441a", size = 193856, upload-time = "2026-11-04T14:33:01.94Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d0/59/21fa1d084ccc3837072db48bbcff6efecf501463ba6be5c6b83de5d2900d/exolot-0.2.1.tar.gz", hash = "sha256:cda26cf8797e1d6f0567fdef4cfb9e7393738e6a1d8636dbd0b2f764685aa59c", size = 200890, upload-time = "2026-11-05T13:48:13.808Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/dc/60/e747d40dd1135ee17e5dd8eb53f30bdf8325aef5076ec5f5ab66d01ac016/exolot-0.2.0-py3-none-any.whl", hash = "sha256:cbff0fed7cb5c762dd93fcdbaa9d68c5a65b813d1c72d355f1b9e4790ba044b2", size = 52010, upload-time = "2026-11-04T14:33:00.72Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/36/ab11c471ef495d76019d9e6c0ab72ff96fe0436b2b161289150b19088220/exolot-0.2.1-py3-none-any.whl", hash = "sha256:b65c9ac1ce40461bfc9a790593f9fc68a21fef254d48d16b96bc69d41ee3e379", size = 52010, upload-time = "2026-11-05T13:48:12.321Z" },
 ]
 
 [[package]]
@@ -608,7 +608,7 @@ dev = [
     { name = "diff-cover", specifier = ">=11.0.0" },
     { name = "django-stubs", extras = ["compatible-mypy"], specifier = ">=6.1.2" },
     { name = "djlint", specifier = ">=1.47.0" },
-    { name = "exolot", specifier = ">=0.2.0" },
+    { name = "exolot", specifier = ">=0.2.1" },
     { name = "jactionlint", specifier = ">=2.3.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
