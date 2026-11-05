@@ -371,6 +371,15 @@ wheels = [
 ]
 
 [[package]]
+name = "exolot"
+version = "0.2.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d0/59/21fa1d084ccc3837072db48bbcff6efecf501463ba6be5c6b83de5d2900d/exolot-0.2.1.tar.gz", hash = "sha256:cda26cf8797e1d6f0567fdef4cfb9e7393738e6a1d8636dbd0b2f764685aa59c", size = 200890, upload-time = "2026-11-05T13:48:13.808Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4f/36/ab11c471ef495d76019d9e6c0ab72ff96fe0436b2b161289150b19088220/exolot-0.2.1-py3-none-any.whl", hash = "sha256:b65c9ac1ce40461bfc9a790593f9fc68a21fef254d48d16b96bc69d41ee3e379", size = 52010, upload-time = "2026-11-05T13:48:12.321Z" },
+]
+
+[[package]]
 name = "google-auth"
 version = "2.62.0"
 source = { registry = "https://pypi.org/simple" }
@@ -565,6 +574,7 @@ dev = [
     { name = "diff-cover" },
     { name = "django-stubs", extra = ["compatible-mypy"] },
     { name = "djlint" },
+    { name = "exolot" },
     { name = "jactionlint" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -598,6 +608,7 @@ dev = [
     { name = "diff-cover", specifier = ">=11.0.0" },
     { name = "django-stubs", extras = ["compatible-mypy"], specifier = ">=6.1.2" },
     { name = "djlint", specifier = ">=1.47.0" },
+    { name = "exolot", specifier = ">=0.2.1" },
     { name = "jactionlint", specifier = ">=2.3.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
