@@ -41,3 +41,7 @@ junit.xml
 
 # Docker image saved by CI for the publish job
 lifetracker-image.tar
+
+# exolot's cache in CI (EXOLOT_CACHE_DIR). Ignored so exolot, which analyzes
+# untracked files that aren't ignored, skips the language server restored there.
+.exolot-cache/
