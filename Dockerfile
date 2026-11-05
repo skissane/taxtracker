@@ -62,9 +62,7 @@ RUN groupdel dialout \
 COPY --from=builder /app /app
 COPY --from=envoy /usr/local/bin/envoy /usr/local/bin/envoy
 COPY envoy/envoy.yaml /app/envoy/envoy.yaml
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN mkdir /data && chown lifetracker:lifetracker /data
 VOLUME /data
