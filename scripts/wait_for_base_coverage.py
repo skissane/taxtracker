@@ -61,7 +61,7 @@ def codecov_coverage(repo: str, sha: str, timeout: float) -> tuple[bool, str]:
     url = f"{CODECOV_API}/{owner}/repos/{name}/totals/?{urllib.parse.urlencode({'sha': sha})}"
     try:
         status, body = _get_json(url, {}, timeout)
-    except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
+    except (OSError, http.client.HTTPException) as e:
         return False, f"request failed: {getattr(e, 'reason', e)}"
     if status == 404:
         # Both an unknown commit and one without a processed report.
@@ -88,7 +88,7 @@ def base_ci_state(repo: str, sha: str, check_name: str, token: str | None, timeo
         headers["Authorization"] = f"Bearer {token}"
     try:
         status, body = _get_json(url, headers, timeout)
-    except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
+    except (OSError, http.client.HTTPException) as e:
         return "running", f"request failed: {getattr(e, 'reason', e)}"
     runs = body.get("check_runs") if status == 200 and isinstance(body, dict) else None
     if not isinstance(runs, list):
