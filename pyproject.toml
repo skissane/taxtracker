@@ -68,6 +68,22 @@ See [AGENTS.md](https://github.com/skissane/taxtracker/blob/master/AGENTS.md) fo
 "python:S117" = { level = "off" }
 # <li> outside <ul>/<ol>: the admin's object-tools blocks are inside the parent template's <ul>.
 "Web:ItemTagNotWithinContainerTagCheck" = { level = "off" }
+# Invariant return value: exit-code functions that deliberately always succeed, and views returning the response
+# they modified.
+"python:S3516" = { level = "off" }
+# Argument types: strict mypy checks these, and better (this rule misreads policy.default's EmailMessage).
+"python:S5655" = { level = "off" }
+# ModelForm fields = "__all__": the forms are only used by the admin, which picks the fields itself.
+"python:S6559" = { level = "off" }
+# Consecutive append() calls: appending output lines one at a time is no less clear than extend().
+"python:S9409" = { level = "off" }
+# Publicly writable directories and world-readable file modes: the app has one user and runs only in its own
+# container or on its owner's machine, so there's no other local user to guard against.
+"python:S5443" = { level = "off" }
+"python:S2612" = { level = "off" }
+# Accessibility: the app's one user doesn't need it.
+"Web:S6819" = { level = "off" }
+"Web:InputWithoutLabelCheck" = { level = "off" }
 
 [tool.ruff]
 line-length = 120

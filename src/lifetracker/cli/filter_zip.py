@@ -15,22 +15,24 @@ def filter_zip(input_path: str | Path, output_path: str | Path, reject_substring
 
     try:
         # Open the input zip for reading and the output zip for writing
-        with zipfile.ZipFile(input_path, "r") as zin:
-            with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
-                skipped_count = 0
-                kept_count = 0
+        with (
+            zipfile.ZipFile(input_path, "r") as zin,
+            zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zout,
+        ):
+            skipped_count = 0
+            kept_count = 0
 
-                # Iterate through all members in the input archive
-                for item in zin.infolist():
-                    if reject_substring in item.filename:
-                        skipped_count += 1
-                        continue  # Skip this file
+            # Iterate through all members in the input archive
+            for item in zin.infolist():
+                if reject_substring in item.filename:
+                    skipped_count += 1
+                    continue  # Skip this file
 
-                    # Read the file content from the source zip
-                    content = zin.read(item.filename)
-                    # Write it to the destination zip, preserving original metadata
-                    zout.writestr(item, content)
-                    kept_count += 1
+                # Read the file content from the source zip
+                content = zin.read(item.filename)
+                # Write it to the destination zip, preserving original metadata
+                zout.writestr(item, content)
+                kept_count += 1
 
         click.echo(f"SUCCESS: Created {output_path!r}")
         click.echo(f"Files kept: {kept_count} | Files skipped: {skipped_count}")

@@ -321,9 +321,8 @@ def _download(url: str, destination: Path) -> bool:
         response.raise_for_status()
         fd, temp_name = tempfile.mkstemp(dir=destination.parent, prefix=f".{destination.name}.")
         try:
-            with os.fdopen(fd, "wb") as temp_file:
-                with gzip.GzipFile(fileobj=response.raw) as unzipped:
-                    shutil.copyfileobj(unzipped, temp_file)
+            with os.fdopen(fd, "wb") as temp_file, gzip.GzipFile(fileobj=response.raw) as unzipped:
+                shutil.copyfileobj(unzipped, temp_file)
             maxminddb.open_database(temp_name).close()
             os.chmod(temp_name, 0o644)
             os.replace(temp_name, destination)
@@ -752,11 +751,19 @@ def record(connection: sqlite3.Connection, requests_: Iterable[Request], geoip: 
 
 
 def _min(a: float | None, b: float | None) -> float | None:
-    return b if a is None else a if b is None else min(a, b)
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return min(a, b)
 
 
 def _max(a: float | None, b: float | None) -> float | None:
-    return b if a is None else a if b is None else max(a, b)
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return max(a, b)
 
 
 def _merge(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
