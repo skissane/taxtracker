@@ -36,7 +36,7 @@ from lifetracker.taxtracker.models import (
     Item,
     ReceivedDocument,
 )
-from lifetracker.taxtracker.zip_export import adjust_notes_headings
+from lifetracker.taxtracker.zip_export import _folder_path, adjust_notes_headings, build_fy_index_md
 
 
 class FinancialYearModelTests(TestCase):
@@ -1868,6 +1868,42 @@ class AdjustNotesHeadingsTests(TestCase):
         result = adjust_notes_headings(notes, 2)
         self.assertIn("### Real heading", result)
         self.assertIn("This has a # in the middle", result)
+
+
+class BuildFyIndexMdTests(TestCase):
+    """build_fy_index_md() without a ZipFile, as the View Index action calls it."""
+
+    def setUp(self) -> None:
+        self.fy = FinancialYear.objects.create(year=2024)
+        self.item = Item.objects.create(year=self.fy, title="Income", order=1)
+
+    def test_lists_attachment_type_path_and_notes(self) -> None:
+        file_type = FileType.objects.create(short_name="PDF", full_name="PDF Document")
+        Attachment.objects.create(
+            item=self.item,
+            title="Payslip",
+            file=ContentFile(b"data", name="payslip.pdf"),
+            file_type=file_type,
+            notes="From employer",
+        )
+        index = build_fy_index_md(self.fy, prefix="FY2024/")
+        self.assertIn(f"- **Payslip** ({file_type}) → `FY2024/Income/payslip.pdf`\n", index)
+        self.assertIn("  From employer\n", index)
+
+    def test_marks_attachment_with_missing_stored_file(self) -> None:
+        attachment = Attachment.objects.create(
+            item=self.item,
+            title="Gone",
+            file=ContentFile(b"data", name="gone.pdf"),
+        )
+        stored_pk = int((attachment.file.name or "").split("/")[1])
+        DBStoredFile.objects.filter(pk=stored_pk).delete()
+        index = build_fy_index_md(self.fy)
+        self.assertIn("- **Gone** [MISSING]\n", index)
+
+    def test_folder_path_of_child_item(self) -> None:
+        child = Item.objects.create(year=self.fy, parent=self.item, title="Pay slips", order=1)
+        self.assertEqual(_folder_path(child, {}), "Income/Pay_slips")
 
 
 class ZipIndexHeadingAdjustmentTests(TestCase):
