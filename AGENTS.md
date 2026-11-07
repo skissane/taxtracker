@@ -380,7 +380,7 @@ Both ZIPs are built in a `SpooledTemporaryFile` (in memory up to `ZIP_SPOOL_MAX_
 - Items appear in the index only if they have attachments or notes.
 - ATX headings in `item.notes` are re-levelled so the shallowest heading becomes `item_heading_level + 1` (implemented in `adjust_notes_headings`).
   Lines inside fenced code blocks (```` ``` ```` or `~~~`) are left alone and don't count towards the shallowest level.
-  In `_write_fy_to_zip`, notes appear *after* attachments; in `build_fy_index_md` (used for the View Index action), notes appear *before* attachments.
+  Both the ZIP's `index.md` and the View Index action (`build_fy_index_md`, which `_write_fy_to_zip` also uses) put an item's notes *after* its attachments.
 
 ## Archive import formats
 
