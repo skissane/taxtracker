@@ -34,7 +34,7 @@ dev = [
     "diff-cover>=11.0.0",
     "django-stubs[compatible-mypy]>=6.1.2",
     "djlint>=1.47.0",
-    "exolot>=0.2.1",
+    "exolot>=0.3.1",
     "jactionlint>=2.3.0",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
@@ -49,10 +49,41 @@ screenshots = [
 # The policy at the top of the exolot PR comment (see AGENTS.md).
 [tool.exolot]
 preamble = """
-**For information only.** Fix the findings worth fixing; it's fine to ignore the rest, which don't block the PR, \
-and there's no need to suppress them with a rules file, `NOSONAR` or `noqa`. \
+**For information only.** Fix a finding when fixing it makes the code better, e.g. a real bug, or a refactor \
+that makes a complex function clearer; otherwise ignore it, as findings don't block the PR. \
+Don't suppress one with `NOSONAR` or `noqa`. \
 See [AGENTS.md](https://github.com/skissane/taxtracker/blob/master/AGENTS.md) for more.
 """
+
+# Project-wide rule settings (see AGENTS.md): only for rules whose findings here are consistently noise.
+[tool.exolot.rules]
+# Cognitive complexity: the default of 15 flags many functions that read fine; above 25 is worth a look.
+"python:S3776" = { level = "on", parameters = { threshold = 25 } }
+# Duplicated string literals: mostly URL names reversed a few times, clearer than a constant.
+"python:S1192" = { level = "off" }
+# Unused parameters: gunicorn hooks and django-google-sso callbacks have fixed signatures.
+"python:S1172" = { level = "off" }
+# Local variable naming: `User = get_user_model()` and `apps.get_model()` in migrations are Django idiom.
+"python:S117" = { level = "off" }
+# <li> outside <ul>/<ol>: the admin's object-tools blocks are inside the parent template's <ul>.
+"Web:ItemTagNotWithinContainerTagCheck" = { level = "off" }
+# Invariant return value: exit-code functions that deliberately always succeed, and views returning the response
+# they modified.
+"python:S3516" = { level = "off" }
+# Argument types: strict mypy checks these, and does a better job of it (this rule misreads policy.default's
+# EmailMessage).
+"python:S5655" = { level = "off" }
+# ModelForm fields = "__all__": the forms are only used by the admin, which picks the fields itself.
+"python:S6559" = { level = "off" }
+# Consecutive append() calls: appending output lines one at a time is no less clear than extend().
+"python:S9409" = { level = "off" }
+# Publicly writable directories and world-readable file modes: the app has one user and runs only in its own
+# container or on its owner's machine, so there's no other local user to guard against.
+"python:S5443" = { level = "off" }
+"python:S2612" = { level = "off" }
+# Accessibility: the app's one user doesn't need it.
+"Web:S6819" = { level = "off" }
+"Web:InputWithoutLabelCheck" = { level = "off" }
 
 [tool.ruff]
 line-length = 120

@@ -948,6 +948,17 @@ class RecordTests(TempDirMixin, SimpleTestCase):
             reader.execute("DELETE FROM client_ip")
 
 
+class MinMaxTests(SimpleTestCase):
+    def test_none_is_ignored(self) -> None:
+        for function, expected in ((client_ips._min, 1.0), (client_ips._max, 2.0)):
+            with self.subTest(function=function.__name__):
+                self.assertIsNone(function(None, None))
+                self.assertEqual(function(None, 1.0), 1.0)
+                self.assertEqual(function(1.0, None), 1.0)
+                self.assertEqual(function(1.0, 2.0), expected)
+                self.assertEqual(function(2.0, 1.0), expected)
+
+
 class RunTests(TempDirMixin, SimpleTestCase):
     def _config(self, **kwargs: Any) -> client_ips.Config:
         return client_ips.Config(

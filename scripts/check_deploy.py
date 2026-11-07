@@ -32,7 +32,7 @@ def check_once(url: str, commit: str, timeout: float) -> str | None:
     except urllib.error.HTTPError as e:
         with e:
             status, raw = e.code, e.read()
-    except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
+    except (OSError, http.client.HTTPException) as e:
         # HTTPException covers a connection dropped mid-response, e.g. by Fly
         # Proxy while the Machine boots (IncompleteRead, RemoteDisconnected).
         reason = getattr(e, "reason", e)

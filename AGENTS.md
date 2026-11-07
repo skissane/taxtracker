@@ -500,11 +500,16 @@ Like them it posts nothing unless `--commit` is still the PR's head, and runs on
 The `exolot` job checks out the PR's head rather than its merge with the base, so the findings' line numbers and links match the PR's code.
 The findings are for information only: `--exit-zero` means findings never fail the job, though a failed analysis still does.
 
-- Use your judgement: fix a finding when it points at a real bug or a change that makes the code clearer, and ignore the rest, e.g. cognitive-complexity warnings on code that's clear enough as it is.
+- Use your judgement: fix a finding when fixing it makes the code better, e.g. a real bug, or a cognitive-complexity warning where splitting the function up would make it clearer.
+  When the fix wouldn't, e.g. a complex function that already reads clearly, or a suggestion that would change behaviour (`Number.isNaN(date)` is always false for a `Date`), leave it.
 - Pay most attention to findings on lines your PR changes.
   Don't widen a PR to fix findings elsewhere unless asked.
 - A finding you've chosen to ignore doesn't block a PR, and needs no reply or explanation.
-- Don't suppress an ignored finding: no `NOSONAR` or `noqa` comments, and no `--rules` file to turn rules off.
+- Don't suppress a single finding with a `NOSONAR` or `noqa` comment.
+- `pyproject.toml`'s `[tool.exolot.rules]` turns off rules, or changes their parameters, project-wide, each with a comment saying why.
+  Add one only for a rule whose findings in this repo are consistently noise, not to clear one finding.
+  It raises cognitive complexity's (`python:S3776`) threshold from 15 to 25, rather than turning it off, as the functions above 25 are the ones worth checking for a refactor.
+  The app has one user, its owner, and runs only in its own container or on the owner's machine, so rules that guard against other local users (`/tmp` use, file modes) or are about accessibility are off; turn off any others like them that appear.
 
 ## Linting config
 

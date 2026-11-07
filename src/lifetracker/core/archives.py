@@ -50,7 +50,7 @@ def extract_pdfs_from_zip(file_bytes: bytes) -> tuple[list[tuple[str, bytes]], l
             entry_name = Path(info.filename.replace("\\", "/")).name
             if not entry_name:
                 continue
-            if not (entry_name.endswith(".pdf") or entry_name.endswith(".PDF")):
+            if not entry_name.endswith((".pdf", ".PDF")):
                 skipped.append(entry_name)
                 continue
             if entry_name.endswith(".PDF"):
