@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 import os
 import re
@@ -145,6 +146,61 @@ def _warn_skipped(request: HttpRequest, names: Iterable[str], reason: str) -> No
     if names:
         unique_names = list(dict.fromkeys(names))
         messages.warning(request, f"Skipped {len(unique_names)} {reason}: {', '.join(unique_names)}.")
+
+
+@dataclasses.dataclass
+class _ReceivedDocumentImport:
+    """What ``_import_received_documents`` did with an archive's PDFs."""
+
+    created_count: int = 0
+    no_year_names: list[str] = dataclasses.field(default_factory=list)
+    missing_fy_names: list[str] = dataclasses.field(default_factory=list)
+    duplicate_names: list[str] = dataclasses.field(default_factory=list)
+
+
+def _import_received_documents(extracted: Sequence[tuple[str, bytes]]) -> _ReceivedDocumentImport:
+    """Create a ``ReceivedDocument``, with the PDF attached, for each of *extracted*'s ``(filename, pdf_bytes)``.
+
+    Each goes to the Financial Year its filename's leading 4-digit year names, unless a received document of that
+    FY already has an attachment of the same name; all in one transaction.
+    """
+    result = _ReceivedDocumentImport()
+    if not extracted:
+        return result
+    fy_cache: dict[int, FinancialYear | None] = {}
+    existing_names_by_year: dict[int, set[str]] = {}
+
+    with transaction.atomic():
+        for pdf_filename, pdf_bytes in extracted:
+            base_name = Path(pdf_filename).name
+            match = _RECEIVED_DOC_YEAR_RE.match(base_name)
+            if not match:
+                result.no_year_names.append(base_name)
+                continue
+
+            year_num = int(match.group(1))
+            if year_num not in fy_cache:
+                fy_cache[year_num] = FinancialYear.objects.filter(year=year_num).first()
+            fy = fy_cache[year_num]
+            if fy is None:
+                result.missing_fy_names.append(f"{base_name} (FY{year_num})")
+                continue
+            if year_num not in existing_names_by_year:
+                existing_names_by_year[year_num] = _existing_attachment_names(received_document__year=fy)
+            existing_names = existing_names_by_year[year_num]
+            if base_name in existing_names:
+                result.duplicate_names.append(base_name)
+                continue
+
+            doc = ReceivedDocument.objects.create(
+                year=fy,
+                title=base_name,
+                date=extract_date_from_filename(base_name),
+            )
+            _save_imported_attachment(Attachment(received_document=doc), base_name, pdf_bytes)
+            existing_names.add(base_name)
+            result.created_count += 1
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -555,57 +611,18 @@ class ReceivedDocumentAdmin(admin.ModelAdmin[ReceivedDocument]):
             file_bytes = uploaded.read()
             filename = uploaded.name
 
-            no_year_names: list[str] = []
-            missing_fy_names: list[str] = []
-            created_count = 0
             extracted, archive_skipped_names, had_error = _extract_archive(request, file_bytes, filename)
-
-            duplicate_names: list[str] = []
-            if extracted:
-                fy_cache: dict[int, FinancialYear | None] = {}
-                existing_names_by_year: dict[int, set[str]] = {}
-
-                with transaction.atomic():
-                    for pdf_filename, pdf_bytes in extracted:
-                        base_name = Path(pdf_filename).name
-                        match = _RECEIVED_DOC_YEAR_RE.match(base_name)
-                        if not match:
-                            no_year_names.append(base_name)
-                            continue
-
-                        year_num = int(match.group(1))
-                        if year_num not in fy_cache:
-                            fy_cache[year_num] = FinancialYear.objects.filter(year=year_num).first()
-                        fy = fy_cache[year_num]
-                        if fy is None:
-                            missing_fy_names.append(f"{base_name} (FY{year_num})")
-                            continue
-                        if year_num not in existing_names_by_year:
-                            existing_names_by_year[year_num] = _existing_attachment_names(received_document__year=fy)
-                        existing_names = existing_names_by_year[year_num]
-                        if base_name in existing_names:
-                            duplicate_names.append(base_name)
-                            continue
-
-                        doc = ReceivedDocument.objects.create(
-                            year=fy,
-                            title=base_name,
-                            date=extract_date_from_filename(base_name),
-                        )
-                        _save_imported_attachment(Attachment(received_document=doc), base_name, pdf_bytes)
-                        existing_names.add(base_name)
-                        created_count += 1
-
-                if created_count:
-                    messages.success(
-                        request,
-                        f"Imported {created_count} received document(s) from '{filename}'.",
-                    )
+            result = _import_received_documents(extracted)
+            if result.created_count:
+                messages.success(
+                    request,
+                    f"Imported {result.created_count} received document(s) from '{filename}'.",
+                )
 
             _warn_skipped(request, archive_skipped_names, "non-PDF, too large or unreadable file(s)")
-            _warn_skipped(request, duplicate_names, "file(s) already imported for that Financial Year")
-            _warn_skipped(request, no_year_names, "file(s) without a leading 4-digit year")
-            _warn_skipped(request, missing_fy_names, "file(s) with no matching Financial Year record")
+            _warn_skipped(request, result.duplicate_names, "file(s) already imported for that Financial Year")
+            _warn_skipped(request, result.no_year_names, "file(s) without a leading 4-digit year")
+            _warn_skipped(request, result.missing_fy_names, "file(s) with no matching Financial Year record")
             if not had_error and not extracted and not archive_skipped_names:
                 messages.warning(
                     request,
