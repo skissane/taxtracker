@@ -138,9 +138,9 @@ def _non_sqlite_database() -> Iterator[None]:
     override = override_settings(
         DATABASES={"default": {"ENGINE": "django.db.backends.postgresql", "NAME": "irrelevant"}}
     )
-    with pytest.warns(UserWarning, match="Overriding setting DATABASES"):
-        override.enable()
     try:
+        with pytest.warns(UserWarning, match="Overriding setting DATABASES"):
+            override.enable()
         yield
     finally:
         override.disable()
