@@ -61,7 +61,7 @@ def expand_expr(text, env: dict[str, str], workspace: str) -> str:
         # — leave a visible marker instead of silently guessing wrong.
         return f"<<UNRESOLVED:{expr}>>"
 
-    return re.sub(r"\$\{\{(.*?)\}\}", repl, text)
+    return re.sub(r"\$\{\{(.*?)\}\}", repl, text, flags=re.DOTALL)
 
 
 def load_workflow(path: str) -> dict:
