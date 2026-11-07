@@ -55,80 +55,74 @@ def extract_pdfs_from_har(
     if not isinstance(entries, list):
         raise UnsupportedArchiveError("Could not parse file as a HAR archive: 'entries' must be a list")
 
-    def skip(url: str, reason: str) -> None:
-        if on_skip is not None:
-            on_skip(url, reason)
-
     results: list[tuple[str, bytes]] = []
-
     for entry in entries:
         if not isinstance(entry, dict):
             continue
         request = _field(entry, "request", dict)
-        response = _field(entry, "response", dict)
-
         if _field(request, "method", str).upper() != "GET":
             continue
-
         url = _field(request, "url", str)
         if not url.startswith(FIDELITY_URL_PREFIX):
             continue
-
-        # Derive filename from the URL suffix after "/c:".
-        pdf_name = url[len(FIDELITY_URL_PREFIX) :].split("?")[0].split("#")[0]
-        # Sanitize: take only the basename to prevent path-traversal attacks.
-        pdf_name = Path(pdf_name).name
-        if not pdf_name:
-            skip(url, "could not determine filename from URL")
-            continue
-        pdf_filename = pdf_name + ".pdf"
-
-        # Require JSON content type.
-        content = _field(response, "content", dict)
-        mime_type = _field(content, "mimeType", str)
-        if "application/json" not in mime_type:
-            skip(url, f"unexpected content type {mime_type!r}")
-            continue
-
-        # Decode the response body (may itself be Base64-encoded in the HAR).
-        body_text = _field(content, "text", str)
-        if _field(content, "encoding", str).lower() == "base64":
-            try:
-                body_str = base64.b64decode(body_text).decode("utf-8")
-            except ValueError as exc:  # binascii.Error, UnicodeDecodeError, or a non-ASCII string
-                skip(url, f"could not decode Base64-encoded body: {exc}")
-                continue
-        else:
-            body_str = body_text
-
-        if not body_str:
-            skip(url, "empty response body")
-            continue
-
         try:
-            payload = json.loads(body_str)
-        except ValueError as exc:
-            skip(url, f"could not parse JSON response body: {exc}")
-            continue
-        if not isinstance(payload, dict):
-            skip(url, "JSON response body is not an object")
-            continue
-
-        file_content_b64 = _field(payload, "fileContent", str)
-        if not file_content_b64:
-            skip(url, "'fileContent' key missing in response")
-            continue
-
-        try:
-            pdf_bytes = base64.b64decode(file_content_b64)
-        except ValueError as exc:  # binascii.Error, or a non-ASCII string
-            skip(url, f"could not Base64-decode fileContent: {exc}")
-            continue
-
-        if not pdf_bytes.startswith(PDF_MAGIC):
-            skip(url, f"decoded data does not look like a PDF (starts with {pdf_bytes[:8]!r})")
-            continue
-
-        results.append((pdf_filename, pdf_bytes))
-
+            results.append(_pdf_from_entry(url, _field(entry, "response", dict)))
+        except _SkippedEntry as exc:
+            if on_skip is not None:
+                on_skip(url, str(exc))
     return results
+
+
+class _SkippedEntry(Exception):
+    """A matching HAR entry has no PDF to extract; the message says why."""
+
+
+def _pdf_from_entry(url: str, response: dict[str, Any]) -> tuple[str, bytes]:
+    """Return the ``(filename, pdf_bytes)`` in the response to a request for *url*, a Fidelity record URL.
+
+    Raises ``_SkippedEntry`` if there's none.
+    """
+    # Derive filename from the URL suffix after "/c:".
+    pdf_name = url[len(FIDELITY_URL_PREFIX) :].split("?")[0].split("#")[0]
+    # Sanitize: take only the basename to prevent path-traversal attacks.
+    pdf_name = Path(pdf_name).name
+    if not pdf_name:
+        raise _SkippedEntry("could not determine filename from URL")
+
+    payload = _response_json(_field(response, "content", dict))
+
+    file_content_b64 = _field(payload, "fileContent", str)
+    if not file_content_b64:
+        raise _SkippedEntry("'fileContent' key missing in response")
+    try:
+        pdf_bytes = base64.b64decode(file_content_b64)
+    except ValueError as exc:  # binascii.Error, or a non-ASCII string
+        raise _SkippedEntry(f"could not Base64-decode fileContent: {exc}") from exc
+    if not pdf_bytes.startswith(PDF_MAGIC):
+        raise _SkippedEntry(f"decoded data does not look like a PDF (starts with {pdf_bytes[:8]!r})")
+    return pdf_name + ".pdf", pdf_bytes
+
+
+def _response_json(content: dict[str, Any]) -> dict[str, Any]:
+    """Return a HAR response's ``content`` parsed as a JSON object, or raise ``_SkippedEntry``."""
+    mime_type = _field(content, "mimeType", str)
+    if "application/json" not in mime_type:
+        raise _SkippedEntry(f"unexpected content type {mime_type!r}")
+
+    # Decode the response body (may itself be Base64-encoded in the HAR).
+    body_text = _field(content, "text", str)
+    if _field(content, "encoding", str).lower() == "base64":
+        try:
+            body_text = base64.b64decode(body_text).decode("utf-8")
+        except ValueError as exc:  # binascii.Error, UnicodeDecodeError, or a non-ASCII string
+            raise _SkippedEntry(f"could not decode Base64-encoded body: {exc}") from exc
+    if not body_text:
+        raise _SkippedEntry("empty response body")
+
+    try:
+        payload = json.loads(body_text)
+    except ValueError as exc:
+        raise _SkippedEntry(f"could not parse JSON response body: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise _SkippedEntry("JSON response body is not an object")
+    return payload
