@@ -510,6 +510,7 @@ The findings are for information only: `--exit-zero` means findings never fail t
 - `pyproject.toml`'s `[tool.exolot.rules]` turns off rules, or changes their parameters, project-wide, each with a comment saying why.
   Add one only for a rule whose findings in this repo are consistently noise, not to clear one finding.
   It raises cognitive complexity's (`python:S3776`) threshold from 15 to 25, rather than turning it off, as the functions above 25 are the ones worth checking for a refactor.
+  The app has one user, its owner, and runs only in its own container or on the owner's machine, so rules that guard against other local users (`/tmp` use, file modes) or are about accessibility are off; turn off any others like them that appear.
 
 ## Linting config
 

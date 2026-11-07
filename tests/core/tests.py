@@ -1,4 +1,5 @@
 import ast
+import contextlib
 import dataclasses
 import datetime
 import importlib.util
@@ -14,6 +15,7 @@ import sys
 import tempfile
 import time
 import typing
+from collections.abc import Iterator
 from pathlib import Path
 from unittest import mock
 
@@ -125,6 +127,23 @@ _GOOGLE_SSO_ENABLED_SETTINGS = {
     "GOOGLE_SSO_PROJECT_ID": "test-project-id",
     "GOOGLE_SSO_CALLBACK_DOMAIN": "testserver",
 }
+
+
+@contextlib.contextmanager
+def _non_sqlite_database() -> Iterator[None]:
+    """Override ``DATABASES`` with a non-SQLite engine.
+
+    Only enabling the override warns, so ``pytest.warns`` covers just that, not the code under test.
+    """
+    override = override_settings(
+        DATABASES={"default": {"ENGINE": "django.db.backends.postgresql", "NAME": "irrelevant"}}
+    )
+    try:
+        with pytest.warns(UserWarning, match="Overriding setting DATABASES"):
+            override.enable()
+        yield
+    finally:
+        override.disable()
 
 
 class GoogleSSOSettingsTests(TestCase):
@@ -2266,16 +2285,8 @@ class BackupAdminViewTests(TransactionTestCase):
 
     def test_download_db_backup_rejects_non_sqlite_engine(self) -> None:
         url = reverse("admin:core_cloudbackupstatus_download_db_backup")
-        with pytest.warns(UserWarning, match="Overriding setting DATABASES"):
-            with override_settings(
-                DATABASES={
-                    "default": {
-                        "ENGINE": "django.db.backends.postgresql",
-                        "NAME": "irrelevant",
-                    }
-                }
-            ):
-                response = self.client.get(url, follow=True)
+        with _non_sqlite_database():
+            response = self.client.get(url, follow=True)
         self.assertRedirects(response, reverse("admin:core_cloudbackupstatus_changelist"))
         self.assertContains(response, "DB backup is only available for SQLite databases.")
 
@@ -2399,17 +2410,8 @@ class BackupAdminViewTests(TransactionTestCase):
         LIFETRACKER_BACKUP_S3_SECRET_ACCESS_KEY="",
     )
     def test_run_cloud_backup_checks_engine_before_settings(self) -> None:
-        with pytest.warns(UserWarning, match="Overriding setting DATABASES"):
-            with override_settings(
-                DATABASES={
-                    "default": {
-                        "ENGINE": "django.db.backends.postgresql",
-                        "NAME": "irrelevant",
-                    }
-                }
-            ):
-                with self.assertRaisesMessage(RuntimeError, "only available for SQLite databases"):
-                    run_cloud_backup()
+        with _non_sqlite_database(), self.assertRaisesMessage(RuntimeError, "only available for SQLite databases"):
+            run_cloud_backup()
 
     @override_settings(
         LIFETRACKER_BACKUP_S3_BUCKET_NAME="test-bucket",
@@ -2419,16 +2421,8 @@ class BackupAdminViewTests(TransactionTestCase):
     @mock.patch("lifetracker.core.backup.boto3.client")
     def test_cloud_backup_rejects_non_sqlite_engine(self, mock_client: mock.MagicMock) -> None:
         url = reverse("admin:core_cloudbackupstatus_changelist")
-        with pytest.warns(UserWarning, match="Overriding setting DATABASES"):
-            with override_settings(
-                DATABASES={
-                    "default": {
-                        "ENGINE": "django.db.backends.postgresql",
-                        "NAME": "irrelevant",
-                    }
-                }
-            ):
-                response = self.client.post(url)
+        with _non_sqlite_database():
+            response = self.client.post(url)
         self.assertContains(
             response,
             "Cloud backup failed: Cloud backup is only available for SQLite databases.",
