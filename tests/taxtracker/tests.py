@@ -20,7 +20,6 @@ from django.utils import timezone
 from lifetracker.core.models import DBStoredFile, FileExtension, FileType, database_storage
 from lifetracker.taxtracker.admin import (
     FinancialYearAdmin,
-    _adjust_notes_headings,
     _attachment_date_warning,
 )
 from lifetracker.taxtracker.archives import (
@@ -37,6 +36,7 @@ from lifetracker.taxtracker.models import (
     Item,
     ReceivedDocument,
 )
+from lifetracker.taxtracker.zip_export import adjust_notes_headings
 
 
 class FinancialYearModelTests(TestCase):
@@ -674,7 +674,7 @@ class AdminViewTests(TestCase):
             file=ContentFile(b"x" * 1000, name="big.pdf"),
         )
         url = reverse("admin:taxtracker_financialyear_download_zip", args=[self.fy.pk])
-        with mock.patch("lifetracker.taxtracker.admin._ZIP_SPOOL_MAX_SIZE", 1):
+        with mock.patch("lifetracker.taxtracker.zip_export.ZIP_SPOOL_MAX_SIZE", 1):
             response = self.client.get(url)
         content = response.getvalue()
         self.assertEqual(int(response["Content-Length"]), len(content))
@@ -1778,31 +1778,31 @@ class DatabaseStorageTests(TestCase):
 
 
 # ---------------------------------------------------------------------------
-# _adjust_notes_headings unit tests
+# adjust_notes_headings unit tests
 # ---------------------------------------------------------------------------
 
 
 class AdjustNotesHeadingsTests(TestCase):
     def test_no_headings_unchanged(self) -> None:
         notes = "Just some plain text.\nNo headings here."
-        self.assertEqual(_adjust_notes_headings(notes, 2), notes)
+        self.assertEqual(adjust_notes_headings(notes, 2), notes)
 
     def test_single_h1_becomes_h3(self) -> None:
         notes = "# My Heading\nSome text."
-        result = _adjust_notes_headings(notes, 2)
+        result = adjust_notes_headings(notes, 2)
         self.assertIn("### My Heading", result)
         self.assertNotRegex(result, r"(?m)^# My Heading")
 
     def test_min_level_not_one(self) -> None:
         # Min is ##, so ## → ### and ### → ####
         notes = "## Section\n### Subsection"
-        result = _adjust_notes_headings(notes, 2)
+        result = adjust_notes_headings(notes, 2)
         self.assertIn("### Section", result)
         self.assertIn("#### Subsection", result)
 
     def test_mixed_levels_scaled_correctly(self) -> None:
         notes = "# Top\n## Second\n### Third"
-        result = _adjust_notes_headings(notes, 2)
+        result = adjust_notes_headings(notes, 2)
         self.assertIn("### Top", result)
         self.assertIn("#### Second", result)
         self.assertIn("##### Third", result)
@@ -1810,13 +1810,13 @@ class AdjustNotesHeadingsTests(TestCase):
     def test_heading_capped_at_h6(self) -> None:
         # item_heading_level=2 → target_base=3; min=1, so h5 → h5-1+3=h7 → capped h6
         notes = "# H1\n##### H5"
-        result = _adjust_notes_headings(notes, 2)
+        result = adjust_notes_headings(notes, 2)
         self.assertIn("### H1", result)
         self.assertIn("###### H5", result)
 
     def test_body_text_preserved(self) -> None:
         notes = "# Heading\n\nSome **bold** text.\n\n- item"
-        result = _adjust_notes_headings(notes, 2)
+        result = adjust_notes_headings(notes, 2)
         self.assertIn("Some **bold** text.", result)
         self.assertIn("- item", result)
 
@@ -1824,7 +1824,7 @@ class AdjustNotesHeadingsTests(TestCase):
         notes = '```bash\n# comment inside shell block\necho "hi"\n```\n## Real heading\n~~~\n# also ignored\n~~~\n'
         # The fenced "#" lines don't count, so "##" is the shallowest level.
         self.assertEqual(
-            _adjust_notes_headings(notes, 2),
+            adjust_notes_headings(notes, 2),
             notes.replace("## Real heading", "### Real heading"),
         )
 
@@ -1839,33 +1839,33 @@ class AdjustNotesHeadingsTests(TestCase):
             "# Heading\n"
         )
         self.assertEqual(
-            _adjust_notes_headings(notes, 2),
+            adjust_notes_headings(notes, 2),
             notes.replace("# Heading", "### Heading"),
         )
 
     def test_unclosed_fence_runs_to_end(self) -> None:
         notes = "# Heading\n```\n# code\n"
-        self.assertEqual(_adjust_notes_headings(notes, 2), "### Heading\n```\n# code\n")
+        self.assertEqual(adjust_notes_headings(notes, 2), "### Heading\n```\n# code\n")
 
     def test_inline_code_span_does_not_open_fence(self) -> None:
         notes = "```inline code```\n# Heading\n"
-        self.assertEqual(_adjust_notes_headings(notes, 2), "```inline code```\n### Heading\n")
+        self.assertEqual(adjust_notes_headings(notes, 2), "```inline code```\n### Heading\n")
 
     def test_only_newline_splits_lines(self) -> None:
         notes = "# One\rtext\f# not a heading\n## Two"
         self.assertEqual(
-            _adjust_notes_headings(notes, 2),
+            adjust_notes_headings(notes, 2),
             "### One\rtext\f# not a heading\n#### Two",
         )
 
     def test_line_endings_preserved(self) -> None:
         notes = "# One\r\n## Two\n# Three"
-        self.assertEqual(_adjust_notes_headings(notes, 2), "### One\r\n#### Two\n### Three")
+        self.assertEqual(adjust_notes_headings(notes, 2), "### One\r\n#### Two\n### Three")
 
     def test_hash_in_body_not_treated_as_heading(self) -> None:
         # Only lines where # is at the start are headings
         notes = "# Real heading\nThis has a # in the middle"
-        result = _adjust_notes_headings(notes, 2)
+        result = adjust_notes_headings(notes, 2)
         self.assertIn("### Real heading", result)
         self.assertIn("This has a # in the middle", result)
 

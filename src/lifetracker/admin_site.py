@@ -69,9 +69,10 @@ class LifetrackerAdminSite(admin.AdminSite):
     login_template = "google_sso/login.html"
 
     def get_urls(self) -> list[URLPattern | URLResolver]:
-        # Imported here: core.admin registers its models on admin.site, an
-        # instance of this class, so a top-level import would be circular.
-        from lifetracker.core.admin import (  # noqa: PLC0415
+        # Imported here: core.admin_views imports core's models, which can't be
+        # imported until the app registry is ready, and this module is imported
+        # while it's being populated.
+        from lifetracker.core.admin_views import (  # noqa: PLC0415
             app_icon_view,
             client_ips_view,
             idle_watchdog_view,
