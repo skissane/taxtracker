@@ -93,7 +93,7 @@ def _positive_number(environ: Mapping[str, str], name: str, default: float) -> f
         value = float(raw)
     except ValueError:
         value = 0
-    if not value > 0:
+    if not math.isfinite(value) or value <= 0:
         raise ValueError(f"{name} must be a positive number, not {raw!r}")
     return value
 
