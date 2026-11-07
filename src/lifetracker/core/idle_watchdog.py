@@ -93,7 +93,7 @@ def _positive_number(environ: Mapping[str, str], name: str, default: float) -> f
         value = float(raw)
     except ValueError:
         value = 0
-    if not value > 0:
+    if not math.isfinite(value) or value <= 0:
         raise ValueError(f"{name} must be a positive number, not {raw!r}")
     return value
 
@@ -356,40 +356,9 @@ def run(
     ``stop`` mode) or gunicorn's master has gone; returns the exit status."""
     if not config.has_work:
         return 0
-    started_at = clock()
-    watchdog = Watchdog(config, master_pid, started_at=started_at)
-    checking = config.mode != "off"
-    if checking:
-        log(
-            f"started in {config.mode} mode, watching ports"
-            f" {', '.join(map(str, config.ports))}, idle timeout"
-            f" {config.idle_seconds / 60:g} minutes, status in {config.status_file}"
-        )
-    uptime_recorder = None
-    since = None
-    if config.uptime_dir is not None:
-        uptime_recorder = uptime_log.UptimeLog(config.uptime_dir)
-        log(f"recording uptime in {config.uptime_dir}")
-        # Count the seconds since a fresh boot, before gunicorn was ready.
-        booted = uptime()
-        if booted is not None and booted <= uptime_log.MAX_BOOT_BACKFILL_SECONDS:
-            since = started_at - booted
-    backup = None
-    if config.auto_backup_interval_seconds is not None:
-        backup = auto_backup.AutoBackup(config.auto_backup_interval_seconds, started_at, log=log, popen=popen)
-        watchdog.auto_backup = backup
-        log(
-            "automatic backups at startup, every"
-            f" {config.auto_backup_interval_seconds / 3600:g} hours"
-            + (" and before stopping" if config.mode == "stop" else "")
-        )
-    # Whether the backup before stopping has started, for this idle stretch.
-    pre_stop_backup = False
-    uptime_failing = False
-    next_check = started_at
-    # Uptime is fsynced every check interval, even when not checking.
-    next_sync = started_at + config.interval_seconds
-    reported_due = False
+    loop = _Loop(
+        config, master_pid, clock(), count=count, request_time=request_time, kill=kill, uptime=uptime, popen=popen
+    )
     while True:
         # Exiting with the master (when it's replaced, the watchdog is
         # reparented) keeps a watchdog from outliving its gunicorn, and from
@@ -398,64 +367,146 @@ def run(
             log(f"gunicorn master {master_pid} has exited, exiting")
             return 0
         now = clock()
-        check_due = checking and now >= next_check
-        if uptime_recorder is not None:
-            try:
-                uptime_recorder.record(now, since=since)
-                if now >= next_sync:
-                    uptime_recorder.sync()
-                    next_sync = max(next_sync + config.interval_seconds, now)
-            except OSError as exc:
-                # Logged once per failing stretch, not every second.
-                if not uptime_failing:
-                    log(f"couldn't record uptime: {exc}")
-                uptime_failing = True
-            else:
-                if uptime_failing:
-                    log("recording uptime again")
-                uptime_failing = False
-                since = None
-        if backup is not None:
-            backup.tick(now)
-        if check_due:
-            due = watchdog.check(now, count(config.ports), request_time(config.request_file))
-            stop = due and config.mode == "stop"
-            backing_up = False
-            if not due:
-                pre_stop_backup = False
-            if stop and backup is not None:
-                # Back up first, waiting for any backup already running, and
-                # then for this one; stop anyway if it fails (the next startup
-                # backs up). Activity meanwhile calls off the stop.
-                if not pre_stop_backup and not backup.running:
-                    backup.start(now, "before stopping")
-                    pre_stop_backup = True
-                stop = pre_stop_backup and not backup.running
-                backing_up = not stop
-            watchdog.stopping = stop
-            watchdog.backing_up = backing_up
-            try:
-                write_status(config.status_file, watchdog.status())
-            except OSError as exc:
-                log(f"couldn't write {config.status_file}: {exc}")
-            idle_minutes = config.idle_seconds / 60
-            if watchdog.stopping:
-                log(f"no activity for {idle_minutes:g} minutes, sending SIGTERM to gunicorn master {master_pid}")
-                kill(master_pid, signal.SIGTERM)
-                return 0
-            if due and config.mode == "monitor" and not reported_due:
-                log(f"no activity for {idle_minutes:g} minutes (monitor mode: not stopping)")
-            reported_due = due
-            # From the schedule rather than now, so checks don't drift; but
-            # never into the past, so a long stall doesn't bunch them up.
-            next_check = max(next_check + config.interval_seconds, now)
-        # Wake at the next whole second, or the next check if that's sooner.
-        wake = math.floor(now) + 1 if uptime_recorder is not None else math.inf
-        if checking:
-            wake = min(wake, next_check)
-        if backup is not None:
-            wake = min(wake, backup.wake_time(now))
-        sleep(max(wake - clock(), 0))
+        if loop.step(now):
+            return 0
+        sleep(max(loop.wake_time(now) - clock(), 0))
+
+
+class _Loop:
+    """``run``'s state from one wake to the next, and what it does at each."""
+
+    def __init__(
+        self,
+        config: Config,
+        master_pid: int,
+        started_at: float,
+        *,
+        count: Callable[[Iterable[int]], dict[int, int]],
+        request_time: Callable[[Path], float | None],
+        kill: Callable[[int, int], None],
+        uptime: Callable[[], float | None],
+        popen: Callable[..., subprocess.Popen[bytes]],
+    ) -> None:
+        self.config = config
+        self.master_pid = master_pid
+        self.count = count
+        self.request_time = request_time
+        self.kill = kill
+        self.watchdog = Watchdog(config, master_pid, started_at=started_at)
+        self.checking = config.mode != "off"
+        if self.checking:
+            log(
+                f"started in {config.mode} mode, watching ports"
+                f" {', '.join(map(str, config.ports))}, idle timeout"
+                f" {config.idle_seconds / 60:g} minutes, status in {config.status_file}"
+            )
+        self.uptime_recorder: uptime_log.UptimeLog | None = None
+        # The time to record uptime from, if before now: set until the first
+        # successful record.
+        self.since: float | None = None
+        if config.uptime_dir is not None:
+            self.uptime_recorder = uptime_log.UptimeLog(config.uptime_dir)
+            log(f"recording uptime in {config.uptime_dir}")
+            # Count the seconds since a fresh boot, before gunicorn was ready.
+            booted = uptime()
+            if booted is not None and booted <= uptime_log.MAX_BOOT_BACKFILL_SECONDS:
+                self.since = started_at - booted
+        self.backup: auto_backup.AutoBackup | None = None
+        if config.auto_backup_interval_seconds is not None:
+            self.backup = auto_backup.AutoBackup(config.auto_backup_interval_seconds, started_at, log=log, popen=popen)
+            self.watchdog.auto_backup = self.backup
+            log(
+                "automatic backups at startup, every"
+                f" {config.auto_backup_interval_seconds / 3600:g} hours"
+                + (" and before stopping" if config.mode == "stop" else "")
+            )
+        # Whether the backup before stopping has started, for this idle stretch.
+        self.pre_stop_backup = False
+        self.uptime_failing = False
+        self.next_check = started_at
+        # Uptime is fsynced every check interval, even when not checking.
+        self.next_sync = started_at + config.interval_seconds
+        self.reported_due = False
+
+    def step(self, now: float) -> bool:
+        """Do what's due at ``now``; returns whether the watchdog has stopped
+        gunicorn, and so should exit."""
+        if self.uptime_recorder is not None:
+            self._record_uptime(self.uptime_recorder, now)
+        if self.backup is not None:
+            self.backup.tick(now)
+        if self.checking and now >= self.next_check:
+            return self._check(now)
+        return False
+
+    def wake_time(self, now: float) -> float:
+        """When to wake next: the next whole second, or the next check or
+        backup poll if that's sooner."""
+        wake = math.floor(now) + 1 if self.uptime_recorder is not None else math.inf
+        if self.checking:
+            wake = min(wake, self.next_check)
+        if self.backup is not None:
+            wake = min(wake, self.backup.wake_time(now))
+        return wake
+
+    def _record_uptime(self, recorder: uptime_log.UptimeLog, now: float) -> None:
+        try:
+            recorder.record(now, since=self.since)
+            if now >= self.next_sync:
+                recorder.sync()
+                self.next_sync = max(self.next_sync + self.config.interval_seconds, now)
+        except OSError as exc:
+            # Logged once per failing stretch, not every second.
+            if not self.uptime_failing:
+                log(f"couldn't record uptime: {exc}")
+            self.uptime_failing = True
+        else:
+            if self.uptime_failing:
+                log("recording uptime again")
+            self.uptime_failing = False
+            self.since = None
+
+    def _check(self, now: float) -> bool:
+        """Check for idleness and write the status; returns whether it has
+        stopped gunicorn."""
+        config = self.config
+        due = self.watchdog.check(now, self.count(config.ports), self.request_time(config.request_file))
+        self.watchdog.stopping = self._ready_to_stop(now, due)
+        try:
+            write_status(config.status_file, self.watchdog.status())
+        except OSError as exc:
+            log(f"couldn't write {config.status_file}: {exc}")
+        idle_minutes = config.idle_seconds / 60
+        if self.watchdog.stopping:
+            log(f"no activity for {idle_minutes:g} minutes, sending SIGTERM to gunicorn master {self.master_pid}")
+            self.kill(self.master_pid, signal.SIGTERM)
+            return True
+        if due and config.mode == "monitor" and not self.reported_due:
+            log(f"no activity for {idle_minutes:g} minutes (monitor mode: not stopping)")
+        self.reported_due = due
+        # From the schedule rather than now, so checks don't drift; but
+        # never into the past, so a long stall doesn't bunch them up.
+        self.next_check = max(self.next_check + config.interval_seconds, now)
+        return False
+
+    def _ready_to_stop(self, now: float, due: bool) -> bool:
+        """Whether to stop now, given whether the idle timeout is ``due``;
+        sets ``watchdog.backing_up``."""
+        if not due:
+            self.pre_stop_backup = False
+        stop = due and self.config.mode == "stop"
+        backing_up = False
+        if stop and self.backup is not None:
+            # Back up first, waiting for any backup already running, and
+            # then for this one; stop anyway if it fails (the next startup
+            # backs up). Activity meanwhile calls off the stop.
+            if not self.pre_stop_backup and not self.backup.running:
+                self.backup.start(now, "before stopping")
+                self.pre_stop_backup = True
+            stop = self.pre_stop_backup and not self.backup.running
+            backing_up = not stop
+        self.watchdog.backing_up = backing_up
+        return stop
 
 
 def spawn(master_pid: int, environ: Mapping[str, str] = os.environ) -> subprocess.Popen[bytes] | None:
