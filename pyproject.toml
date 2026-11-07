@@ -71,7 +71,7 @@ See [AGENTS.md](https://github.com/skissane/taxtracker/blob/master/AGENTS.md) fo
 # Invariant return value: exit-code functions that deliberately always succeed, and views returning the response
 # they modified.
 "python:S3516" = { level = "off" }
-# Argument types: strict mypy checks these, and better (this rule misreads policy.default's EmailMessage).
+# Argument types: strict mypy checks these, and does a better job of it (this rule misreads policy.default's EmailMessage).
 "python:S5655" = { level = "off" }
 # ModelForm fields = "__all__": the forms are only used by the admin, which picks the fields itself.
 "python:S6559" = { level = "off" }
