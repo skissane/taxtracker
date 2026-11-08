@@ -24,7 +24,7 @@ import time
 import unittest
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 from unittest import mock
 
 import jwt
@@ -247,6 +247,7 @@ class _EchoHandler(http.server.BaseHTTPRequestHandler):
 
     do_GET = do_HEAD = do_POST = do_PUT = do_DELETE = do_OPTIONS = _echo
 
+    @override
     def log_message(self, format: str, *args: Any) -> None:
         pass
 
@@ -260,6 +261,7 @@ class EnvoyAuthTests(SimpleTestCase):
     port: int
 
     @classmethod
+    @override
     def setUpClass(cls) -> None:
         super().setUpClass()
         envoy = os.environ.get("LIFETRACKER_ENVOY")

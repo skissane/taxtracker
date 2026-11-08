@@ -146,6 +146,9 @@ plugins = ["mypy_django_plugin.main"]
 python_version = "3.14"
 strict = true
 files = ["src", "scripts", "tests", "screenshot_tests"]
+# Every method that overrides one must say so with @override, so one that stops overriding (the base renamed or
+# removed it) is an error rather than silently dead.
+enable_error_code = ["explicit-override"]
 # Resolve `lifetracker` from src, and `scripts`, `tests` and `screenshot_tests` from the repo root, so each file has
 # one module name (otherwise scripts/github_comments.py is both `github_comments` and `scripts.github_comments`).
 mypy_path = "src"

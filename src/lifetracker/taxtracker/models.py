@@ -1,7 +1,7 @@
 import datetime
 from collections.abc import Collection, Iterable
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Self, override
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -50,10 +50,12 @@ class FinancialYear(models.Model):
         verbose_name = "Financial Year"
         verbose_name_plural = "Financial Years"
 
+    @override
     def __str__(self) -> str:
         return f"FY{self.year}"
 
     @classmethod
+    @override
     def from_db(
         cls, db: str | None, field_names: Collection[str], values: Collection[Any], *, fetch_mode: Any = None
     ) -> Self:
@@ -64,6 +66,7 @@ class FinancialYear(models.Model):
             instance._loaded_status = instance.status
         return instance
 
+    @override
     def refresh_from_db(
         self, using: str | None = None, fields: Iterable[str] | None = None, from_queryset: Any = None
     ) -> None:
@@ -111,6 +114,7 @@ class FinancialYear(models.Model):
         latest = self.status_history.filter(to_status=self.status).order_by("-transitioned_at", "-pk").first()
         return latest.transitioned_at if latest else None
 
+    @override
     def save(self, *args: Any, **kwargs: Any) -> None:
         update_fields = kwargs.get("update_fields")
         status_being_saved = update_fields is None or "status" in update_fields
@@ -155,6 +159,7 @@ class FinancialYearStatusHistory(models.Model):
         verbose_name = "Financial Year Status Transition"
         verbose_name_plural = "Financial Year Status Transitions"
 
+    @override
     def __str__(self) -> str:
         if self.from_status:
             return (
@@ -196,9 +201,11 @@ class Item(TreeNodeMixin, models.Model):
         verbose_name = "Item"
         verbose_name_plural = "Items"
 
+    @override
     def __str__(self) -> str:
         return f"{self.year} > {self.tree_path_str()}"
 
+    @override
     def clean(self) -> None:
         if self.parent_id is not None:
             # Enforce year inheritance: child items always share their parent's year.
@@ -209,6 +216,7 @@ class Item(TreeNodeMixin, models.Model):
                 pass
         self.check_parent_cycle()
 
+    @override
     def save(self, *args: Any, **kwargs: Any) -> None:
         old_year_id = None
         if self.pk is not None:
@@ -260,6 +268,7 @@ class ReceivedDocument(models.Model):
         verbose_name = "Received Document"
         verbose_name_plural = "Received Documents"
 
+    @override
     def __str__(self) -> str:
         return f"{self.year}: {self.title}"
 
@@ -320,6 +329,7 @@ class Attachment(AttachmentAutofillMixin, models.Model):
             ),
         ]
 
+    @override
     def __str__(self) -> str:
         if self.title:
             label = self.title
@@ -330,6 +340,7 @@ class Attachment(AttachmentAutofillMixin, models.Model):
         parent = self.item or self.received_document
         return f"{label} ({parent})"
 
+    @override
     def clean(self) -> None:
         # Check the cached related object too, not just the _id attname: when
         # an Attachment is added inline alongside a brand-new (unsaved) parent,

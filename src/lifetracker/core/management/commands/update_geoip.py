@@ -9,7 +9,7 @@ against the relay ranges, as the client IP collector does at startup (see
 page shows.
 """
 
-from typing import Any
+from typing import Any, override
 
 from django.core.management.base import BaseCommand, CommandError
 
@@ -19,6 +19,7 @@ from lifetracker.core import client_ips, ip_location
 class Command(BaseCommand):
     help = "Download the DB-IP Lite databases and iCloud Private Relay ranges, and look up client IPs in them."
 
+    @override
     def handle(self, *args: Any, **options: Any) -> None:
         config = client_ips.config_from_env()
         if config.db_path is None or config.geoip_dir is None:

@@ -6,7 +6,7 @@ import tempfile
 import urllib.error
 from email.message import Message
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 from unittest import mock
 
 from django.test import SimpleTestCase
@@ -28,6 +28,7 @@ def _lines(n: int) -> str:
 
 
 class _GitRepoTestCase(SimpleTestCase):
+    @override
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -226,6 +227,7 @@ class FakeGitHub:
 
 
 class MainTests(_GitRepoTestCase):
+    @override
     def setUp(self) -> None:
         super().setUp()
         self.write("src/big.py", _lines(7))

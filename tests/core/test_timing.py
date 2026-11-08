@@ -1,4 +1,5 @@
 import re
+from typing import override
 from unittest import mock
 
 from django.contrib.auth.models import User
@@ -13,6 +14,7 @@ from lifetracker.taxtracker.models import FinancialYear
 class RequestTimingTests(TestCase):
     PAGE_TIME = re.compile(r'<p class="lt-page-time">Page generated in \d+\.\d{3} seconds</p>')
 
+    @override
     def setUp(self) -> None:
         User.objects.create_superuser("admin", "admin@example.com", "password")
         self.client.login(username="admin", password="password")

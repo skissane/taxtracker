@@ -9,7 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from email.message import Message
-from typing import IO, Any
+from typing import IO, Any, override
 
 API_URL = "https://api.github.com"
 
@@ -19,6 +19,7 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     urllib's own handler follows GET redirects keeping every header, the
     token included, even to another host."""
 
+    @override
     def redirect_request(
         self,
         req: urllib.request.Request,

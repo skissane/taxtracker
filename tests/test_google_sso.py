@@ -2,6 +2,7 @@ import ast
 import importlib.util
 import typing
 from pathlib import Path
+from typing import override
 from unittest import mock
 
 from django.conf import settings
@@ -175,6 +176,7 @@ class GoogleSSOLoginFlowTests(TestCase):
     """End-to-end tests of the library's callback view with our settings, with
     only the calls out to Google mocked."""
 
+    @override
     def setUp(self) -> None:
         self.user = User.objects.create_user("alice", email="A@example.com", is_staff=True)
 

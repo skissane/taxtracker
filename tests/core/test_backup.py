@@ -7,6 +7,7 @@ import tempfile
 import typing
 from collections.abc import Iterator
 from pathlib import Path
+from typing import override
 from unittest import mock
 
 import pytest
@@ -76,6 +77,7 @@ def _record_uploads(mock_client: mock.MagicMock) -> list[dict[str, typing.Any]]:
 class BackupAdminViewTests(TransactionTestCase):
     # Not TestCase: backup_database() refuses to run inside a transaction.
 
+    @override
     def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "admin@example.com", "password")
         self.client = Client()
@@ -643,6 +645,7 @@ class BackupStateTests(TestCase):
     """database_changed() after run_cloud_backup(), backing up a file-backed
     database (the tests' own is in memory)."""
 
+    @override
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -773,6 +776,7 @@ class InMemoryBackupStateTests(SimpleTestCase):
 class RestoreDatabaseTests(TestCase):
     """restore_database() and check_backup_file(), on file-backed databases."""
 
+    @override
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -890,6 +894,7 @@ class RestoreCloudBackupCommandTests(TransactionTestCase):
 
     KEY = "other-host/db-backup.2026-10-01.00.00.00.sqlite3"
 
+    @override
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)

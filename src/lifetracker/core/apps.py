@@ -1,3 +1,5 @@
+from typing import override
+
 from django.apps import AppConfig, apps
 from django.db.models.signals import post_delete
 
@@ -7,6 +9,7 @@ class CoreConfig(AppConfig):
     label = "core"
     verbose_name = "Core"
 
+    @override
     def ready(self) -> None:
         # Imported here: it imports models, which aren't loaded until now.
         from lifetracker.core.attachments import (  # noqa: PLC0415

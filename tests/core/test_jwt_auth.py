@@ -6,6 +6,7 @@ import tempfile
 import time
 import typing
 from pathlib import Path
+from typing import override
 from unittest import mock
 
 import jwt
@@ -60,6 +61,7 @@ def _decode_jwt(token: str) -> dict[str, typing.Any]:
 class JWTKeyTests(SimpleTestCase):
     """The JWT signing key and the JWKS written for the front proxy."""
 
+    @override
     def setUp(self) -> None:
         temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
@@ -173,6 +175,7 @@ class JWTCookieMiddlewareTests(TestCase):
 
     PASSWORD = "correct horse battery staple"
 
+    @override
     def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "", self.PASSWORD)
 

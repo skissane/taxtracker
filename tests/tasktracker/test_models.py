@@ -1,4 +1,5 @@
 import datetime
+from typing import override
 
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
@@ -75,6 +76,7 @@ class TaskTypeModelTests(TestCase):
 
 
 class TaskModelTests(TestCase):
+    @override
     def setUp(self) -> None:
         self.file_type = FileType.objects.create(
             short_name="PDF",
@@ -247,6 +249,7 @@ class TaskModelTests(TestCase):
 
 
 class TaskAttachmentModelTests(TestCase):
+    @override
     def setUp(self) -> None:
         self.task = Task.objects.create(title="Inbox", order=1)
         self.pdf_type = FileType.objects.create(

@@ -1,6 +1,7 @@
 import datetime
 import io
 import zipfile
+from typing import override
 from unittest import mock
 
 from django.contrib.auth.models import User
@@ -109,6 +110,7 @@ class AdjustNotesHeadingsTests(TestCase):
 class BuildFyIndexMdTests(TestCase):
     """build_fy_index_md() without a ZipFile, as the View Index action calls it."""
 
+    @override
     def setUp(self) -> None:
         self.fy = FinancialYear.objects.create(year=2024)
         self.item = Item.objects.create(year=self.fy, title="Income", order=1)
@@ -145,6 +147,7 @@ class BuildFyIndexMdTests(TestCase):
 class ZipIndexHeadingAdjustmentTests(TestCase):
     """Integration: headings in item notes are re-levelled in the ZIP index."""
 
+    @override
     def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "admin@example.com", "pass")
         self.client = Client()
