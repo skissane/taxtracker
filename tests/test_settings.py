@@ -8,6 +8,7 @@ import sys
 import tempfile
 import typing
 from pathlib import Path
+from typing import override
 from unittest import mock
 
 import coverage
@@ -491,6 +492,7 @@ class LoggingTests(TestCase):
     DEBUG is (tests run with it off, as production does), so they reach the
     Fly logs."""
 
+    @override
     def setUp(self) -> None:
         # Both loggers share the one handler, which writes to stderr.
         (handler,) = logging.getLogger("django").handlers
@@ -568,6 +570,7 @@ class SQLiteFileDatabaseTests(TestCase):
     open a separate connection to a temporary file with the same settings.
     """
 
+    @override
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)

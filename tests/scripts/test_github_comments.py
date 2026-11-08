@@ -4,7 +4,7 @@ import threading
 import urllib.error
 import urllib.request
 from email.message import Message
-from typing import Any
+from typing import Any, override
 from unittest import mock
 
 from django.test import SimpleTestCase
@@ -113,6 +113,7 @@ class GitHubCommentsRequestTests(SimpleTestCase):
                     self.end_headers()
                     self.wfile.write(body)
 
+            @override
             def log_message(self, format: str, *args: Any) -> None:
                 pass
 

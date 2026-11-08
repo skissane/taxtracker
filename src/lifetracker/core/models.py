@@ -1,7 +1,7 @@
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 from django.core.exceptions import SuspiciousFileOperation, ValidationError
 from django.core.files.base import ContentFile
@@ -31,6 +31,7 @@ class FileType(models.Model):
         verbose_name = "File Type"
         verbose_name_plural = "File Types"
 
+    @override
     def __str__(self) -> str:
         return self.short_name
 
@@ -74,9 +75,11 @@ class MimeType(models.Model):
             ),
         ]
 
+    @override
     def __str__(self) -> str:
         return self.mime_type
 
+    @override
     def clean(self) -> None:
         if self.mime_type and not _MIME_TYPE_RE.match(self.mime_type):
             raise ValidationError(
@@ -125,15 +128,18 @@ class FileExtension(models.Model):
             ),
         ]
 
+    @override
     def __str__(self) -> str:
         return self.extension
 
+    @override
     def clean(self) -> None:
         if self.extension:
             self.extension = self.extension.lower()
             if _EXTENSION_INVALID_RE.search(self.extension):
                 raise ValidationError({"extension": ("File extension must not contain whitespace, a dot, or a slash.")})
 
+    @override
     def save(self, *args: Any, **kwargs: Any) -> None:
         if self.extension:
             self.extension = self.extension.lower()
@@ -150,6 +156,7 @@ class DBStoredFile(models.Model):
         verbose_name = "Stored File"
         verbose_name_plural = "Stored Files"
 
+    @override
     def __str__(self) -> str:
         return self.filename
 
@@ -173,6 +180,7 @@ class DatabaseStorage(Storage):
         obj = DBStoredFile.objects.create(filename=filename, content=data)
         return f"{self._PREFIX}{obj.pk}/{filename}"
 
+    @override
     def exists(self, name: str) -> bool:
         try:
             pk = self._name_to_pk(name)
@@ -180,10 +188,12 @@ class DatabaseStorage(Storage):
         except ValueError:
             return False
 
+    @override
     def url(self, name: str | None) -> str:
         pk = self._name_to_pk(name)
         return reverse("admin:core_dbstoredfile_serve_file", args=[pk])
 
+    @override
     def delete(self, name: str) -> None:
         try:
             pk = self._name_to_pk(name)
@@ -191,11 +201,13 @@ class DatabaseStorage(Storage):
         except ValueError:
             pass
 
+    @override
     def size(self, name: str) -> int:
         pk = self._name_to_pk(name)
         # LENGTH() of a blob reads only its size, not the content.
         return DBStoredFile.objects.filter(pk=pk).annotate(size=Length("content")).values_list("size", flat=True).get()
 
+    @override
     def get_available_name(self, name: str, max_length: int | None = None) -> str:
         # Each save creates a new record so there are no name conflicts.
         # _save returns "db/<pk>/<filename>", so leave room for that prefix with the longest pk.
@@ -253,6 +265,7 @@ class CloudBackupStatus(models.Model):
             ),
         ]
 
+    @override
     def __str__(self) -> str:
         if self.last_backup_at is None:
             return "Cloud backup status: never backed up"
@@ -286,6 +299,7 @@ class AppIcon(models.Model):
             ),
         ]
 
+    @override
     def __str__(self) -> str:
         return f"App icon uploaded at {self.uploaded_at}"
 

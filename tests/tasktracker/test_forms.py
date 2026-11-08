@@ -1,4 +1,5 @@
 import datetime
+from typing import override
 
 from django.test import TestCase
 
@@ -7,6 +8,7 @@ from lifetracker.tasktracker.models import Task
 
 
 class TaskAttachmentFormTests(TestCase):
+    @override
     def setUp(self) -> None:
         self.task = Task.objects.create(title="Inbox", order=1)
 

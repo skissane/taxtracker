@@ -1,4 +1,5 @@
 import datetime
+from typing import override
 from unittest import mock
 
 from django.contrib import admin
@@ -17,6 +18,7 @@ from lifetracker.taxtracker.models import Attachment, FinancialYear, FinancialYe
 
 
 class FinancialYearModelTests(TestCase):
+    @override
     def setUp(self) -> None:
         self.fy = FinancialYear.objects.create(year=2024)
 
@@ -186,6 +188,7 @@ class FinancialYearModelTests(TestCase):
 
 
 class ItemModelTests(TestCase):
+    @override
     def setUp(self) -> None:
         self.fy = FinancialYear.objects.create(year=2024)
         self.parent = Item.objects.create(year=self.fy, title="Income", order=1)
@@ -214,6 +217,7 @@ class ItemModelTests(TestCase):
 class ItemYearInheritanceTests(TestCase):
     """Model-level enforcement: child items always inherit parent's year."""
 
+    @override
     def setUp(self) -> None:
         self.fy2024 = FinancialYear.objects.create(year=2024)
         self.fy2025 = FinancialYear.objects.create(year=2025)
@@ -307,6 +311,7 @@ class ItemYearInheritanceTests(TestCase):
 
 
 class ReceivedDocumentModelTests(TestCase):
+    @override
     def setUp(self) -> None:
         self.fy = FinancialYear.objects.create(year=2024)
 
@@ -330,6 +335,7 @@ class ReceivedDocumentModelTests(TestCase):
 class ItemParentCycleTests(TestCase):
     """Tests that circular parent references are rejected with a ValidationError."""
 
+    @override
     def setUp(self) -> None:
         self.fy = FinancialYear.objects.create(year=2024)
         self.user = User.objects.create_superuser("admin", "admin@example.com", "pass")
@@ -500,6 +506,7 @@ class ItemParentCycleTests(TestCase):
 class AttachmentTitleTests(TestCase):
     """Tests for Attachment.title auto-population and FK file_type."""
 
+    @override
     def setUp(self) -> None:
         self.fy = FinancialYear.objects.create(year=2024)
         self.item = Item.objects.create(year=self.fy, title="Income", order=1)
@@ -547,6 +554,7 @@ class AttachmentTitleTests(TestCase):
 class AttachmentDateTests(TestCase):
     """Tests for Attachment.date auto-extraction from filename."""
 
+    @override
     def setUp(self) -> None:
         self.fy = FinancialYear.objects.create(year=2024)
         self.item = Item.objects.create(year=self.fy, title="Income", order=1)
@@ -591,6 +599,7 @@ class AttachmentDateTests(TestCase):
 class AttachmentParentValidationTests(TestCase):
     """Tests for Attachment's exactly-one-of item/received_document invariant."""
 
+    @override
     def setUp(self) -> None:
         self.fy = FinancialYear.objects.create(year=2024)
         self.item = Item.objects.create(year=self.fy, title="Income", order=1)
@@ -643,6 +652,7 @@ class AttachmentParentValidationTests(TestCase):
 class AttachmentParentConstraintTests(TestCase):
     """The DB CheckConstraint fires even when clean()/full_clean() is bypassed."""
 
+    @override
     def setUp(self) -> None:
         self.fy = FinancialYear.objects.create(year=2024)
 
@@ -665,6 +675,7 @@ class AttachmentParentConstraintTests(TestCase):
 class DatabaseStorageTests(TestCase):
     """Tests for DatabaseStorage backend and file-storage related behaviours."""
 
+    @override
     def setUp(self) -> None:
         self.fy = FinancialYear.objects.create(year=2024)
         self.item = Item.objects.create(year=self.fy, title="Income", order=1)

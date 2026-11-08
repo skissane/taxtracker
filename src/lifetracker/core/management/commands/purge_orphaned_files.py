@@ -9,7 +9,7 @@ nothing else is using the database.
 """
 
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, override
 
 from django.core.management.base import BaseCommand, CommandParser
 from django.db import transaction
@@ -31,6 +31,7 @@ def _batches(pks: list[int]) -> Iterator[list[int]]:
 class Command(BaseCommand):
     help = "Report stored files no attachment refers to, and delete them with --delete."
 
+    @override
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "--delete",
@@ -38,6 +39,7 @@ class Command(BaseCommand):
             help="Delete the orphaned files (default: only report them).",
         )
 
+    @override
     def handle(self, *args: Any, delete: bool = False, **options: Any) -> None:
         # One transaction, so the count reported matches what's deleted. It
         # doesn't lock out writers until its first delete, so an upload saved

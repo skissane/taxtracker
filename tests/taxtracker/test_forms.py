@@ -1,3 +1,5 @@
+from typing import override
+
 from django.test import TestCase
 
 from lifetracker.taxtracker.forms import AttachmentForm
@@ -7,6 +9,7 @@ from lifetracker.taxtracker.models import FinancialYear, Item
 class AttachmentDateInputFormatTests(TestCase):
     """AttachmentForm accepts FlexibleDateField's extra English date formats."""
 
+    @override
     def setUp(self) -> None:
         self.fy = FinancialYear.objects.create(year=2024)
         self.item = Item.objects.create(year=self.fy, title="Income", order=1)
