@@ -59,8 +59,8 @@ limits = {}
 # The policy at the top of the exolot PR comment (see AGENTS.md).
 [tool.exolot]
 preamble = """
-**For information only.** Fix a finding when fixing it makes the code better, e.g. a real bug, or a refactor \
-that makes a complex function clearer; otherwise ignore it, as findings don't block the PR. \
+**For information only.** For each finding the PR adds, sketch the fix and judge whether the code would be \
+better or worse with it: if better, fix it; if worse, leave it be, as findings don't block the PR. \
 Don't suppress one with `NOSONAR` or `noqa`. \
 See [AGENTS.md](https://github.com/skissane/taxtracker/blob/master/AGENTS.md) for more.
 """

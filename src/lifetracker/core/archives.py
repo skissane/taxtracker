@@ -29,6 +29,31 @@ MAX_ZIP_PDF_MEMBER_BYTES = 20 * 1024 * 1024
 MAX_ZIP_PDF_TOTAL_BYTES = 100 * 1024 * 1024
 
 
+def _safe_to_read(info: zipfile.ZipInfo, total_pdf_size: int) -> bool:
+    """Whether reading *info* keeps within the size limits, given the PDFs
+    already read total *total_pdf_size* bytes."""
+    # zipfile limits how much it decompresses at once only for deflate, so a bzip2 or LZMA entry could
+    # still expand far beyond file_size in one call; real ZIPs of PDFs are stored or deflated anyway.
+    return (
+        info.compress_type in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+        and info.file_size <= MAX_ZIP_PDF_MEMBER_BYTES
+        and total_pdf_size + info.file_size <= MAX_ZIP_PDF_TOTAL_BYTES
+    )
+
+
+def _read_pdf(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes | None:
+    """*info*'s data, or None if it's corrupt or not a PDF."""
+    # Not archive.read(): that asks the decompressor for up to 2 GiB at once and only then cuts the
+    # result to file_size, so an entry whose header understates its size could still exhaust memory.
+    # A bad CRC or local header raises BadZipFile; a corrupt or cut-off deflate stream, zlib.error or EOFError.
+    try:
+        with archive.open(info) as member:
+            pdf_bytes = member.read(info.file_size)
+    except zipfile.BadZipFile, zlib.error, EOFError:
+        return None
+    return pdf_bytes if pdf_bytes.startswith(PDF_MAGIC) else None
+
+
 def extract_pdfs_from_zip(file_bytes: bytes) -> tuple[list[tuple[str, bytes]], list[str]]:
     """Extract PDF files from a ZIP archive.
 
@@ -53,29 +78,9 @@ def extract_pdfs_from_zip(file_bytes: bytes) -> tuple[list[tuple[str, bytes]], l
             if not entry_name.endswith((".pdf", ".PDF")):
                 skipped.append(entry_name)
                 continue
-            if entry_name.endswith(".PDF"):
-                entry_name = entry_name[:-4] + ".pdf"
-            # zipfile limits how much it decompresses at once only for deflate, so a bzip2 or LZMA entry could
-            # still expand far beyond file_size in one call; real ZIPs of PDFs are stored or deflated anyway.
-            if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
-                skipped.append(entry_name)
-                continue
-            if info.file_size > MAX_ZIP_PDF_MEMBER_BYTES:
-                skipped.append(entry_name)
-                continue
-            if total_pdf_size + info.file_size > MAX_ZIP_PDF_TOTAL_BYTES:
-                skipped.append(entry_name)
-                continue
-            # Not archive.read(): that asks the decompressor for up to 2 GiB at once and only then cuts the
-            # result to file_size, so an entry whose header understates its size could still exhaust memory.
-            # A bad CRC or local header raises BadZipFile; a corrupt or cut-off deflate stream, zlib.error or EOFError.
-            try:
-                with archive.open(info) as member:
-                    pdf_bytes = member.read(info.file_size)
-            except zipfile.BadZipFile, zlib.error, EOFError:
-                skipped.append(entry_name)
-                continue
-            if not pdf_bytes.startswith(PDF_MAGIC):
+            entry_name = entry_name[:-4] + ".pdf"
+            pdf_bytes = _read_pdf(archive, info) if _safe_to_read(info, total_pdf_size) else None
+            if pdf_bytes is None:
                 skipped.append(entry_name)
                 continue
             total_pdf_size += info.file_size

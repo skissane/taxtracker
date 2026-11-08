@@ -155,7 +155,7 @@ def log(message: str) -> None:
 class Request:
     ip: str
     time: float
-    request: str
+    request_line: str
     status: int | None
     user_agent: str
     rejected: bool
@@ -198,7 +198,7 @@ def parse_line(line: str) -> Request | None:
     return Request(
         ip=ip,
         time=when,
-        request=f"{method} {path}"[:MAX_TEXT_LENGTH],
+        request_line=f"{method} {path}"[:MAX_TEXT_LENGTH],
         status=status,
         user_agent=(str(user_agent) if _present(user_agent) else "")[:MAX_TEXT_LENGTH],
         rejected=_present(entry.get("jwt_failure")),
@@ -292,7 +292,7 @@ def record(connection: sqlite3.Connection, requests_: Iterable[Request], geoip: 
                 "logged_in": len(logged_in_times),
                 "first_logged_in": min(logged_in_times, default=None),
                 "last_logged_in": max(logged_in_times, default=None),
-                "last_request": latest.request,
+                "last_request": latest.request_line,
                 "last_status": latest.status,
                 "last_user_agent": latest.user_agent,
                 **dataclasses.asdict(location),

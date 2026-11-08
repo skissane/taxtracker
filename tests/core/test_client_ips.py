@@ -51,7 +51,7 @@ def request(ip: str = "203.0.113.7", time: float = 1000.0, **fields: Any) -> cli
         **{
             "ip": ip,
             "time": time,
-            "request": "GET /admin/",
+            "request_line": "GET /admin/",
             "status": 200,
             "user_agent": "UA",
             "rejected": False,
@@ -108,7 +108,7 @@ class ParseLineTests(SimpleTestCase):
             client_ips.Request(
                 ip="203.0.113.7",
                 time=1761200000.123,
-                request="GET /admin/",
+                request_line="GET /admin/",
                 status=302,
                 user_agent="curl/8",
                 rejected=True,
@@ -134,13 +134,13 @@ class ParseLineTests(SimpleTestCase):
 
     def test_missing_fields(self) -> None:
         parsed = _parse(envoy_line(method=None, path=None, status=None, user_agent=None))
-        self.assertEqual(parsed.request, "- -")
+        self.assertEqual(parsed.request_line, "- -")
         self.assertIsNone(parsed.status)
         self.assertEqual(parsed.user_agent, "")
 
     def test_long_text_is_cut_off(self) -> None:
         parsed = _parse(envoy_line(path="/" + "x" * 1000, user_agent="y" * 1000))
-        self.assertEqual(len(parsed.request), client_ips.MAX_TEXT_LENGTH)
+        self.assertEqual(len(parsed.request_line), client_ips.MAX_TEXT_LENGTH)
         self.assertEqual(len(parsed.user_agent), client_ips.MAX_TEXT_LENGTH)
 
     def test_not_a_request(self) -> None:
@@ -222,7 +222,7 @@ class RecordTests(TempDirMixin, SimpleTestCase):
         updated = client_ips.record(
             self.connection,
             [
-                request(time=1002, rejected=True, request="GET /x", status=302),
+                request(time=1002, rejected=True, request_line="GET /x", status=302),
                 request(time=1000, logged_in=True),
                 request(ip="198.51.100.1", time=1001),
             ],
@@ -260,7 +260,7 @@ class RecordTests(TempDirMixin, SimpleTestCase):
         client_ips.record(
             self.connection,
             [
-                request(time=1005, logged_in=True, request="GET /y", user_agent="B"),
+                request(time=1005, logged_in=True, request_line="GET /y", user_agent="B"),
                 # Older than what's recorded, e.g. out of order.
                 request(time=900),
             ],
@@ -297,7 +297,7 @@ class RecordTests(TempDirMixin, SimpleTestCase):
 
     def test_latest_request_kept_when_batch_is_older(self) -> None:
         client_ips.record(self.connection, [request(time=1000)], self.geoip)
-        client_ips.record(self.connection, [request(time=500, request="GET /old")], self.geoip)
+        client_ips.record(self.connection, [request(time=500, request_line="GET /old")], self.geoip)
         self.assertEqual(self._row()["last_request"], "GET /admin/")
         self.assertEqual(self._row()["last_seen"], 1000)
 
@@ -915,7 +915,7 @@ class ClientIPsAdminViewTests(TempDirMixin, TestCase):
                     ip="198.51.100.1",
                     time=1761200100,
                     rejected=True,
-                    request="GET /wp-login.php",
+                    request_line="GET /wp-login.php",
                     status=302,
                 ),
             ],

@@ -23,7 +23,7 @@ _ATX_HEADING_RE = re.compile(r"(#{1,6}) (.+)")
 # A fence opens with 3+ backticks or tildes, indented at most 3 spaces (a backtick
 # fence's info string can't hold a backtick, or it's an inline code span); a
 # closing fence uses the same character, at least as many of it, and nothing after.
-_CODE_FENCE_RE = re.compile(r" {0,3}(`{3,}(?=[^`]*$)|~{3,})(.*)")
+_CODE_FENCE_RE = re.compile(r" {0,3}(`{3,}+(?=[^`]*$)|~{3,}+)(.*)")
 
 
 def adjust_notes_headings(notes: str, item_heading_level: int) -> str:

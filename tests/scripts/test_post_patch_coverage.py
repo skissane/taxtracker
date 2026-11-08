@@ -115,6 +115,7 @@ class PostPatchCoverageTests(SimpleTestCase):
             no_lines + "more\n": "line 5: expected nothing more, found 'more'",
             self.HEAD.replace("## Summary", "## Totals"): "line 6: expected '## Summary', found '## Totals'",
             self.HEAD.replace("**Missing**", "**Uncovered**"): "line 9: expected '- **Missing**: ...'",
+            self.HEAD.replace("**Total**: 2 lines", "**Coverage**: 50%"): "line 8: expected '- **Total**: ...'",
             self.HEAD.replace("- **Coverage**: 50%\n", ""): "line 10: expected '- **Coverage**: ...', found the end",
         }
         for report, error in cases.items():
