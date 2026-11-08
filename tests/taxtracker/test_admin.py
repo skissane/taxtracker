@@ -366,6 +366,7 @@ class AdminViewTests(AdminLoginMixin, TestCase):
         ]:
             with self.subTest(expected=expected):
                 response = self.client.post(url, {"fy_ids": fy_ids, "action": "zip"})
+                response.close()
 
                 self.assertIn(f'filename="{expected}"', response["Content-Disposition"])
 
