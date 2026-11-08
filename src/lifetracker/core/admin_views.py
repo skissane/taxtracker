@@ -22,7 +22,7 @@ from django.utils.html import format_html_join
 from django.utils.safestring import mark_safe
 from django.utils.timesince import timesince
 
-from lifetracker.core import app_icon, client_ips, idle_watchdog, ip_location, uptime_log
+from lifetracker.core import app_icon, client_ips, idle_watchdog, ip_location, sqlite_helpers, uptime_log
 
 # ---------------------------------------------------------------------------
 # Idle watchdog status page
@@ -404,7 +404,7 @@ def client_ips_page_context(logged_in_only: bool = False) -> dict[str, Any]:
     if not config.db_path.exists():
         return context
     try:
-        connection = client_ips.connect_read_only(config.db_path)
+        connection = sqlite_helpers.connect_read_only(config.db_path)
         try:
             context["ips"] = [
                 _client_ip_row(row)

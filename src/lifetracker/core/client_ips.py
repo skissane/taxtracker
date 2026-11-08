@@ -27,7 +27,6 @@ Like the idle watchdog, it doesn't import Django.
 """
 
 import collections
-import contextlib
 import dataclasses
 import datetime
 import ipaddress
@@ -38,12 +37,13 @@ import sqlite3
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from types import FrameType
 from typing import Any
 
 from lifetracker.core.ip_location import DOWNLOADED, FAILED, GeoIP, Location, Relay, update_geoip
+from lifetracker.core.sqlite_helpers import transaction
 
 DEFAULT_REQUEST_LOG_NAME = "lifetracker-envoy-requests.jsonl"
 DEFAULT_INTERVAL_SECONDS = 5
@@ -249,7 +249,7 @@ def connect(path: Path) -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
     # So the admin page's reads never wait for the collector.
     connection.execute("PRAGMA journal_mode=WAL")
-    with _transaction(connection):
+    with transaction(connection):
         connection.execute(_SCHEMA)
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(client_ip)")}
         for column, type_ in _ADDED_COLUMNS.items():
@@ -257,26 +257,6 @@ def connect(path: Path) -> sqlite3.Connection:
                 connection.execute(f"ALTER TABLE client_ip ADD COLUMN {column} {type_}")
         connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     return connection
-
-
-def connect_read_only(path: Path) -> sqlite3.Connection:
-    """Open the collector's database read-only (``sqlite3.OperationalError``
-    if it doesn't exist)."""
-    connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
-    connection.row_factory = sqlite3.Row
-    return connection
-
-
-@contextlib.contextmanager
-def _transaction(connection: sqlite3.Connection) -> Iterator[None]:
-    # IMMEDIATE, so a read then a write never fails with "database is locked".
-    connection.execute("BEGIN IMMEDIATE")
-    try:
-        yield
-    except BaseException:
-        connection.execute("ROLLBACK")
-        raise
-    connection.execute("COMMIT")
 
 
 def record(connection: sqlite3.Connection, requests_: Iterable[Request], geoip: GeoIP) -> int:
@@ -289,7 +269,7 @@ def record(connection: sqlite3.Connection, requests_: Iterable[Request], geoip: 
         by_ip.setdefault(request.ip, []).append(request)
     if not by_ip:
         return 0
-    with _transaction(connection):
+    with transaction(connection):
         for ip, ip_requests in by_ip.items():
             ip_requests.sort(key=lambda request: request.time)
             latest = ip_requests[-1]
@@ -365,7 +345,7 @@ def fill_in_locations(connection: sqlite3.Connection, geoip: GeoIP) -> int:
     """Look up every IP without a location yet (e.g. seen before the databases
     were downloaded); returns how many it found."""
     found = 0
-    with _transaction(connection):
+    with transaction(connection):
         rows = connection.execute("SELECT ip FROM client_ip WHERE country IS NULL AND asn IS NULL").fetchall()
         for row in rows:
             location = geoip.lookup(row["ip"])
@@ -383,7 +363,7 @@ def fill_in_relay(connection: sqlite3.Connection, geoip: GeoIP) -> int:
     before there were any, or before this existed); returns how many it
     checked."""
     checked = 0
-    with _transaction(connection):
+    with transaction(connection):
         rows = connection.execute("SELECT ip FROM client_ip WHERE private_relay IS NULL").fetchall()
         for row in rows:
             relay = geoip.relay(row["ip"])

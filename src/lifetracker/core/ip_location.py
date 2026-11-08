@@ -33,6 +33,7 @@ import maxminddb
 import requests
 
 from lifetracker.core import idle_watchdog
+from lifetracker.core.sqlite_helpers import connect_read_only, transaction
 
 # The DB-IP Lite databases, by the name in their download URLs.
 GEOIP_DATABASES = ("dbip-country-lite", "dbip-asn-lite")
@@ -353,15 +354,12 @@ def build_relay_ranges(lines: Iterable[str], destination: Path) -> int:
                 "CREATE TABLE relay_range (start BLOB PRIMARY KEY, end BLOB NOT NULL,"
                 " country TEXT, region TEXT, city TEXT) WITHOUT ROWID"
             )
-            # One transaction, as row-by-row commits would be slow; on failure,
-            # the file is deleted, so there's nothing to roll back.
-            connection.execute("BEGIN")
-            # Streamed, so the whole list is never in memory at once.
-            connection.executemany(
-                "INSERT OR REPLACE INTO relay_range VALUES (?, ?, ?, ?, ?)",
-                filter(None, map(_parse_range, lines)),
-            )
-            connection.execute("COMMIT")
+            with transaction(connection):
+                # Streamed, so the whole list is never in memory at once.
+                connection.executemany(
+                    "INSERT OR REPLACE INTO relay_range VALUES (?, ?, ?, ?, ?)",
+                    filter(None, map(_parse_range, lines)),
+                )
             count = int(connection.execute("SELECT count(*) FROM relay_range").fetchone()[0])
         finally:
             connection.close()
@@ -413,8 +411,7 @@ class RelayRanges:
             return None
         connection = None
         try:
-            connection = sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
-            connection.row_factory = sqlite3.Row
+            connection = connect_read_only(self.path)
             connection.execute("SELECT 1 FROM relay_range LIMIT 1").fetchall()
         except sqlite3.Error:
             if connection is not None:
