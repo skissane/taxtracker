@@ -313,25 +313,26 @@ The cloud backup and the DB backup download both get their copy from `backup_dat
 The temporary directory (`/tmp`, or `$TMPDIR`; on Fly, the Machine's root filesystem, not the `/data` volume) needs room for one full copy of the database while a backup runs; if it fills, SQLite's `sqlite3.OperationalError` (in `CLOUD_BACKUP_ERRORS`, with `OSError`) is reported as a failed backup, not a 500.
 It raises `RuntimeError` inside a transaction (`in_atomic_block`), since SQLite won't back up from a connection that's writing and `backup()` would retry forever; so tests that run a backup are `TransactionTestCase`s, not `TestCase`s.
 
-The superuser-only **Idle Watchdog** page (`/admin/idle-watchdog/`, URL name `admin:idle_watchdog`) belongs to no model, so it has no admin index entry; instead `LifetrackerAdminSite.get_urls` serves `core.admin.idle_watchdog_view` there, and `src/lifetracker/templates/admin/base_site.html` (in `TEMPLATES`' `DIRS`, so ahead of the admin's own templates, which it extends) links it from the top bar for superusers, before "View site".
+The superuser-only **Idle Watchdog** page (`/admin/idle-watchdog/`, URL name `admin:idle_watchdog`) belongs to no model, so it has no admin index entry; instead `LifetrackerAdminSite.get_urls` serves `core.admin_views.idle_watchdog_view` there, and `src/lifetracker/templates/admin/base_site.html` (in `TEMPLATES`' `DIRS`, so ahead of the admin's own templates, which it extends) links it from the top bar for superusers, before "View site".
+Its view, like those of the other pages below that belong to no model, is in `core/admin_views.py`, apart from `core/admin.py`'s `ModelAdmin`s.
 Add any further model-less pages the same way, rather than giving them a tableless model; if the links grow numerous, make them a menu.
-`idle_watchdog_page_context` (in `core/admin.py`) builds the page from `idle_watchdog.config_from_env()` (the web process has the watchdog's environment), the status file (`idle_watchdog.read_status`), the request file's modification time (`last_request_time`, read directly, as the status file's copy is only as fresh as the last check; issue #172) and `/proc/uptime` (`system_uptime`).
+`idle_watchdog_page_context` (in `core/admin_views.py`) builds the page from `idle_watchdog.config_from_env()` (the web process has the watchdog's environment), the status file (`idle_watchdog.read_status`), the request file's modification time (`last_request_time`, read directly, as the status file's copy is only as fresh as the last check; issue #172) and `/proc/uptime` (`system_uptime`).
 It shows durations to the second (`_format_duration`), since `timesince` rounds anything under a minute to "0 minutes".
 It warns that the watchdog has probably stopped when its last check, or its start if it hasn't checked yet, is more than three check intervals old.
 Invalid settings, an unreadable status file and unexpected contents are shown as errors on the page.
 Times are in the site's time zone.
 
-The superuser-only **Uptime** page (`/admin/uptime/`, URL name `admin:uptime_report`) is served and linked the same way, by `core.admin.uptime_report_view`.
+The superuser-only **Uptime** page (`/admin/uptime/`, URL name `admin:uptime_report`) is served and linked the same way, by `core.admin_views.uptime_report_view`.
 It shows the same report as the `uptime_report` command, newest day first, as both get it from `uptime_log.daily_report` (a list of `DayUptime`); its `days` query parameter (default 7, at most 366) is the command's `--days`, and an invalid one is reported on the page and the default used.
 Dates are UTC days, as the files are.
-Each day's Starts count (unless it's "No data") links to that day's drill-down page (`/admin/uptime/<YYYY-MM-DD>/`, URL name `admin:uptime_day`, `core.admin.uptime_day_view`; not in the top bar).
+Each day's Starts count (unless it's "No data") links to that day's drill-down page (`/admin/uptime/<YYYY-MM-DD>/`, URL name `admin:uptime_day`, `core.admin_views.uptime_day_view`; not in the top bar).
 It lists the day's up periods (`uptime_log.day_periods`, from `up_periods`, one `UpPeriod` per start) with start, last second up and duration (all `HH:MM:SS`), noting a period that began the day before (up at midnight, and the previous day's last second up), continued into the next day, or may still be going (today's, if it ended within `MAX_FILLED_GAP_SECONDS` of now).
 An invalid date or one after today is a 404; the page keeps the report's `days` for its links back and to the days either side.
 Both pages also show times in the browser's time zone: the drill-down each period's start and last second up (after the UTC time, as e.g. `(Fri 02:59 local)`) and the UTC day's span, the report page when today's UTC day began.
 The pages put UTC ISO 8601 times in `<time data-lt-local datetime="...Z">` elements, and `core/static/core/local_times.js` (loaded from the templates' `extrahead`) rewrites each as `YYYY-MM-DD HH:MM` local time, without seconds as they match UTC's (or `Fri 02:59` with `data-lt-local="weekday"`), fills each `[data-lt-time-zone]` with the zone's IANA name and unhides each `[data-lt-local-only]` element, which the page renders `hidden` so nothing shows empty without JavaScript.
 The screenshot tests set the browser's time zone to `Australia/Sydney`, so their local times differ from UTC.
 
-The superuser-only **Client IPs** page (`/admin/client-ips/`, URL name `admin:client_ips`) is served and linked the same way, by `core.admin.client_ips_view`, reading the client IP record read-only (`client_ips.connect_read_only`): a table of the networks (ASNs) requests with a valid JWT came from (`logged_in_networks`), then the `_CLIENT_IPS_LIMIT` (500) IPs seen most recently (`recent_ips`), or only those with logged-in requests with `?logged_in=1`.
+The superuser-only **Client IPs** page (`/admin/client-ips/`, URL name `admin:client_ips`) is served and linked the same way, by `core.admin_views.client_ips_view`, reading the client IP record read-only (`client_ips.connect_read_only`): a table of the networks (ASNs) requests with a valid JWT came from (`logged_in_networks`), then the `_CLIENT_IPS_LIMIT` (500) IPs seen most recently (`recent_ips`), or only those with logged-in requests with `?logged_in=1`.
 Each network's row counts its Private Relay IPs, and each IP's network cell marks it **iCloud Private Relay**, with the city and region Apple's list gives (`relay_location`).
 Above them, a table from `status.json` shows each DB-IP database's, and the relay ranges', last download attempt and success, its outcome and URL, and a failure's traceback in a collapsed `<details>`; an unreadable file or unexpected contents is an error note.
 Times are UTC in the HTML, shown in the browser's time zone by `local_times.js`.
@@ -342,7 +343,7 @@ Every admin page's head links the web app manifest (`/manifest.webmanifest`, URL
 It's on the auth whitelist, as browsers fetch it without cookies, so it always names the site `LIFETRACKER_UNAUTHENTICATED_SITE_NAME`, whoever asks; that's why it's a view rather than a static file.
 `base_site.html`'s `extrahead` block links it and the icon (as the favicon and the `apple-touch-icon`, via the `app_icon` template tag), and sets `apple-mobile-web-app-title` to the page's `site_title`, so the login page includes them all.
 No `apple-mobile-web-app-capable` tag: it's deprecated, and the manifest's `display: standalone` replaces it.
-`core/app_icon.py`'s `current_icon()` gives the icon all of these use: by default `core/static/core/app_icon.png` (512x512 and opaque, rendered from `app_icon.svg` beside it, which is the default favicon), or the PNG a superuser uploaded on the **App Icon** page (`/admin/app-icon/`, URL name `admin:app_icon_page`, `core.admin.app_icon_view`, served and linked from the top bar like the Idle Watchdog page), which also resets it to the default.
+`core/app_icon.py`'s `current_icon()` gives the icon all of these use: by default `core/static/core/app_icon.png` (512x512 and opaque, rendered from `app_icon.svg` beside it, which is the default favicon), or the PNG a superuser uploaded on the **App Icon** page (`/admin/app-icon/`, URL name `admin:app_icon_page`, `core.admin_views.app_icon_view`, served and linked from the top bar like the Idle Watchdog page), which also resets it to the default.
 An upload must be a square PNG, at least 512x512 and at most 1 MiB; `check_icon` reads the chunk structure and IHDR with the standard library, not Pillow, and the page warns of transparency (an alpha colour type or a `tRNS` chunk), which iOS fills in with black.
 It's stored as the single `AppIcon` row, whose `DatabaseStorage` file goes with it when `save_icon` or `reset_icon` deletes it, and served publicly (it's on the auth whitelist) by the `app_icon` view at `/app-icon.png`, which redirects to the default (uncached) when there's none.
 Links to it add `?v=` and the first 16 hex digits of its SHA-256, and a response for the current version is cached for a year (`immutable`), any other `v` not at all; the manifest's one-hour cache can still name the previous icon for up to an hour.
@@ -360,7 +361,7 @@ Custom admin pages in any module link `core/admin_pages.css` (static), which siz
   Also supports "View Index (Markdown)" action.
 - **Copy to new year** (`copy-to-new-year/`) — clones the item tree (without notes/status/attachments) into `year+1`.
 
-Both ZIPs are built in a `SpooledTemporaryFile` (in memory up to `_ZIP_SPOOL_MAX_SIZE`, 10 MB, then on disk), copying in one attachment at a time, and returned as a `FileResponse`, so they never hold every attachment in memory at once.
+Both ZIPs are built in a `SpooledTemporaryFile` (in memory up to `ZIP_SPOOL_MAX_SIZE`, 10 MB, then on disk), copying in one attachment at a time, and returned as a `FileResponse`, so they never hold every attachment in memory at once.
 
 `ItemAdmin` adds:
 - **Import archive** (`<pk>/import-archive/`) — uploads a `.har` (Fidelity) or `.zip` file and creates `Attachment` records for each extracted PDF.
@@ -371,13 +372,15 @@ Both ZIPs are built in a `SpooledTemporaryFile` (in memory up to `_ZIP_SPOOL_MAX
 
 ## ZIP export rules
 
+`taxtracker/zip_export.py` builds the ZIPs and their `index.md`, apart from the admin views that serve them.
+
 - Spaces in item titles → underscores in ZIP paths (`_safe_component`).
 - Names that would clash in a folder, compared case-insensitively, get ` (2)`, ` (3)`... (before the extension for attachments; `_unique_folder_paths`, `_dedupe_name`): sibling items' folders, an item's attachments and its child folders, and `index.md` at the top.
   Items in a parent cycle keep `_folder_path`'s `…`-prefixed path, with only the last component suffixed.
 - Items appear in the index only if they have attachments or notes.
-- ATX headings in `item.notes` are re-levelled so the shallowest heading becomes `item_heading_level + 1` (implemented in `_adjust_notes_headings`).
+- ATX headings in `item.notes` are re-levelled so the shallowest heading becomes `item_heading_level + 1` (implemented in `adjust_notes_headings`).
   Lines inside fenced code blocks (```` ``` ```` or `~~~`) are left alone and don't count towards the shallowest level.
-  In `_write_fy_to_zip`, notes appear *after* attachments; in `_build_fy_index_md` (used for the View Index action), notes appear *before* attachments.
+  Both the ZIP's `index.md` and the View Index action (`build_fy_index_md`, which `_write_fy_to_zip` also uses) put an item's notes *after* its attachments.
 
 ## Archive import formats
 

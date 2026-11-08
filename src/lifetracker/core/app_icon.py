@@ -2,7 +2,7 @@
 
 The default is ``core/static/core/app_icon.png`` (512x512, rendered from
 ``app_icon.svg`` beside it, which is the default favicon). A superuser can
-upload a replacement PNG on the App Icon admin page (``core.admin.app_icon_view``);
+upload a replacement PNG on the App Icon admin page (``core.admin_views.app_icon_view``);
 it's stored in the main database, as the single ``AppIcon`` row, so backups
 include it, and resetting to the default deletes that row.
 

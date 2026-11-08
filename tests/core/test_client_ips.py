@@ -1471,7 +1471,7 @@ class ClientIPsAdminViewTests(TempDirMixin, TestCase):
 
     def test_limit(self) -> None:
         self._record()
-        with mock.patch("lifetracker.core.admin._CLIENT_IPS_LIMIT", 1):
+        with mock.patch("lifetracker.core.admin_views._CLIENT_IPS_LIMIT", 1):
             response = self.client.get(self.URL)
         self.assertEqual(self._ips(response), ["198.51.100.1"])
         self.assertContains(response, "Showing the 1 seen most recently.")

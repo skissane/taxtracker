@@ -74,9 +74,8 @@ from lifetracker.core.admin import (
     DBStoredFileAdmin,
     MimeTypeFormSet,
     _AtLeastOnePrimaryFormSet,
-    _format_duration,
-    idle_watchdog_page_context,
 )
+from lifetracker.core.admin_views import _format_duration, idle_watchdog_page_context
 from lifetracker.core.attachments import (
     extract_date_from_filename,
     file_type_for_filename,
@@ -1730,7 +1729,7 @@ class LoggingTests(TestCase):
         client = Client(raise_request_exception=False)
         client.force_login(User.objects.create_superuser("admin", "", "pw"))
         with mock.patch(
-            "lifetracker.core.admin.idle_watchdog_page_context",
+            "lifetracker.core.admin_views.idle_watchdog_page_context",
             side_effect=RuntimeError("boom"),
         ):
             response = client.get(reverse("admin:idle_watchdog"))

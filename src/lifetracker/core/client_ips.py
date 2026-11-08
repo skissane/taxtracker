@@ -12,7 +12,7 @@ few seconds and adds them up per IP in a SQLite file of its own (by default
 ``$LIFETRACKER_DATA_DIR/client_ips.sqlite3``, beside the main database rather
 than in it). Once it has read the whole file, and the file has grown past
 ``TRUNCATE_BYTES``, it empties it; Envoy appends, so carries on at the start.
-The admin's Client IPs page (``core.admin.client_ips_view``) reads the file.
+The admin's Client IPs page (``core.admin_views.client_ips_view``) reads the file.
 
 The client's IP is Fly Proxy's ``Fly-Client-IP`` header, or Envoy's peer
 without one (e.g. under ``just docker-run``). ``./run.sh`` runs no Envoy, so
