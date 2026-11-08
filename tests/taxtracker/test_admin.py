@@ -6,7 +6,7 @@ from unittest import mock
 
 from django.contrib.auth.models import Permission, User
 from django.core.files.base import ContentFile
-from django.test import Client, TestCase
+from django.test import Client, SimpleTestCase, TestCase
 from django.urls import reverse
 
 from lifetracker.taxtracker.admin import _attachment_date_warning
@@ -190,7 +190,9 @@ class ReceivedDocumentAdminViewTests(TestCase):
         self.assertContains(response, attachment_url)
 
 
-class AdminViewTests(TestCase):
+class AdminLoginMixin(SimpleTestCase):
+    """Logs a superuser in, with one financial year and one item, for the admin view tests."""
+
     def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "admin@example.com", "password")
         self.client = Client()
@@ -198,6 +200,8 @@ class AdminViewTests(TestCase):
         self.fy = FinancialYear.objects.create(year=2024)
         self.item = Item.objects.create(year=self.fy, title="Test Item", order=1)
 
+
+class AdminViewTests(AdminLoginMixin, TestCase):
     def _limited_client(self, username: str, *permission_codenames: str) -> Client:
         user = User.objects.create_user(username, f"{username}@example.com", "password")
         user.is_staff = True

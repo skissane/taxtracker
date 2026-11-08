@@ -11,6 +11,7 @@ from django.urls import reverse
 from lifetracker.core.models import DBStoredFile, FileType
 from lifetracker.taxtracker.models import Attachment, FinancialYear, Item
 from lifetracker.taxtracker.zip_export import _folder_path, adjust_notes_headings, build_fy_index_md
+from tests.taxtracker.test_admin import AdminLoginMixin
 
 # ---------------------------------------------------------------------------
 # adjust_notes_headings unit tests
@@ -182,15 +183,8 @@ class ZipIndexHeadingAdjustmentTests(TestCase):
         self.assertIn("#### Detail", index)
 
 
-class ZipDownloadTests(TestCase):
+class ZipDownloadTests(AdminLoginMixin, TestCase):
     """The single-year ZIP download's folder layout, names and index."""
-
-    def setUp(self) -> None:
-        self.user = User.objects.create_superuser("admin", "admin@example.com", "password")
-        self.client = Client()
-        self.client.login(username="admin", password="password")
-        self.fy = FinancialYear.objects.create(year=2024)
-        self.item = Item.objects.create(year=self.fy, title="Test Item", order=1)
 
     def test_download_zip_view_handles_parent_cycles(self) -> None:
         first = Item.objects.create(year=self.fy, title="Cycle A", order=9)

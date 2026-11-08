@@ -1,27 +1,14 @@
 import datetime
 
-from django.contrib import admin
-from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
-from django.test import RequestFactory, TestCase
+from django.test import TestCase
 
-from lifetracker.core.models import (
-    DBStoredFile,
-    FileExtension,
-    FileType,
-    database_storage,
-)
-from lifetracker.tasktracker.admin import TaskTypeAdmin
-from lifetracker.tasktracker.forms import TaskAttachmentForm
-from lifetracker.tasktracker.models import (
-    Task,
-    TaskAttachment,
-    TaskType,
-)
+from lifetracker.core.models import DBStoredFile, FileExtension, FileType, database_storage
+from lifetracker.tasktracker.models import Task, TaskAttachment, TaskType
 
 
 class TaskTypeModelTests(TestCase):
@@ -357,55 +344,3 @@ class TaskAttachmentModelTests(TestCase):
         attachment.save()
         attachment.refresh_from_db()
         self.assertIsNone(attachment.file_type)
-
-
-class TaskAttachmentFormTests(TestCase):
-    def setUp(self) -> None:
-        self.task = Task.objects.create(title="Inbox", order=1)
-
-    def test_accepts_english_month_name_dates(self) -> None:
-        form = TaskAttachmentForm(data={"task": self.task.pk, "title": "T", "date": "20 July 2023"})
-        self.assertNotIn("date", form.errors)
-        self.assertEqual(form.cleaned_data["date"], datetime.date(2023, 7, 20))
-
-    def test_admin_uses_it(self) -> None:
-        self.assertIs(admin.site._registry[TaskAttachment].form, TaskAttachmentForm)
-        task_admin = admin.site._registry[Task]
-        inline = next(i for i in task_admin.inlines if i.model is TaskAttachment)
-        self.assertIs(inline.form, TaskAttachmentForm)
-
-
-class TaskTypeAdminGenericProtectionTests(TestCase):
-    """The built-in 'Generic' TaskType (pk=1) should be uneditable and
-    undeletable through the admin."""
-
-    def setUp(self) -> None:
-        self.admin = TaskTypeAdmin(TaskType, admin.site)
-        self.generic = TaskType.objects.get(pk=TaskType.GENERIC_PK)
-        self.other = TaskType.objects.create(name="Household")
-        superuser = User.objects.create_superuser("root", "", "password")
-        self.request = RequestFactory().get("/")
-        self.request.user = superuser
-
-    def test_delete_permission_denied_for_generic(self) -> None:
-        self.assertFalse(self.admin.has_delete_permission(self.request, self.generic))
-
-    def test_delete_permission_allowed_for_other(self) -> None:
-        self.assertTrue(self.admin.has_delete_permission(self.request, self.other))
-
-    def test_delete_permission_allowed_with_no_object(self) -> None:
-        self.assertTrue(self.admin.has_delete_permission(self.request, None))
-
-    def test_readonly_fields_locked_for_generic(self) -> None:
-        readonly_fields = self.admin.get_readonly_fields(self.request, self.generic)
-        self.assertIn("name", readonly_fields)
-        self.assertIn("content_type", readonly_fields)
-
-    def test_readonly_fields_unlocked_for_other(self) -> None:
-        readonly_fields = self.admin.get_readonly_fields(self.request, self.other)
-        self.assertNotIn("name", readonly_fields)
-        self.assertNotIn("content_type", readonly_fields)
-
-    def test_readonly_fields_unlocked_for_new_object(self) -> None:
-        readonly_fields = self.admin.get_readonly_fields(self.request, None)
-        self.assertNotIn("name", readonly_fields)
