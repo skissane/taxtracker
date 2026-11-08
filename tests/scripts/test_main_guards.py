@@ -111,14 +111,18 @@ def test_recreate_pr(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixt
     assert "Invalid GitHub PR URL" in capsys.readouterr().err
 
 
+class _Response(io.BytesIO):
+    """A urlopen response: its body, and the status the scripts read."""
+
+    status = 200
+
+
 def _respond(monkeypatch: pytest.MonkeyPatch, url_prefix: str, body: object) -> None:
     """Make urlopen answer requests under url_prefix with a 200 and body as JSON."""
 
-    def urlopen(request: urllib.request.Request, **kwargs: Any) -> io.BytesIO:
+    def urlopen(request: urllib.request.Request, **kwargs: Any) -> _Response:
         assert request.full_url.startswith(url_prefix)
-        response = io.BytesIO(json.dumps(body).encode())
-        response.status = 200  # type: ignore[attr-defined]
-        return response
+        return _Response(json.dumps(body).encode())
 
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
 
