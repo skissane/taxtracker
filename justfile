@@ -268,7 +268,7 @@ fly-setup *args:
 
 # Lint the GitHub Actions workflows with jactionlint
 lint-workflows:
-    uv run --group dev jactionlint --profile correctness
+    uv run --group dev jactionlint
 
 # Check that every workflow pins the uv and just versions the project requires, and the Dockerfile the same uv
 check-pins:

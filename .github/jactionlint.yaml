@@ -1,0 +1,9 @@
+# The correctness profile (what actionlint checks), plus the Dependabot rules
+# from the default profile: a cooldown on every update, and no
+# insecure-external-code-execution. unpinned-uses stays off, as actions are
+# pinned to commits by .github/workflows/actions.lock rather than in the
+# workflows themselves.
+profile: correctness
+rules:
+  dependabot-cooldown: error
+  dependabot-execution: error
