@@ -46,6 +46,16 @@ screenshots = [
     "playwright>=1.64.1",
 ]
 
+# Files `just long-files` reports when they're over their limit (see AGENTS.md):
+# tracked files matching an `include` glob and no `exclude` one (`*` matches
+# `/` too). `limits` maps globs to their own limit, the first match winning
+# over `limit`, e.g. "tests/*" = 700.
+[tool.lifetracker.long-files]
+include = ["*.py"]
+exclude = ["*/migrations/*"]
+limit = 500
+limits = {}
+
 # The policy at the top of the exolot PR comment (see AGENTS.md).
 [tool.exolot]
 preamble = """

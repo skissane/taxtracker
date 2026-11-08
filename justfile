@@ -155,6 +155,18 @@ exolot *args:
 exolot-post *args:
     uv run --no-project python -m scripts.post_exolot_findings "$@"
 
+# long-files' options are --base (default origin/$GITHUB_BASE_REF, else
+# origin/master; files the HEAD's working tree changes since its merge base
+# with it are listed first) and --post <PR> to comment instead of printing,
+# editing the previous comment, with $GITHUB_TOKEN (default `gh auth
+# token`); see --help. Like exolot-post it uses only the stdlib, as CI runs it
+# with a write-capable token.
+
+# List files over pyproject.toml's line limit as Markdown, or post that to a PR
+[positional-arguments]
+long-files *args:
+    uv run --no-project python -m scripts.long_files "$@"
+
 # Build the container image
 docker-build:
     docker build --build-arg LIFETRACKER_COMMIT_ID="$(git rev-parse HEAD)" -t lifetracker .

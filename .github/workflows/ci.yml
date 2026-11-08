@@ -451,6 +451,59 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: just exolot-post "$PR_NUMBER" exolot.md --commit "$HEAD_SHA"
 
+  # Lists the files over pyproject.toml's line limit, for information only, in
+  # the job summary and, on PRs, as a github-actions[bot] comment edited in
+  # place, with the files the PR changes first. The report is cheap to make and
+  # its script stdlib-only, so one job both makes and posts it, with the same
+  # precautions as post-exolot: only same-repo, non-Dependabot PRs post; queued
+  # per PR; posts only if HEAD_SHA is still the PR's head; installs nothing.
+  # See AGENTS.md.
+  long-files:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: long-files-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: false
+
+    steps:
+      # The PR's head, as for exolot, so line counts and links match the PR's
+      # code. Full history for the merge base with the base branch.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+
+      - name: Set up Python
+        run: uv python install 3.14.9
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+        with:
+          just-version: "1.58.0"
+
+      - name: List long files
+        env:
+          BASE: ${{ github.base_ref && format('origin/{0}', github.base_ref) || '' }}
+        run: just long-files --base "$BASE" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post report to the PR
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE: origin/${{ github.base_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # GITHUB_TOKEN can't look up its own login, so name it.
+        run: just long-files --base "$BASE" --commit "$HEAD_SHA" --post "$PR_NUMBER" --author 'github-actions[bot]'
+
   # Runs on a Dependabot branch, whose bumped dependency we don't trust, so the
   # write-capable DEPENDABOT_FIX_TOKEN is only exposed to the final push step:
   # checkout doesn't persist credentials, and nothing installs the project or its
