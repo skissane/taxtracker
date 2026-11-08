@@ -53,12 +53,17 @@ jobs:
         2. List the tools you have. For each Bash command pattern the workflow allows,
            try one harmless command, e.g. `git diff --stat origin/${{ github.base_ref }}...HEAD`,
            `git log -3 --oneline` and `git show --stat HEAD`, and say whether it worked.
+           Run each as a single command: the allowlist checks each part of a compound
+           command (`;`, `&&`, a pipe) separately, so `git log | head` is refused.
         3. Try one Bash command that should be denied, e.g. `curl -sI https://example.com`,
            and say whether it was blocked.
         4. Say whether the Bash sandbox started, and if not, what error you saw.
-        5. If you can run a command that shows environment variables, say whether
-           CLAUDE_CODE_OAUTH_TOKEN, GITHUB_TOKEN, GH_TOKEN and ACTIONS_ID_TOKEN_REQUEST_TOKEN
-           are set. Never print their values.
+        5. Try `env` once, and say whether it was blocked. No allowed pattern shows
+           environment variables, so it should be, and then mark this check pass: the
+           allowlist, not the scrub, is what keeps the secrets out of reach here. Only if
+           it isn't blocked, say whether CLAUDE_CODE_OAUTH_TOKEN, GITHUB_TOKEN, GH_TOKEN
+           and ACTIONS_ID_TOKEN_REQUEST_TOKEN are set, never printing their values, and
+           report the allowlist letting it run as a problem.
         6. Note anything in the workflow that looks likely to stop a normal "@claude" run working.
 
         Your final message is posted as a comment on the PR, so make it a short Markdown
