@@ -12,7 +12,7 @@ Keep to this when editing them: put each new sentence on its own line, don't rew
 
 ## Commands
 
-CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `sentence-per-line-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `mypy`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `coverage`, `patch-coverage`, `patch-coverage-post`, `screenshots`, `screenshots-post`, `exolot`, `exolot-post`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
+CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `sentence-per-line-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `mypy`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `coverage`, `patch-coverage`, `patch-coverage-post`, `screenshots`, `screenshots-post`, `exolot`, `exolot-post`, `long-files`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
 `just ci` is maintained by hand, so when you change the `test` job's steps in `ci.yml`, change the `ci` recipe to match.
 After `just coverage` runs, CI uploads `coverage.xml` to Codecov (`codecov/codecov-action`), and also uploads the `junit.xml` test results it writes for Codecov Test Analytics (`report_type: test_results`, even if the tests failed; not `codecov/test-results-action`, which is deprecated); these steps need a `CODECOV_TOKEN` repo secret from codecov.io.
 Codecov works out a PR's comparison with its base commit's report only when the PR's own upload is processed, and never redoes it when the base's report arrives later, so a stacked PR rebased onto `master` as its parent merges (whose CI races `master`'s, which uploads last as it saves the Docker image first) got "Please upload report for BASE".
@@ -20,7 +20,7 @@ So on PRs, the `test` job first runs `scripts/wait_for_base_coverage.py` (stdlib
 It never fails the job, only prints a warning annotation when it gives up, as a broken `master` mustn't fail the required `test` check of the PR fixing it.
 `codecov.yml` sets `if_not_found: failure` on the project status, so then `codecov/project` fails (it passes by default); re-run the PR's `test` job once the base has uploaded.
 That only applies when Codecov knows the base commit but has no report for it; for a commit it has never heard of, Codecov compares with the newest earlier commit on the base branch that passed CI instead (`allow_pseudo_compare`, which despite Codecov's docs affects only its web UI, not the statuses).
-`ci.yml` has ten jobs, `test`, `post-patch-coverage` (see Patch coverage), `exolot` and `post-exolot` (see Exolot), `screenshots` and `post-screenshots` (see Screenshots), `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment).
+`ci.yml` has eleven jobs, `test`, `post-patch-coverage` (see Patch coverage), `exolot` and `post-exolot` (see Exolot), `long-files` (see Long files), `screenshots` and `post-screenshots` (see Screenshots), `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment).
 
 **PR Fixes:** `.github/workflows/fix.yml` (issue #254) is run by hand (`workflow_dispatch`) on an open PR's branch.
 A PR comment from the repo owner (`author_association` `OWNER`) that is only `/autofix`, give or take whitespace, also runs it: `.github/workflows/autofix-comment.yml` (issue #261) checks the whole body against `^[[:space:]]*/autofix[[:space:]]*$`, so a comment that merely mentions `/autofix` doesn't, then runs `gh workflow run fix.yml --ref <head branch>` and reacts 🚀 to the comment.
@@ -104,6 +104,9 @@ just exolot
 
 # Post a `just exolot --format github-comment` report (exolot.md) to PR 123 as a new comment, hiding earlier ones
 just exolot-post 123 exolot.md
+
+# List files over the line limit, those changed since the merge base with origin/master first (--base for another branch, --post 123 to comment on PR 123 instead)
+just long-files
 
 # Lint (matches `just lint`/`just fmt-check`, which check the whole repo root)
 uv run ruff check .
@@ -517,6 +520,23 @@ The findings are for information only: `--exit-zero` means findings never fail t
   Add one only for a rule whose findings in this repo are consistently noise, not to clear one finding.
   It raises cognitive complexity's (`python:S3776`) threshold from 15 to 25, rather than turning it off, as the functions above 25 are the ones worth checking for a refactor.
   The app has one user, its owner, and runs only in its own container or on the owner's machine, so rules that guard against other local users (`/tmp` use, file modes) or are about accessibility are off; turn off any others like them that appear.
+
+## Long files
+
+We aim for source files under 500 lines, but only split one where splitting makes the code better, e.g. moving out a cohesive piece that has no reason to sit there, not just to get under the number.
+A long file that is already one cohesive unit can stay as it is, and needs no reply or explanation.
+The same goes for tests, which follow one test file per source file as a guideline (see Architecture).
+
+`just long-files` (`scripts/long_files.py`, stdlib-only, `uv run --no-project`) lists the files over their limit as Markdown: the files the working tree changes since its merge base with `--base` (default `origin/$GITHUB_BASE_REF`, else `origin/master`; empty for none) first, with their line counts there too (`1243 → 986`, `new → 612`, and ones the change brought under the limit marked `(now under)`), then the rest in a collapsed `<details>`.
+Each section has one table per top-level directory: `src/`, `scripts/`, `tests/` and `screenshot_tests/`, then files at the top level, then any other directories.
+Lines are counted as `wc -l` does, plus a last line without a newline.
+`pyproject.toml`'s `[tool.lifetracker.long-files]` picks the files and limits: tracked files matching an `include` glob and no `exclude` one (all `*.py` but migrations), `limit` (500), and `limits`, which maps globs to their own limit (none yet; e.g. `"tests/*" = 700`), the first match winning.
+There's no list of accepted files: the policy above means a long file that should stay long just stays in the list.
+CI's `long-files` job, on every run, writes the report to the job summary and, on PRs from this repository other than Dependabot's, runs it with `--post`, which posts it as a `github-actions[bot]` PR comment, found by a hidden `<!-- lifetracker-long-files -->` marker and edited in place like the patch coverage comment.
+It checks out the PR's head, like `exolot`, so counts and links match the PR's code.
+With no file over the limit, it only edits an earlier comment to say so, never posting a new one.
+As the report needs nothing installed, one job makes and posts it, with the same precautions as `post-exolot`: `GITHUB_TOKEN` only, nothing posted unless `--commit` is still the PR's head, and a per-PR `concurrency` group.
+It never fails the job over long files, only if the report can't be made or posted.
 
 ## Linting config
 
