@@ -604,7 +604,7 @@ class EnvoyAuthTests(SimpleTestCase):
             client_ips.Request(
                 ip="203.0.113.7",
                 time=rejected.time,
-                request="GET /admin/?a=1",
+                request_line="GET /admin/?a=1",
                 status=302,
                 user_agent=user_agent,
                 rejected=True,
@@ -613,7 +613,7 @@ class EnvoyAuthTests(SimpleTestCase):
         )
         self.assertAlmostEqual(rejected.time, time.time(), delta=60)
         self.assertEqual(
-            (logged_in.ip, logged_in.request, logged_in.status),
+            (logged_in.ip, logged_in.request_line, logged_in.status),
             ("203.0.113.7", "GET /admin/", 200),
         )
         self.assertEqual((logged_in.rejected, logged_in.logged_in), (False, True))

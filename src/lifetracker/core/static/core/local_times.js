@@ -38,7 +38,7 @@
     var zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local time";
     document.querySelectorAll("time[data-lt-local]").forEach(function (element) {
       var date = new Date(element.dateTime);
-      if (!isNaN(date)) {
+      if (!Number.isNaN(date.getTime())) {
         element.textContent = format(date, element.dataset.ltLocal);
       }
     });

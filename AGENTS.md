@@ -511,11 +511,13 @@ Like them it posts nothing unless `--commit` is still the PR's head, and runs on
 The `exolot` job checks out the PR's head rather than its merge with the base, so the findings' line numbers and links match the PR's code.
 The findings are for information only: `--exit-zero` means findings never fail the job, though a failed analysis still does.
 
-- Use your judgement: fix a finding when fixing it makes the code better, e.g. a real bug, and leave it when it wouldn't, e.g. a suggestion that would change behaviour (`Number.isNaN(date)` is always false for a `Date`).
+- For each finding your PR adds, sketch the change that would fix it, then judge whether the code would be better or worse with it: if better, fix it; if worse, leave it be.
+  Judge the fix on its merits, not on an earlier decision to leave a similar finding.
+  Look for the fix that works, not just the one Sonar names: `Number.isNaN(date)` is always false for a `Date`, but `Number.isNaN(date.getTime())` is right.
 - For a cognitive complexity finding (`python:S3776`), the threshold only decides which functions get looked at; whether to refactor depends only on whether the refactored code would read better than the current code.
   How far the score is over the threshold isn't a reason either way: don't leave a function because it's only just over, or refactor one only because it's far over.
-  Refactoring helps when it pulls out a step with its own name and purpose (e.g. a view's planning apart from applying it, or a formatting step inside a loop), or removes redundant state.
-  It hurts when the pieces only make sense together, e.g. a sequential parser sharing a cursor or a flat list of commented guard clauses, so a reader would have to jump between functions to follow one idea.
+  Refactoring helps when it pulls out a step with its own name and purpose (e.g. a view's planning apart from applying it, a formatting step inside a loop, a parser's line cursor apart from the grammar it parses, or a group of guard clauses that together answer one question), or removes redundant state or repetition.
+  It hurts when the pieces only make sense together, e.g. a polling loop's give-up checks that share its state, so a reader would have to jump between functions to follow one idea.
   When you recommend leaving one, say which of these applies, not how close to the threshold it is.
 - Pay most attention to findings on lines your PR changes.
   Don't widen a PR to fix findings elsewhere unless asked.
