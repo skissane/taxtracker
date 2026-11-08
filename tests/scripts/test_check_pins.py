@@ -171,9 +171,13 @@ def test_main_checks_the_dockerfile_uv_stage(repo: Path, capsys: pytest.CaptureF
     (repo / ".github/workflows/a.yml").write_text(WORKFLOW.split("  other:")[0])
     (repo / "Dockerfile").write_text(
         "FROM ghcr.io/astral-sh/uv:0.13.5 AS uv\nfrom ghcr.io/astral-sh/uv:0.13.6@sha256:abc AS uv2\n"
+        "FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:0.13.4 AS uv3\n"
     )
     assert main(repo) == 1
-    assert capsys.readouterr().err.splitlines() == ["Dockerfile: FROM ghcr.io/astral-sh/uv:0.13.5, not 0.13.6"]
+    assert capsys.readouterr().err.splitlines() == [
+        "Dockerfile: FROM ghcr.io/astral-sh/uv:0.13.5, not 0.13.6",
+        "Dockerfile: FROM ghcr.io/astral-sh/uv:0.13.4, not 0.13.6",
+    ]
     (repo / "Dockerfile").write_text("FROM python:3.14-slim\n")
     assert main(repo) == 1
     assert capsys.readouterr().err.splitlines() == ["Dockerfile has no FROM ghcr.io/astral-sh/uv:<version> stage"]

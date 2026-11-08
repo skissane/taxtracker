@@ -20,7 +20,10 @@ _USES_RE = re.compile(r"^\s*(?:- )?uses:\s*[\"']?(?P<action>[^@\s\"']+)@")
 _WITH_RE = re.compile(r"^(?:- )?with:\s*(?:#.*)?$")
 _JUST_MIN_RE = re.compile(r"^set minimum-version := '(?P<version>[^']+)'$", re.MULTILINE)
 # The tag, without any @sha256: digest.
-_DOCKER_UV_RE = re.compile(r"^FROM\s+ghcr\.io/astral-sh/uv:(?P<version>[^\s@]+)", re.MULTILINE | re.IGNORECASE)
+# A FROM line's flags (e.g. --platform=$BUILDPLATFORM) come before the image.
+_DOCKER_UV_RE = re.compile(
+    r"^FROM\s+(?:--\S+\s+)*ghcr\.io/astral-sh/uv:(?P<version>[^\s@]+)", re.MULTILINE | re.IGNORECASE
+)
 
 
 def steps(text: str) -> list[list[str]]:
