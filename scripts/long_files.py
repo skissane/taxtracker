@@ -164,6 +164,30 @@ def _table(files: list[LongFile], *, default_limit: int, show_base: bool, link: 
     return rows
 
 
+# The order of the top-level directories' tables; any others follow, sorted.
+GROUP_ORDER = ("src", "scripts", "tests", "screenshot_tests")
+
+
+def _group(path: str) -> str:
+    """path's top-level directory, or "" for a file at the root."""
+    return path.split("/", 1)[0] if "/" in path else ""
+
+
+def _tables(files: list[LongFile], *, default_limit: int, show_base: bool, link: str | None) -> list[str]:
+    """files as one table per top-level directory, each under its name."""
+    groups: dict[str, list[LongFile]] = {}
+    for f in files:
+        groups.setdefault(_group(f.path), []).append(f)
+    order = sorted(groups, key=lambda g: (GROUP_ORDER.index(g) if g in GROUP_ORDER else len(GROUP_ORDER), g))
+    lines: list[str] = []
+    for group in order:
+        label = f"`{group}/`" if group else "Top level"
+        lines += [f"**{label}** ({len(groups[group])})", ""]
+        lines += _table(groups[group], default_limit=default_limit, show_base=show_base, link=link)
+        lines.append("")
+    return lines[:-1]
+
+
 def render(report: Report, *, base: str | None, commit: str | None, repo: str | None) -> str:
     """report as the Markdown of a PR comment, without the marker."""
     link = f"https://github.com/{repo}/blob/{commit}" if repo and commit else None
@@ -182,14 +206,14 @@ def render(report: Report, *, base: str | None, commit: str | None, repo: str | 
         lines.append(f"### Changed in this PR ({len(report.changed)})")
         lines.append("")
         if report.changed:
-            lines += _table(report.changed, default_limit=report.default_limit, show_base=True, link=link)
+            lines += _tables(report.changed, default_limit=report.default_limit, show_base=True, link=link)
         else:
             lines.append("None of the files this PR changes are over the limit.")
         lines.append("")
     if report.unchanged:
         title = "Unchanged files" if base else "Files"
         lines += [f"<details><summary>{title} ({len(report.unchanged)})</summary>", ""]
-        lines += _table(report.unchanged, default_limit=report.default_limit, show_base=False, link=link)
+        lines += _tables(report.unchanged, default_limit=report.default_limit, show_base=False, link=link)
         lines += ["", "</details>"]
     return "\n".join(lines) + "\n"
 

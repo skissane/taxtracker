@@ -528,6 +528,7 @@ A long file that is already one cohesive unit can stay as it is, and needs no re
 The same goes for tests, which follow one test file per source file as a guideline (see Architecture).
 
 `just long-files` (`scripts/long_files.py`, stdlib-only, `uv run --no-project`) lists the files over their limit as Markdown: the files the working tree changes since its merge base with `--base` (default `origin/$GITHUB_BASE_REF`, else `origin/master`; empty for none) first, with their line counts there too (`1243 → 986`, `new → 612`, and ones the change brought under the limit marked `(now under)`), then the rest in a collapsed `<details>`.
+Each section has one table per top-level directory: `src/`, `scripts/`, `tests/` and `screenshot_tests/`, then files at the top level, then any other directories.
 Lines are counted as `wc -l` does, plus a last line without a newline.
 `pyproject.toml`'s `[tool.lifetracker.long-files]` picks the files and limits: tracked files matching an `include` glob and no `exclude` one (all `*.py` but migrations), `limit` (500), and `limits`, which maps globs to their own limit (none yet; e.g. `"tests/*" = 700`), the first match winning.
 There's no list of accepted files: the policy above means a long file that should stay long just stays in the list.

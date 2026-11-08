@@ -167,6 +167,17 @@ class RenderTests(SimpleTestCase):
         self.assertNotIn("Limit", body)
         self.assertLess(body.index("a.py"), body.index("d.py"))
 
+    def test_one_table_per_top_level_directory(self) -> None:
+        paths = ["tests/t.py", "zzz/z.py", "src/a/s.py", "aaa/a.py", "scripts/c.py", "top.py", "src/b.py"]
+        report = Report(changed=[], unchanged=[LongFile(p, 20, 10) for p in paths], default_limit=10)
+        body = render(report, base=None, commit=None, repo=None)
+        labels = ["**`src/`** (2)", "**`scripts/`** (1)", "**`tests/`** (1)", "**Top level** (1)", "**`aaa/`** (1)"]
+        labels.append("**`zzz/`** (1)")
+        positions = [body.index(f"{label}\n\n| File | Lines |") for label in labels]
+        self.assertEqual(positions, sorted(positions))
+        self.assertLess(body.index("`src/a/s.py`"), body.index("**`scripts/`**"))
+        self.assertIn("| `zzz/z.py` | 20 |\n\n</details>", body)
+
     def test_no_changed_long_files(self) -> None:
         report = Report(changed=[], unchanged=[LongFile("d.py", 30, 10)], default_limit=10)
         body = render(report, base="origin/master", commit=None, repo=None)
