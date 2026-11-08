@@ -54,7 +54,7 @@ jobs:
            try one harmless command, e.g. `git diff --stat origin/${{ github.base_ref }}...HEAD`,
            `git log -3 --oneline` and `git show --stat HEAD`, and say whether it worked.
            Run each as a single command: the allowlist checks each part of a compound
-           command (`;`, `&&`, a pipe) separately, so `git log | head` is refused.
+           command (`;`, `&&`, a pipe) separately, and refuses it if any part isn't allowed.
         3. Try one Bash command that should be denied, e.g. `curl -sI https://example.com`,
            and say whether it was blocked.
         4. Say whether the Bash sandbox started, and if not, what error you saw.
