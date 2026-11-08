@@ -357,6 +357,18 @@ class AdminViewTests(AdminLoginMixin, TestCase):
             rf'<input[^>]*value="{finalised.pk}"[^>]*checked',
         )
 
+    def test_download_multi_zip_filename(self) -> None:
+        fy2026 = FinancialYear.objects.create(year=2026)
+        url = reverse("admin:taxtracker_financialyear_download_multi_zip")
+        for fy_ids, expected in [
+            ([self.fy.pk], "FY2024_attachments.zip"),
+            ([fy2026.pk, self.fy.pk], "FY2024-FY2026_multi_attachments.zip"),
+        ]:
+            with self.subTest(expected=expected):
+                response = self.client.post(url, {"fy_ids": fy_ids, "action": "zip"})
+
+                self.assertIn(f'filename="{expected}"', response["Content-Disposition"])
+
     def test_download_multi_zip_post_returns_zip(self) -> None:
         """POST with action=zip returns a ZIP with a per-year top-level prefix."""
         fy2025 = FinancialYear.objects.create(year=2025)
