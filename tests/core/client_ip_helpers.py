@@ -2,6 +2,7 @@
 
 import tempfile
 from pathlib import Path
+from typing import override
 
 from django.test import SimpleTestCase
 
@@ -21,6 +22,7 @@ def write_relay_ranges(geoip_dir: Path, lines: list[str] = RELAY_LINES) -> int:
 
 
 class TempDirMixin(SimpleTestCase):
+    @override
     def setUp(self) -> None:
         super().setUp()
         tempdir = tempfile.TemporaryDirectory()

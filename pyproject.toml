@@ -154,15 +154,18 @@ files = ["src", "scripts", "tests", "screenshot_tests"]
 mypy_path = "src"
 explicit_package_bases = true
 # Beyond --strict, as in skissane/exolot: unreachable code, unimported types
-# that would be Any, and the optional error codes below. Not mutable-override,
-# which flags every Django Meta and ModelAdmin attribute against django-stubs'
-# types, disallow_any_decorated, which flags Django's view decorators, or
-# explicit-override, which would want @override on every ModelAdmin method.
+# that would be Any, and the optional error codes below. explicit-override
+# makes every method that overrides one say so with @override, so one that
+# stops overriding (the base renamed or removed it) is an error rather than
+# silently dead. Not mutable-override, which flags every Django Meta and
+# ModelAdmin attribute against django-stubs' types, or disallow_any_decorated,
+# which flags Django's view decorators.
 warn_unreachable = true
 disallow_any_unimported = true
 enable_error_code = [
     "deprecated",
     "exhaustive-match",
+    "explicit-override",
     "ignore-without-code",
     "possibly-undefined",
     "redundant-expr",

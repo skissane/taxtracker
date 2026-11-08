@@ -1,4 +1,5 @@
 import datetime
+from typing import override
 
 from django.core.files.base import ContentFile
 from django.test import TestCase
@@ -8,6 +9,7 @@ from lifetracker.taxtracker.reassign import apply_reassignments, item_path_signa
 
 
 class PlanReassignmentsTests(TestCase):
+    @override
     def setUp(self) -> None:
         self.fy = FinancialYear.objects.create(year=2024)
         self.root = Item.objects.create(year=self.fy, title="Root", order=1)

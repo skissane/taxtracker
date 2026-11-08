@@ -1,5 +1,6 @@
 import datetime
 import io
+from typing import override
 from unittest import mock
 
 from django.core.files.base import ContentFile
@@ -59,6 +60,7 @@ class ExtractDateFromFilenameTests(TestCase):
 
 
 class FileTypeForFilenameTests(TestCase):
+    @override
     def setUp(self) -> None:
         self.pdf = FileType.objects.create(short_name="PDF", full_name="PDF Document")
         FileExtension.objects.create(file_type=self.pdf, extension="pdf")
@@ -80,6 +82,7 @@ class PurgeOrphanedFilesTests(TestCase):
     file fields are found across apps.
     """
 
+    @override
     def setUp(self) -> None:
         item = Item.objects.create(year=FinancialYear.objects.create(year=2024), title="Item", order=1)
         self.attachment = Attachment.objects.create(item=item, file=ContentFile(b"kept", name="kept.pdf"))

@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from email.message import Message
-from typing import Any
+from typing import Any, override
 from unittest import mock
 
 from django.test import SimpleTestCase
@@ -123,6 +123,7 @@ class WaitForBaseCoverageTests(SimpleTestCase):
                 self.send_header("Content-Length", "0")
                 self.end_headers()
 
+            @override
             def log_message(self, format: str, *args: Any) -> None:
                 pass
 

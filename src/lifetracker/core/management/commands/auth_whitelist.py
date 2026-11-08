@@ -6,7 +6,7 @@ login, as JSON, for generating the front proxy's config from.
 
 import dataclasses
 import json
-from typing import Any
+from typing import Any, override
 
 from django.core.management.base import BaseCommand
 
@@ -16,6 +16,7 @@ from lifetracker.core.auth_whitelist import auth_whitelist
 class Command(BaseCommand):
     help = "Print the requests that need no login, as JSON."
 
+    @override
     def handle(self, *args: Any, **options: Any) -> None:
         entries = [dataclasses.asdict(entry) for entry in auth_whitelist()]
         self.stdout.write(json.dumps(entries, indent=2))

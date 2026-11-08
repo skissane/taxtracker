@@ -1,4 +1,5 @@
 import typing
+from typing import override
 
 from django.contrib import admin
 from django.contrib.auth.models import Permission, User
@@ -18,6 +19,7 @@ from lifetracker.taxtracker.models import Attachment, FinancialYear, Item, Recei
 class FileTypePrimaryValidationTests(TestCase):
     """Tests for the 'at least one primary' admin formset validation."""
 
+    @override
     def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "a@b.com", "pass")
         self.client = Client()
@@ -356,6 +358,7 @@ class AtLeastOnePrimaryFormSetTests(TestCase):
     """Direct unit tests for base-class branches not reachable through the
     concrete MimeTypeFormSet/FileExtensionFormSet subclasses used in the admin."""
 
+    @override
     def setUp(self) -> None:
         self.ft = FileType.objects.create(short_name="TST", full_name="Test Type")
 
@@ -410,6 +413,7 @@ class AtLeastOnePrimaryFormSetTests(TestCase):
 class FileTypeAdminDisplayTests(TestCase):
     """Tests for FileTypeAdmin's primary_mime_type/primary_extension columns."""
 
+    @override
     def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "a@b.com", "pass")
         self.client = Client()
@@ -437,6 +441,7 @@ class DBStoredFileAdminPermissionTests(TestCase):
     """DBStoredFileAdmin exists only to host the serve-file view; every
     permission check should always deny."""
 
+    @override
     def setUp(self) -> None:
         self.admin = DBStoredFileAdmin(DBStoredFile, admin.site)
 

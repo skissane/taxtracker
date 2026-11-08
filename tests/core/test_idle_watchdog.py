@@ -9,6 +9,7 @@ import sys
 import tempfile
 import typing
 from pathlib import Path
+from typing import override
 from unittest import mock
 
 import gunicorn.config
@@ -1174,6 +1175,7 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
 class IdleWatchdogAdminViewTests(TestCase):
     URL = "/admin/idle-watchdog/"
 
+    @override
     def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "admin@example.com", "password")
         self.client.login(username="admin", password="password")

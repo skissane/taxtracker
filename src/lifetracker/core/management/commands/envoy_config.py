@@ -9,7 +9,7 @@ reads (``core.client_ips``), which this deletes if it exists, or to
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
@@ -31,6 +31,7 @@ def _request_log() -> Path:
 class Command(BaseCommand):
     help = "Write Envoy's config, filled in from the settings and URLconf."
 
+    @override
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("template", type=Path, help="envoy/envoy.yaml")
         parser.add_argument("output", type=Path, help="Where to write the config.")
@@ -43,6 +44,7 @@ class Command(BaseCommand):
             help="Gunicorn's port on 127.0.0.1.",
         )
 
+    @override
     def handle(
         self,
         *args: Any,

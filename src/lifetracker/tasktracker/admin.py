@@ -1,3 +1,5 @@
+from typing import override
+
 from django.contrib import admin
 from django.http import HttpRequest
 
@@ -46,12 +48,14 @@ class TaskTypeAdmin(admin.ModelAdmin[TaskType]):
     list_filter = ("content_type",)
     search_fields = ("name",)
 
+    @override
     def get_readonly_fields(self, request: HttpRequest, obj: TaskType | None = None) -> list[str] | tuple[str, ...]:
         readonly_fields = super().get_readonly_fields(request, obj)
         if obj is not None and obj.pk == TaskType.GENERIC_PK:
             readonly_fields = tuple(readonly_fields) + ("name", "content_type")
         return readonly_fields
 
+    @override
     def has_delete_permission(self, request: HttpRequest, obj: TaskType | None = None) -> bool:
         if obj is not None and obj.pk == TaskType.GENERIC_PK:
             return False

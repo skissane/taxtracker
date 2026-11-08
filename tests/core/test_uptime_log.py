@@ -4,6 +4,7 @@ import re
 import tempfile
 import typing
 from pathlib import Path
+from typing import override
 from unittest import mock
 
 from django.contrib.auth.models import User
@@ -234,6 +235,7 @@ class UptimeReportAdminViewTests(TestCase):
     URL = "/admin/uptime/"
     NOW = UptimeReportCommandTests.NOW
 
+    @override
     def setUp(self) -> None:
         User.objects.create_superuser("admin", "admin@example.com", "password")
         self.client.login(username="admin", password="password")
@@ -338,6 +340,7 @@ class UptimeDayAdminViewTests(TestCase):
     NOW = UptimeReportCommandTests.NOW  # 2026-10-22T11:59:59.5Z
     URL = "/admin/uptime/2026-10-20/"
 
+    @override
     def setUp(self) -> None:
         User.objects.create_superuser("admin", "admin@example.com", "password")
         self.client.login(username="admin", password="password")
