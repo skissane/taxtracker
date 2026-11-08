@@ -7,7 +7,7 @@ import io
 import sqlite3
 from collections.abc import Callable, Collection
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import Any, NoReturn
 from unittest import mock
 
 import maxminddb
@@ -15,11 +15,8 @@ import requests
 from django.test import SimpleTestCase
 
 from lifetracker.core import ip_location
-from tests.core.mmdb_writer import write_geoip, write_mmdb
-
-if TYPE_CHECKING:
-    pass
 from tests.core.client_ip_helpers import RELAY_LINES, TempDirMixin, write_relay_ranges
+from tests.core.mmdb_writer import write_geoip, write_mmdb
 
 # tests/conftest.py replaces it in every test, so it never downloads anything.
 download_relay_ranges = ip_location._download_relay_ranges
