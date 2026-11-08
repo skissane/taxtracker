@@ -24,7 +24,8 @@ concurrency:
 
 jobs:
   claude:
-    # "@claude review" goes to claude-code-review.yml instead, wherever it's written.
+    # "@claude review" in a PR comment, review comment or review goes to
+    # claude-code-review.yml instead.
     # Self-tests skip Dependabot's runs: claude-code-action refuses bot actors, and
     # Dependabot's runs get only Dependabot secrets, so no CLAUDE_CODE_OAUTH_TOKEN.
     if: |
