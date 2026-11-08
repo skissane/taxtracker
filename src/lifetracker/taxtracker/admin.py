@@ -133,6 +133,21 @@ def _warn_skipped(request: HttpRequest, names: Iterable[str], reason: str) -> No
         messages.warning(request, f"Skipped {len(unique_names)} {reason}: {', '.join(unique_names)}.")
 
 
+def _import_into_item(item: Item, extracted: list[tuple[str, bytes]]) -> tuple[int, list[str]]:
+    """Attach each of an archive's *extracted* PDFs to *item*, in one transaction.
+
+    Skips names already attached to it; returns how many were imported, and the skipped names.
+    """
+    duplicate_names: list[str] = []
+    if not extracted:
+        return 0, duplicate_names
+    importable = select_importable_files(extracted, _existing_attachment_names(item=item), duplicate_names)
+    with transaction.atomic():
+        for pdf_filename, pdf_bytes in importable:
+            _save_imported_attachment(Attachment(item=item), pdf_filename, pdf_bytes)
+    return len(importable), duplicate_names
+
+
 @dataclasses.dataclass
 class _ReceivedDocumentImport:
     """What ``_import_received_documents`` did with an archive's PDFs."""
@@ -353,19 +368,12 @@ class ItemAdmin(admin.ModelAdmin[Item]):
 
             extracted, archive_skipped_names, had_error = _extract_archive(request, file_bytes, filename)
 
-            duplicate_names: list[str] = []
-            if extracted:
-                existing_names = _existing_attachment_names(item=item)
-                importable = select_importable_files(extracted, existing_names, duplicate_names)
-
-                with transaction.atomic():
-                    for pdf_filename, pdf_bytes in importable:
-                        _save_imported_attachment(Attachment(item=item), pdf_filename, pdf_bytes)
-                if importable:
-                    messages.success(
-                        request,
-                        f"Imported {len(importable)} attachment(s) from '{filename}'.",
-                    )
+            imported_count, duplicate_names = _import_into_item(item, extracted)
+            if imported_count:
+                messages.success(
+                    request,
+                    f"Imported {imported_count} attachment(s) from '{filename}'.",
+                )
 
             _warn_skipped(request, archive_skipped_names, "non-PDF, too large or unreadable file(s)")
             _warn_skipped(request, duplicate_names, "file(s) already attached to this item")
