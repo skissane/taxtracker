@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pytest_django.fixtures import Settings
 
-from lifetracker.core import client_ips
+from lifetracker.core import ip_location
 
 
 @pytest.fixture(scope="session")
@@ -33,4 +33,4 @@ def _no_relay_ranges_download(monkeypatch: pytest.MonkeyPatch) -> None:
     does unless given ``download_relay_ranges``, and so the collector and the
     ``update_geoip`` command. Instead the list is always unchanged, so there
     are none unless a test writes them."""
-    monkeypatch.setattr(client_ips, "_download_relay_ranges", lambda url, destination, etag: None)
+    monkeypatch.setattr(ip_location, "_download_relay_ranges", lambda url, destination, etag: None)

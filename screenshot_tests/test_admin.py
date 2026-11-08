@@ -18,7 +18,7 @@ from playwright.sync_api import Page, sync_playwright
 from pytest_django.fixtures import Settings
 from pytest_django.live_server_helper import LiveServer
 
-from lifetracker.core import client_ips, uptime_log
+from lifetracker.core import client_ips, ip_location, uptime_log
 from tests.core.mmdb_writer import write_mmdb
 
 if TYPE_CHECKING:
@@ -212,9 +212,9 @@ def test_client_ips(admin_user: User, page: Page, monkeypatch: pytest.MonkeyPatc
             )
         },
     )
-    client_ips.build_relay_ranges(
+    ip_location.build_relay_ranges(
         ["2001:db8:4a1c:7f00::/64,AU,AU-NSW,Sydney,"],
-        tmp_path / "geoip" / client_ips.RELAY_RANGES_FILE,
+        tmp_path / "geoip" / ip_location.RELAY_RANGES_FILE,
     )
     now = datetime.datetime.now(datetime.UTC).timestamp()
     browser = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Firefox/140.0"
@@ -257,25 +257,25 @@ def test_client_ips(admin_user: User, page: Page, monkeypatch: pytest.MonkeyPatc
         client_ips.Request("192.0.2.9", now - 300, "GET /admin/login/", 200, "curl/8.5.0", False, False),
     ]
     connection = client_ips.connect(tmp_path / "client_ips.sqlite3")
-    geoip = client_ips.GeoIP(tmp_path / "geoip")
+    geoip = ip_location.GeoIP(tmp_path / "geoip")
     client_ips.record(connection, requests, geoip)
     geoip.close()
     connection.close()
     # This month's country download failed (so September's is still in use),
     # the ASN database was downloaded, and the relay ranges hadn't changed.
-    url = client_ips.GEOIP_URL.format
+    url = ip_location.GEOIP_URL.format
     traceback = (
         "Traceback (most recent call last):\n"
-        '  File "/app/src/lifetracker/core/client_ips.py", line 1, in update_geoip\n'
+        '  File "/app/src/lifetracker/core/ip_location.py", line 1, in update_geoip\n'
         "requests.exceptions.ConnectionError: Connection reset by peer\n"
     )
-    (tmp_path / "geoip" / client_ips.GEOIP_STATUS_NAME).write_text(
+    (tmp_path / "geoip" / ip_location.GEOIP_STATUS_NAME).write_text(
         json.dumps(
             {
                 "databases": {
                     "dbip-country-lite": {
                         "attempted": now - 7200,
-                        "outcome": client_ips.FAILED,
+                        "outcome": ip_location.FAILED,
                         "fell_back": False,
                         "url": url(name="dbip-country-lite", month="2026-10"),
                         "file": "dbip-country-lite-2026-09.mmdb",
@@ -285,7 +285,7 @@ def test_client_ips(admin_user: User, page: Page, monkeypatch: pytest.MonkeyPatc
                     },
                     "dbip-asn-lite": {
                         "attempted": now - 7200,
-                        "outcome": client_ips.DOWNLOADED,
+                        "outcome": ip_location.DOWNLOADED,
                         "fell_back": False,
                         "url": url(name="dbip-asn-lite", month="2026-10"),
                         "file": "dbip-asn-lite-2026-10.mmdb",
@@ -293,12 +293,12 @@ def test_client_ips(admin_user: User, page: Page, monkeypatch: pytest.MonkeyPatc
                         "error": None,
                         "traceback": None,
                     },
-                    client_ips.RELAY_RANGES: {
+                    ip_location.RELAY_RANGES: {
                         "attempted": now - 7200,
-                        "outcome": client_ips.UP_TO_DATE,
+                        "outcome": ip_location.UP_TO_DATE,
                         "fell_back": False,
-                        "url": client_ips.RELAY_RANGES_URL,
-                        "file": client_ips.RELAY_RANGES_FILE,
+                        "url": ip_location.RELAY_RANGES_URL,
+                        "file": ip_location.RELAY_RANGES_FILE,
                         "succeeded": now - 7200,
                         "etag": '"6ad29859-b7d5af"',
                         "error": None,
