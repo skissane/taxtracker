@@ -14,6 +14,7 @@ import json
 import re
 import subprocess
 import sys
+from typing import Any, NoReturn
 from urllib.parse import urlparse
 
 
@@ -70,6 +71,96 @@ def find_open_pr(gh_repo: str, head_branch: str, base_branch: str) -> str | None
     return prs[0]["url"] if prs else None
 
 
+def check_recreatable(pr_data: dict[str, Any], pr_num_from_url: str) -> None:
+    """Exit with an error unless *pr_data* is the open, same-repository PR the URL named."""
+    old_number = pr_data["number"]
+    if str(old_number) != pr_num_from_url:
+        print(f"Error: URL names PR #{pr_num_from_url} but GitHub returned PR #{old_number}.", file=sys.stderr)
+        sys.exit(1)
+
+    # Refuse to operate on fork PRs.
+    # Not a comparison of the head repo's name with the URL's: after a rename, an old URL still resolves
+    if pr_data.get("isCrossRepository", False):
+        head_owner = (pr_data.get("headRepositoryOwner") or {}).get("login", "")
+        print(
+            f"Error: PR #{old_number} comes from a fork ({head_owner or 'cross-repository'}). "
+            "Refusing to operate on fork PRs.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    state = pr_data["state"]
+    if state != "OPEN":
+        print(
+            f"Error: PR #{old_number} is currently '{state}', not OPEN.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def create_args(pr_data: dict[str, Any], gh_repo: str) -> list[str]:
+    """Return the `gh` arguments creating a draft copy of *pr_data*'s PR, reading its body from stdin."""
+    args = [
+        "pr",
+        "create",
+        "--repo",
+        gh_repo,
+        "--head",
+        pr_data["headRefName"],
+        "--base",
+        pr_data["baseRefName"],
+        "--title",
+        pr_data["title"],
+        "--body-file",
+        "-",
+        "--draft",
+    ]
+    for label in pr_data.get("labels") or []:
+        args += ["--label", label["name"]]
+    if pr_data.get("milestone"):
+        args += ["--milestone", pr_data["milestone"]["title"]]
+    return args
+
+
+def recover_from_failed_create(gh_repo: str, head_branch: str, base_branch: str, old_number: int) -> NoReturn:
+    """After `gh pr create` failed with the original PR closed, reopen it if no new PR exists, then exit 1."""
+    # gh can fail after creating the PR (e.g. adding labels), so check before reopening the original
+    try:
+        existing = find_open_pr(gh_repo, head_branch, base_branch)
+    except (subprocess.CalledProcessError, ValueError) as lookup_error:
+        # Reopening when the new PR may exist could leave both open, so leave it to the user
+        detail = lookup_error.stderr.strip() if isinstance(lookup_error, subprocess.CalledProcessError) else ""
+        print(detail or str(lookup_error), file=sys.stderr)
+        print(
+            f"Error: could not check whether the new PR was created anyway. PR #{old_number} is still CLOSED; "
+            f"check for an open PR from '{head_branch}' and reopen #{old_number} manually if there's none.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if existing:
+        print(
+            f"Error: {existing} was created anyway, but may lack labels or milestone; "
+            f"PR #{old_number} stays closed and was not commented on.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print(f"Attempting to reopen original PR #{old_number}...", file=sys.stderr)
+    try:
+        subprocess.run(
+            ["gh", "pr", "reopen", str(old_number), "--repo", gh_repo],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as reopen_error:
+        print(reopen_error.stderr.strip(), file=sys.stderr)
+        print(
+            f"Error: could not reopen PR #{old_number}; it is still CLOSED and must be reopened manually.",
+            file=sys.stderr,
+        )
+    sys.exit(1)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Recreate a GitHub PR as a draft and close the original.")
     parser.add_argument("pr_url", help="The URL of the GitHub Pull Request")
@@ -84,53 +175,11 @@ def main(argv: list[str] | None = None) -> None:
     fields = "number,title,body,headRefName,baseRefName,isCrossRepository,headRepositoryOwner,state,labels,milestone"
     pr_data = json.loads(run_gh(["pr", "view", args.pr_url, "--json", fields]))
 
+    # 3. Refuse anything but the open, same-repository PR the URL named
+    check_recreatable(pr_data, pr_num_from_url)
     old_number = pr_data["number"]
-    if str(old_number) != pr_num_from_url:
-        print(f"Error: URL names PR #{pr_num_from_url} but GitHub returned PR #{old_number}.", file=sys.stderr)
-        sys.exit(1)
-    title = pr_data["title"]
-    body = pr_data.get("body") or ""
     head_branch = pr_data["headRefName"]
     base_branch = pr_data["baseRefName"]
-    state = pr_data["state"]
-
-    # 3. Refuse to operate on fork PRs
-    # Not a comparison of the head repo's name with the URL's: after a rename, an old URL still resolves
-    if pr_data.get("isCrossRepository", False):
-        head_owner = (pr_data.get("headRepositoryOwner") or {}).get("login", "")
-        print(
-            f"Error: PR #{old_number} comes from a fork ({head_owner or 'cross-repository'}). "
-            "Refusing to operate on fork PRs.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    if state != "OPEN":
-        print(
-            f"Error: PR #{old_number} is currently '{state}', not OPEN.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    create_args = [
-        "pr",
-        "create",
-        "--repo",
-        gh_repo,
-        "--head",
-        head_branch,
-        "--base",
-        base_branch,
-        "--title",
-        title,
-        "--body-file",
-        "-",
-        "--draft",
-    ]
-    for label in pr_data.get("labels") or []:
-        create_args += ["--label", label["name"]]
-    if pr_data.get("milestone"):
-        create_args += ["--milestone", pr_data["milestone"]["title"]]
 
     # 4. Close the original PR first.
     # GitHub rejects creating a new PR if an open PR already exists for the same head and base.
@@ -141,8 +190,8 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Creating new draft PR from '{head_branch}' into '{base_branch}'...")
     try:
         new_pr_url = subprocess.run(
-            ["gh"] + create_args,
-            input=body,
+            ["gh"] + create_args(pr_data, gh_repo),
+            input=pr_data.get("body") or "",
             capture_output=True,
             text=True,
             check=True,
@@ -150,41 +199,7 @@ def main(argv: list[str] | None = None) -> None:
     except subprocess.CalledProcessError as e:
         print("Error creating new draft PR:", file=sys.stderr)
         print(e.stderr.strip(), file=sys.stderr)
-        # gh can fail after creating the PR (e.g. adding labels), so check before reopening the original
-        try:
-            existing = find_open_pr(gh_repo, head_branch, base_branch)
-        except (subprocess.CalledProcessError, ValueError) as lookup_error:
-            # Reopening when the new PR may exist could leave both open, so leave it to the user
-            detail = lookup_error.stderr.strip() if isinstance(lookup_error, subprocess.CalledProcessError) else ""
-            print(detail or str(lookup_error), file=sys.stderr)
-            print(
-                f"Error: could not check whether the new PR was created anyway. PR #{old_number} is still CLOSED; "
-                f"check for an open PR from '{head_branch}' and reopen #{old_number} manually if there's none.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        if existing:
-            print(
-                f"Error: {existing} was created anyway, but may lack labels or milestone; "
-                f"PR #{old_number} stays closed and was not commented on.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        print(f"Attempting to reopen original PR #{old_number}...", file=sys.stderr)
-        try:
-            subprocess.run(
-                ["gh", "pr", "reopen", str(old_number), "--repo", gh_repo],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-        except subprocess.CalledProcessError as reopen_error:
-            print(reopen_error.stderr.strip(), file=sys.stderr)
-            print(
-                f"Error: could not reopen PR #{old_number}; it is still CLOSED and must be reopened manually.",
-                file=sys.stderr,
-            )
-        sys.exit(1)
+        recover_from_failed_create(gh_repo, head_branch, base_branch, old_number)
 
     # 6. Extract the new PR number and comment on the original PR (the new PR already exists, so report failures here)
     _, _, new_pr_number = parse_pr_url(new_pr_url)
