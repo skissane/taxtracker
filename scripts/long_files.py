@@ -97,6 +97,13 @@ def _count_lines(data: bytes) -> int:
     return data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
 
 
+def _lines_at(cwd: Path, rev: str, path: str) -> int:
+    """The number of lines in path as it is at rev."""
+    return _count_lines(
+        subprocess.run(["git", "show", f"{rev}:{path}"], cwd=cwd, capture_output=True, check=True).stdout
+    )
+
+
 def _base_paths(cwd: Path, merge_base: str) -> dict[str, str | None]:
     """Each path the working tree changes from merge_base, mapped to its path
     there (another for a rename or copy, None if it's new)."""
@@ -120,7 +127,7 @@ def find_long_files(cwd: Path, config: Config, base: str | None) -> Report:
     or were on base and the working tree changes them. Without base, every
     file counts as unchanged."""
     changed_paths: dict[str, str | None] = {}
-    merge_base = None
+    merge_base = ""
     if base:
         merge_base = _git(cwd, "merge-base", base, "HEAD").strip()
         changed_paths = _base_paths(cwd, merge_base)
@@ -135,13 +142,7 @@ def find_long_files(cwd: Path, config: Config, base: str | None) -> Report:
                 unchanged.append(LongFile(path, lines, limit))
             continue
         base_path = changed_paths[path]
-        base_lines = None
-        if base_path is not None:
-            base_lines = _count_lines(
-                subprocess.run(
-                    ["git", "show", f"{merge_base}:{base_path}"], cwd=cwd, capture_output=True, check=True
-                ).stdout
-            )
+        base_lines = None if base_path is None else _lines_at(cwd, merge_base, base_path)
         if lines > limit or (base_lines or 0) > limit:
             changed.append(LongFile(path, lines, limit, base_lines))
     changed.sort(key=lambda f: (-f.lines, f.path))
