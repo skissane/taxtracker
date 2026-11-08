@@ -92,47 +92,66 @@ def idle_watchdog_page_context(now: datetime.datetime | None = None) -> dict[str
     if raw is None:
         return context
     try:
-        checked_at = _parse_status_time(raw["checked_at"])
-        started_at = _parse_status_time(raw["started_at"])
-        if started_at is None:
-            raise ValueError("the status file has no start time")
-        idle_timeout = float(raw["idle_timeout_seconds"])
-        interval = float(raw["check_interval_seconds"])
-        status = {
-            "mode": raw["mode"],
-            "state": raw["state"],
-            "pid": raw["pid"],
-            "master_pid": raw["master_pid"],
-            "started_at": started_at,
-            "uptime": _format_duration((now - started_at).total_seconds()),
-            "checked_at": checked_at,
-            "idle_timeout": _format_duration(idle_timeout),
-            "check_interval": _format_duration(interval),
-            "idle_since": _parse_status_time(raw["idle_since"]),
-            "ports": [
-                {
-                    "port": port["port"],
-                    "connections": port["connections"],
-                    "last_connection_at": _parse_status_time(port["last_connection_at"]),
-                }
-                for port in raw["ports"]
-            ],
-            "auto_backup": _auto_backup_status(raw.get("auto_backup")),
-        }
+        status = _parse_watchdog_status(raw)
     except (KeyError, TypeError, ValueError) as exc:
         context["status_error"] = f"Unexpected contents in {config.status_file}: {exc!r}"
         return context
+    _add_watchdog_times(status, now, config.request_file)
+    context["status"] = status
+    return context
+
+
+def _parse_watchdog_status(raw: dict[str, Any]) -> dict[str, Any]:
+    """The status file's contents, for the page.
+
+    Raises KeyError, TypeError or ValueError if they're not what the watchdog writes.
+    """
+    started_at = _parse_status_time(raw["started_at"])
+    if started_at is None:
+        raise ValueError("the status file has no start time")
+    idle_timeout = float(raw["idle_timeout_seconds"])
+    interval = float(raw["check_interval_seconds"])
+    return {
+        "mode": raw["mode"],
+        "state": raw["state"],
+        "pid": raw["pid"],
+        "master_pid": raw["master_pid"],
+        "started_at": started_at,
+        "checked_at": _parse_status_time(raw["checked_at"]),
+        "idle_timeout_seconds": idle_timeout,
+        "idle_timeout": _format_duration(idle_timeout),
+        "check_interval_seconds": interval,
+        "check_interval": _format_duration(interval),
+        "idle_since": _parse_status_time(raw["idle_since"]),
+        "ports": [
+            {
+                "port": port["port"],
+                "connections": port["connections"],
+                "last_connection_at": _parse_status_time(port["last_connection_at"]),
+            }
+            for port in raw["ports"]
+        ],
+        "auto_backup": _auto_backup_status(raw.get("auto_backup")),
+    }
+
+
+def _add_watchdog_times(status: dict[str, Any], now: datetime.datetime, request_file: Path) -> None:
+    """Add to *status* the times that depend on *now*: how long ago things happened, staleness and when it stops."""
+    started_at = status["started_at"]
+    checked_at = status["checked_at"]
+    status["uptime"] = _format_duration((now - started_at).total_seconds())
     # Read the request file directly rather than the status file's copy of its
     # time, which is only as fresh as the last check (issue #172). It's touched
     # after each response, so it never includes this page's own request.
-    last_request = idle_watchdog.last_request_time(config.request_file)
+    last_request = idle_watchdog.last_request_time(request_file)
     status["last_request_at"] = (
         datetime.datetime.fromtimestamp(last_request, datetime.UTC) if last_request is not None else None
     )
     status["checked_ago"] = _format_duration((now - checked_at).total_seconds()) if checked_at else None
     # Before its first check, judge by when it started instead.
     last_sign_of_life = checked_at or started_at
-    status["stale"] = (now - last_sign_of_life).total_seconds() > _IDLE_WATCHDOG_STALE_INTERVALS * interval
+    stale_after = _IDLE_WATCHDOG_STALE_INTERVALS * status["check_interval_seconds"]
+    status["stale"] = (now - last_sign_of_life).total_seconds() > stale_after
     status["stale_intervals"] = _IDLE_WATCHDOG_STALE_INTERVALS
     for name in ("last_request_at", "idle_since"):
         value = status[name]
@@ -141,7 +160,7 @@ def idle_watchdog_page_context(now: datetime.datetime | None = None) -> dict[str
     # request: that counts as activity, so the next check restarts the timer
     # from when it finishes, about now. It only stops at a check, so up to one
     # check interval later.
-    status["stop_at"] = now + datetime.timedelta(seconds=idle_timeout)
+    status["stop_at"] = now + datetime.timedelta(seconds=status["idle_timeout_seconds"])
     if status["auto_backup"] and status["auto_backup"]["last_started_at"]:
         status["auto_backup"]["last_started_ago"] = _format_duration(
             (now - status["auto_backup"]["last_started_at"]).total_seconds()
@@ -149,8 +168,6 @@ def idle_watchdog_page_context(now: datetime.datetime | None = None) -> dict[str
     for port in status["ports"]:
         seen = port["last_connection_at"]
         port["last_connection_ago"] = _format_duration((now - seen).total_seconds()) if seen else None
-    context["status"] = status
-    return context
 
 
 def idle_watchdog_view(request: HttpRequest) -> HttpResponse:
