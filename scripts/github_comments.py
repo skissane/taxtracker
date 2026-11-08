@@ -1,7 +1,7 @@
 """GitHub API helpers for the scripts that post a PR comment and edit it in
 place on later runs (post_screenshots, post_patch_coverage, long_files).
-Stdlib-only; run those scripts as modules (`python -m scripts.<name>`) from the repo root, so
-they can import this."""
+Stdlib-only; run those scripts as modules (`python -m scripts.<name>`) from
+the repo root, so they can import this."""
 
 import json
 import subprocess
