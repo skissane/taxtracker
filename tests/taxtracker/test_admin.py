@@ -541,6 +541,24 @@ class AdminViewTests(AdminLoginMixin, TestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 302)
 
+    def test_reassign_attachments_view_ignores_invalid_ids(self) -> None:
+        fy2025 = FinancialYear.objects.create(year=2025)
+        target = Item.objects.create(year=fy2025, title=self.item.title, order=self.item.order)
+        attachment = Attachment.objects.create(
+            item=self.item,
+            title="to-move.pdf",
+            date=datetime.date(2024, 8, 2),
+            file=ContentFile(b"to-move", name="to-move.pdf"),
+        )
+
+        url = reverse("admin:taxtracker_item_reassign_attachments", args=[self.item.pk])
+        # "²" is a digit to str.isdigit() but not to int().
+        response = self.client.post(url, data={"move_attachment_ids": ["abc", "²", "-1", str(attachment.pk)]})
+
+        self.assertEqual(response.status_code, 200)
+        attachment.refresh_from_db()
+        self.assertEqual(attachment.item_id, target.pk)
+
     def test_reassign_attachments_view_moves_selected(self) -> None:
         fy2025 = FinancialYear.objects.create(year=2025)
         fy2023 = FinancialYear.objects.create(year=2023)

@@ -80,6 +80,19 @@ def _attachment_date_warning(obj: Attachment) -> str:
 _RECEIVED_DOC_YEAR_RE = re.compile(r"^(\d{4})(?!\d)")
 
 
+def _posted_pks(request: HttpRequest, name: str) -> set[int]:
+    """The primary keys posted as *name*, ignoring any that aren't one."""
+    pks = set()
+    for value in request.POST.getlist(name):
+        try:
+            pk = int(value)
+        except ValueError:
+            continue
+        if 0 < pk < 2**63:  # SQLite raises OverflowError for anything over 64 bits
+            pks.add(pk)
+    return pks
+
+
 def _existing_attachment_names(**filters: Any) -> set[str]:
     """Return the basename of every stored file name matching *filters*."""
     return {
@@ -399,8 +412,7 @@ class ItemAdmin(admin.ModelAdmin[Item]):
         result_rows = []
         result_summary = None
         if request.method == "POST":
-            selected_ids = {int(v) for v in request.POST.getlist("move_attachment_ids") if v.isdigit()}
-            result_rows = apply_reassignments(rows, selected_ids)
+            result_rows = apply_reassignments(rows, _posted_pks(request, "move_attachment_ids"))
             statuses = [row.status for row in result_rows]
             result_summary = {
                 "total_out_of_year": len(rows),
@@ -571,6 +583,14 @@ class ReceivedDocumentAdmin(admin.ModelAdmin[ReceivedDocument]):
 # ---------------------------------------------------------------------------
 # FinancialYear Admin
 # ---------------------------------------------------------------------------
+
+
+def _multi_zip_filename(fys: Sequence[FinancialYear]) -> str:
+    """The download name for a ZIP of *fys*: the year, or the first and last years."""
+    years = sorted(fy.year for fy in fys)
+    if len(years) == 1:
+        return f"FY{years[0]}_attachments.zip"
+    return f"FY{years[0]}-FY{years[-1]}_multi_attachments.zip"
 
 
 def _zip_response(buf: IO[bytes], filename: str) -> FileResponse:
@@ -762,28 +782,14 @@ class FinancialYearAdmin(admin.ModelAdmin[FinancialYear]):
         error = None
 
         if request.method == "POST":
-            selected_pks: list[int] = []
-            for value in request.POST.getlist("fy_ids"):
-                try:
-                    pk = int(value)
-                except ValueError:
-                    continue
-                if 0 < pk < 2**63:  # SQLite raises OverflowError for anything over 64 bits
-                    selected_pks.append(pk)
-            selected_fys = list(FinancialYear.objects.filter(pk__in=selected_pks).order_by("year"))
+            selected_fys = list(FinancialYear.objects.filter(pk__in=_posted_pks(request, "fy_ids")).order_by("year"))
             if not selected_fys:
                 error = "Please select at least one financial year."
             elif request.POST.get("action") == "view_index":
                 content = build_multi_index_md(selected_fys)
                 return HttpResponse(content, content_type="text/markdown; charset=utf-8")
             else:
-                buf = build_multi_zip(selected_fys)
-                years = sorted(fy.year for fy in selected_fys)
-                if len(years) == 1:
-                    fname = f"FY{years[0]}_attachments.zip"
-                else:
-                    fname = f"FY{years[0]}-FY{years[-1]}_multi_attachments.zip"
-                return _zip_response(buf, fname)
+                return _zip_response(build_multi_zip(selected_fys), _multi_zip_filename(selected_fys))
 
         context = {
             **self.admin_site.each_context(request),
