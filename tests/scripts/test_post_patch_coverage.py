@@ -183,6 +183,14 @@ class PostPatchCoverageTests(SimpleTestCase):
         self.assertEqual(code, 0)
         self.assertIn("| `` a\\|b`c.py `` | 50.0% | 2 |", self._writes(requests)[0][3]["body"])
 
+    def test_backslash_before_pipe(self) -> None:
+        # GFM's table extension takes the backslash right before a pipe as its
+        # escape and drops only that one, so the path's own backslash survives.
+        report = self.HEAD.replace("- a&#46;py (50.0%)", "- a\\|b&#46;py (50.0%)")
+        code, _, requests = self._run(report=report)
+        self.assertEqual(code, 0)
+        self.assertIn("| `a\\\\|b.py` | 50.0% | 2 |", self._writes(requests)[0][3]["body"])
+
     def test_long_report_truncated(self) -> None:
         lines = "\n".join(f"  {n} x = {n}" for n in range(20_000))
         report = f"{self.HEAD}\n## a.py\n\n```python\n{lines}\n```\n"
