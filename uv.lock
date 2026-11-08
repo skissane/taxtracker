@@ -606,7 +606,7 @@ dev = [
     { name = "coverage", specifier = ">=7.17.0" },
     { name = "diff-cover", specifier = ">=11.0.0" },
     { name = "django-stubs", extras = ["compatible-mypy"], specifier = ">=6.1.2" },
-    { name = "djlint", specifier = ">=1.47.0" },
+    { name = "djlint", specifier = ">=1.49.2" },
     { name = "exolot", specifier = ">=0.5.0" },
     { name = "jactionlint", specifier = ">=2.3.0" },
     { name = "pytest", specifier = ">=9.1.1" },
