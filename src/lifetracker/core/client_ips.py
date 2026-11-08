@@ -18,10 +18,10 @@ The client's IP is Fly Proxy's ``Fly-Client-IP`` header, or Envoy's peer
 without one (e.g. under ``just docker-run``). ``./run.sh`` runs no Envoy, so
 records nothing.
 
-At startup the collector updates the DB-IP Lite databases and Apple's list of
-iCloud Private Relay egress ranges (``ip_location.update_geoip``) and fills in any IP
-it couldn't look up before. It looks up each new IP's location as it records
-it, and checks every IP against the relay ranges each time it's seen.
+At startup the collector updates the DB-IP Lite databases and Apple's list
+of iCloud Private Relay egress ranges (``ip_location.update_geoip``) and fills
+in any IP it couldn't look up before. It looks up each new IP's location as it
+records it, and checks every IP against the relay ranges each time it's seen.
 
 Like the idle watchdog, it doesn't import Django.
 """
