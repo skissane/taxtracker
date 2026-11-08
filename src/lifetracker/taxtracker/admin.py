@@ -128,8 +128,8 @@ def _extract_archive(
 
 def _warn_skipped(request: HttpRequest, names: Iterable[str], reason: str) -> None:
     """Add a warning listing the distinct *names* skipped for *reason*, if there are any."""
-    if names:
-        unique_names = list(dict.fromkeys(names))
+    unique_names = list(dict.fromkeys(names))
+    if unique_names:
         messages.warning(request, f"Skipped {len(unique_names)} {reason}: {', '.join(unique_names)}.")
 
 

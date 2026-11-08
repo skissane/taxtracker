@@ -99,7 +99,7 @@ coverage:
 # Show patch coverage from coverage.xml against a base branch (or PR base)
 [positional-arguments]
 patch-coverage compare_branch="" *args:
-    compare_branch="${1:-${GITHUB_BASE_REF:+origin/$GITHUB_BASE_REF}}"; shift $(( $# > 0 )); uv run --group dev diff-cover coverage.xml --compare-branch="${compare_branch:-origin/master}" "$@"
+    compare_branch="${1:-${GITHUB_BASE_REF:+origin/$GITHUB_BASE_REF}}"; shift $(( $# > 0 )); uv run --group dev diff-cover coverage.xml --compare-branch="${compare_branch:-origin/master}" --branch-coverage "$@"
 
 # The screenshot tests live outside `testpaths`, so plain `pytest` (and
 # `just test`/`just coverage`) never collects them; `-n 0` because two tests
