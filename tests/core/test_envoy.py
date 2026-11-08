@@ -270,12 +270,6 @@ class EnvoyAuthTests(SimpleTestCase):
             if os.environ.get("LIFETRACKER_REQUIRE_ENVOY"):
                 raise RuntimeError("Docker isn't available to run Envoy, and LIFETRACKER_REQUIRE_ENVOY is set")
             raise unittest.SkipTest("Docker isn't available to run Envoy")
-        if docker is not None:
-            image = _envoy_image()
-            # Pulled here, so the wait for Envoy below doesn't include it.
-            inspect = subprocess.run([docker, "image", "inspect", image], capture_output=True)
-            if inspect.returncode != 0:
-                subprocess.run([docker, "pull", image], check=True, stdout=subprocess.DEVNULL)
 
         tempdir = tempfile.TemporaryDirectory()
         cls.addClassCleanup(tempdir.cleanup)
@@ -321,6 +315,11 @@ class EnvoyAuthTests(SimpleTestCase):
             assert envoy is not None
             command = [envoy, *args]
         else:
+            image = _envoy_image()
+            # Pulled here, so the wait for Envoy below doesn't include it.
+            inspect = subprocess.run([docker, "image", "inspect", image], capture_output=True)
+            if inspect.returncode != 0:
+                subprocess.run([docker, "pull", image], check=True, stdout=subprocess.DEVNULL)
             # Host networking, so 127.0.0.1 is the same inside and out; the
             # temporary directory (config and JWKS) is mounted at the same
             # path, and Envoy runs as us so it can read it.

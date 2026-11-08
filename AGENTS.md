@@ -12,7 +12,7 @@ Keep to this when editing them: put each new sentence on its own line, don't rew
 
 ## Commands
 
-CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `sentence-per-line-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `mypy`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `coverage`, `patch-coverage`, `patch-coverage-post`, `screenshots`, `screenshots-post`, `exolot`, `exolot-post`, `long-files`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
+CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `sentence-per-line-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `mypy`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `check-pins`, `check-checkout-credentials`, `just-fmt`, `just-fmt-check`, `coverage`, `patch-coverage`, `patch-coverage-post`, `screenshots`, `screenshots-post`, `exolot`, `exolot-post`, `long-files`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
 `just ci` is maintained by hand, so when you change the `test` job's steps in `ci.yml`, change the `ci` recipe to match.
 After `just coverage` runs, CI uploads `coverage.xml` to Codecov (`codecov/codecov-action`), and also uploads the `junit.xml` test results it writes for Codecov Test Analytics (`report_type: test_results`, even if the tests failed; not `codecov/test-results-action`, which is deprecated); these steps need a `CODECOV_TOKEN` repo secret from codecov.io.
 Codecov works out a PR's comparison with its base commit's report only when the PR's own upload is processed, and never redoes it when the base's report arrives later, so a stacked PR rebased onto `master` as its parent merges (whose CI races `master`'s, which uploads last as it saves the Docker image first) got "Please upload report for BASE".
@@ -48,6 +48,14 @@ Outside fenced code blocks, table rows, headings, HTML lines and inline code, it
 
 **Workflow lint:** `just lint-workflows` (part of `just check`, `just ci` and the `test` job) runs `jactionlint --profile correctness` over the workflows, composite actions and Dependabot config.
 It uses the `correctness` profile (what actionlint checks); jactionlint's default profile also enables security rules (`unpinned-uses`, `artipacked`, `missing-timeout`, etc.) that the existing workflows don't yet satisfy.
+
+**Pins and checkout credentials:** `just check-pins` (part of `just check`, `just ci` and the `test` job; `scripts/check_pins.py`, stdlib-only, run as `python -m scripts.check_pins`, ported from exolot) fails unless every `astral-sh/setup-uv` step in the workflows (and any local composite actions under `.github/actions`) sets `version` to `[tool.uv] required-version`'s minimum, every `extractions/setup-just` step sets `just-version` to the `justfile`'s `minimum-version`, and the `Dockerfile`'s `ghcr.io/astral-sh/uv` stage has the same uv tag; it also fails if it finds no such step or stage, as that more likely means it no longer recognises them.
+It reads the YAML with regexes rather than a YAML library, so it needs nothing installed.
+`just check-checkout-credentials` (likewise; `scripts/check_checkout_credentials.py`, which shares `check_pins.py`'s step parser) fails on any `actions/checkout` step that doesn't set `persist-credentials` to `false` or `true`.
+Set `true` only in a job that pushes with the checkout's token, with a comment saying so; the check can't tell whether a job pushes, so that part is left to review (no job does yet: `fix.yml` and `dependabot-fix` push with their own tokens, so check out with `false`).
+Left unset, checkout keeps the token where every later step can read it, including the PR's own code in `test` and `screenshots`; jactionlint's `artipacked` rule doesn't catch it, as it skips checkout v6 and later.
+
+**justfile formatting:** `just just-fmt-check` (part of `just check`, `just ci` and the `test` job) fails unless the `justfile` is as `just --fmt` would write it, and `just just-fmt` (part of `just fix`) rewrites it so.
 
 **Git config and `git blame`:** the `justfile`'s top-level `_ := shell('./scripts/git-config-setup.sh')` runs that script whenever `just` runs a recipe (plain `just` included, as it runs `default`; not `just --list`, which evaluates no assignments), so it sets the repo's local `blame.ignoreRevsFile` to `.git-blame-ignore-revs` if it isn't already, printing an `INFO:` line to stderr when it changes it.
 Outside a Git checkout (e.g. a `git archive` copy) the script does nothing, rather than failing every recipe.
@@ -126,7 +134,7 @@ uv run lifetracker-cli --help
 ## Architecture
 
 **Stack:** Django 6.x, Python 3.14, SQLite, `uv` for package management.
-`pyproject.toml`'s `[tool.uv] required-version` sets the oldest uv allowed (older ones write `uv.lock` in an older format); the `version:` of each `setup-uv` step in `ci.yml` and the `ghcr.io/astral-sh/uv` image tag in the `Dockerfile` pin one exact uv, so raise all three together.
+`pyproject.toml`'s `[tool.uv] required-version` sets the oldest uv allowed (older ones write `uv.lock` in an older format); the `version:` of each `setup-uv` step in `ci.yml` and the `ghcr.io/astral-sh/uv` image tag in the `Dockerfile` pin one exact uv, so raise all three together; `just check-pins` fails if they differ.
 The entire UI is the Django admin — there are no custom non-admin views (except file serving, the `/healthz/` health check, and the web app manifest and app icon), and `/` redirects to `/admin/`.
 No frontend framework.
 
@@ -146,15 +154,16 @@ Tests live outside `src/`, in a top-level `tests/` tree mirroring the package la
 Aim for one test file per source file, named `test_<module>.py` after the module it tests (e.g. `tests/core/test_backup.py` for `core/backup.py`), as a guideline rather than an absolute rule.
 A management command's tests go in the file of the module it wraps (e.g. `cloud_backup`'s in `test_backup.py`), and a page in `core/admin_views.py` is tested with its feature (e.g. the Uptime pages in `test_uptime_log.py`), as that module is a collection of unrelated pages.
 Other exceptions are fine where they read better: `tests/core/test_envoy.py` covers `envoy_config.py`, its command and `envoy/envoy.yaml` together, and `tests/test_docker_entrypoint.py` tests `docker-entrypoint.sh`.
+`tests/scripts/test_main_guards.py` (ported from exolot) runs every script's `if __name__ == "__main__":` block with `runpy`, with arguments that need no network and change nothing, so coverage measures them and a guard that drops `main()`'s exit code fails; add a case there when you add a script.
 A helper that tests in several files need lives in the file of the tests it belongs with, and the others import it (e.g. `tests/core/test_jwt_auth.py`'s `_decode_jwt`), or, if it belongs with none of them in particular, in a helper module not named like a test file (e.g. `tests/core/client_ip_helpers.py`); never import a `TestCase` that has tests from another file, as pytest would then run them twice.
 `tests/scripts/` likewise has one `test_<script>.py` per script in `scripts/`, testing it via `scripts.*` imports, e.g. `from scripts.requirements_min_versions import main`.
 `scripts/` has no `__init__.py`; it resolves as an implicit namespace package from the repo root, which both pytest and `manage.py test` put on `sys.path`.
 (Importing by bare module name with `scripts` on `pytest`'s `pythonpath` also works at runtime, but Pylance can't resolve it.)
-Coverage measures `scripts` alongside `src/lifetracker`.
+Coverage measures `scripts` alongside `src/lifetracker`, with branch coverage on (`[tool.coverage.run]`'s `branch = true`), so an `if` whose other branch never runs counts as partly covered.
 Run via `pytest` (using `pytest-django`, configured in `pyproject.toml`'s `[tool.pytest.ini_options]` with `testpaths = ["tests"]`), parallelised across CPU cores by `pytest-xdist` (`-n auto`, set as a default in `addopts`).
 `manage.py test tests` still works as an unparallelised fallback, using the `tests` package as its label rather than the `lifetracker.*` app labels.
 
-**Patch coverage:** `just patch-coverage [<base>] [<diff-cover option>...]` runs diff-cover over `coverage.xml` against `<base>` (default `origin/$GITHUB_BASE_REF`, else `origin/master`), passing it any further arguments.
+**Patch coverage:** `just patch-coverage [<base>] [<diff-cover option>...]` runs diff-cover over `coverage.xml` against `<base>` (default `origin/$GITHUB_BASE_REF`, else `origin/master`) with `--branch-coverage`, so a changed line with an untaken branch counts as missing, passing it any further arguments.
 On a PR, the `test` job runs it after the tests, as `just patch-coverage "origin/<base>" --format markdown:patch-coverage.md`, and uploads `patch-coverage.md` as a `patch-coverage` workflow artifact (kept 14 days); both steps are `continue-on-error`, as the report is informational and `codecov/patch` stays the gate.
 Then `post-patch-coverage` (once `test` has finished, whether it succeeded or failed, but only if the artifact is there) runs `just patch-coverage-post` (`scripts/post_patch_coverage.py`, run like `post_screenshots.py`), which posts the report as a `github-actions[bot]` PR comment, so it can be read without Codecov (whose comment arrives late, says little and links to a site agents may not reach).
 It works like the screenshot comment: found by a hidden `<!-- lifetracker-patch-coverage -->` marker and edited in place, nothing posted unless `--commit` is still the PR's head, a per-PR `concurrency` group, and skipped for fork PRs and Dependabot.
@@ -553,6 +562,7 @@ Ruff: rules E, F, W, I, UP, TID252, PLC0415, RUF100, TC005; line length 120; mig
 ## Type checking
 
 `just mypy` (`uv run --group dev --group screenshots mypy`; part of `just check`, `just ci` and the `test` job) type-checks `src/`, `scripts/`, `tests/` and `screenshot_tests/` (`[tool.mypy]`'s `files`) with mypy and the `django-stubs` plugin, configured in `pyproject.toml`'s `[tool.mypy]` with `strict = true`, so every function needs annotations (tests' included: `-> None` on each test and `setUp`, and types for fixtures, helpers and fakes), generic classes need their type arguments, and a `# type: ignore` that no longer hides an error fails (`warn_unused_ignores`).
+Beyond `strict`, as in exolot, it sets `warn_unreachable`, `disallow_any_unimported` and the optional error codes in `enable_error_code` (`possibly-undefined`, `truthy-iterable` and others), so a `# type: ignore` needs an error code; it leaves off `mutable-override` (every Django `Meta` and `ModelAdmin` attribute against django-stubs' types) and `disallow_any_decorated` (Django's view decorators), which here are noise.
 It also enables `explicit-override`, so every method that overrides a base class's (`__str__`, `clean`, a `ModelAdmin`'s or a `TestCase`'s `setUp` included) is marked `@override` (`from typing import override`), and one whose base method is renamed or removed fails instead of silently no longer being called.
 The `screenshots` group is there so mypy can see Playwright's types; only its Python package is installed, not a browser.
 `mypy_path = "src"` and `explicit_package_bases` give each file one module name (`lifetracker.*` from `src`, `scripts.*` and `tests.*` from the repo root); without them `scripts/github_comments.py` is found as both `github_comments` and `scripts.github_comments`.

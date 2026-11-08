@@ -26,7 +26,7 @@ requirements-fix:
 
 # Re-lock a Dependabot branch's uv.lock with this uv, from the base ref's uv.lock
 dependabot-relock base:
-    uv run --no-project python scripts/dependabot_relock.py {{base}}
+    uv run --no-project python scripts/dependabot_relock.py {{ base }}
 
 # Check that uv.lock only has wheels for supported OS/CPU combinations
 lock-os-arch-check:
@@ -46,7 +46,7 @@ screenshots-dir-check:
 
 # Check .git-blame-ignore-revs lists real commits that are ancestors of target
 blame-ignore-revs-check target="HEAD":
-    uv run --no-project python scripts/check_blame_ignore_revs.py {{quote(target)}}
+    uv run --no-project python scripts/check_blame_ignore_revs.py {{ quote(target) }}
 
 # Lint Python code with ruff
 lint:
@@ -99,7 +99,7 @@ coverage:
 # Show patch coverage from coverage.xml against a base branch (or PR base)
 [positional-arguments]
 patch-coverage compare_branch="" *args:
-    compare_branch="${1:-${GITHUB_BASE_REF:+origin/$GITHUB_BASE_REF}}"; shift $(( $# > 0 )); uv run --group dev diff-cover coverage.xml --compare-branch="${compare_branch:-origin/master}" "$@"
+    compare_branch="${1:-${GITHUB_BASE_REF:+origin/$GITHUB_BASE_REF}}"; shift $(( $# > 0 )); uv run --group dev diff-cover coverage.xml --compare-branch="${compare_branch:-origin/master}" --branch-coverage "$@"
 
 # The screenshot tests live outside `testpaths`, so plain `pytest` (and
 # `just test`/`just coverage`) never collects them; `-n 0` because two tests
@@ -270,11 +270,27 @@ fly-setup *args:
 lint-workflows:
     uv run --group dev jactionlint --profile correctness
 
-# Run every whitespace, sentence-per-line, screenshots/, blame-ignore-revs, ruff, mypy, djlint and jactionlint check (no fixes, no tests)
-check: whitespace-check sentence-per-line-check screenshots-dir-check blame-ignore-revs-check lint fmt-check mypy lint-templates fmt-check-templates lint-workflows
+# Check that every workflow pins the uv and just versions the project requires, and the Dockerfile the same uv
+check-pins:
+    uv run --no-project python -m scripts.check_pins
 
-# Autofix lint issues and reformat code/templates
-fix: lint-fix fmt fmt-templates
+# Check that every actions/checkout step sets persist-credentials, so none keeps its token by default
+check-checkout-credentials:
+    uv run --no-project python -m scripts.check_checkout_credentials
+
+# Format the justfile with just's built-in formatter
+just-fmt:
+    {{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} --fmt
+
+# Check that the justfile is formatted as just's built-in formatter would
+just-fmt-check:
+    {{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} --fmt --check
+
+# Run every whitespace, sentence-per-line, screenshots/, blame-ignore-revs, ruff, mypy, djlint, jactionlint, pin, checkout and justfile format check (no fixes, no tests)
+check: whitespace-check sentence-per-line-check screenshots-dir-check blame-ignore-revs-check lint fmt-check mypy lint-templates fmt-check-templates lint-workflows check-pins check-checkout-credentials just-fmt-check
+
+# Autofix lint issues and reformat code/templates and the justfile
+fix: lint-fix fmt fmt-templates just-fmt
 
 # Run everything the CI workflow runs
 ci: lock-check lock-os-arch-check sync requirements-check check coverage docker-build docker-smoke
