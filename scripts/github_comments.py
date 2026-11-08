@@ -1,6 +1,6 @@
 """GitHub API helpers for the scripts that post a PR comment and edit it in
-place on later runs (post_screenshots, post_patch_coverage). Stdlib-only; run
-those scripts as modules (`python -m scripts.<name>`) from the repo root, so
+place on later runs (post_screenshots, post_patch_coverage, long_files).
+Stdlib-only; run those scripts as modules (`python -m scripts.<name>`) from the repo root, so
 they can import this."""
 
 import json
@@ -102,9 +102,10 @@ def marked_comments(repo: str, pr: int, author: str, marker: str, token: str) ->
         page += 1
 
 
-def upsert_comment(repo: str, pr: int, author: str, marker: str, body: str, token: str) -> None:
+def upsert_comment(repo: str, pr: int, author: str, marker: str, body: str, token: str, *, create: bool = True) -> bool:
     """Edit author's comment on pr starting with marker to have body, or post
-    one if there's none. body should start with marker, so the next run finds it."""
+    one if there's none and create is true. body should start with marker, so
+    the next run finds it. Returns whether it edited or posted one."""
     previous = marked_comments(repo, pr, author, marker, token)
     comments_url = f"{API_URL}/repos/{repo}/issues/comments"
     if previous:
@@ -113,8 +114,11 @@ def upsert_comment(repo: str, pr: int, author: str, marker: str, body: str, toke
         # Keep only one, should a failed or raced run have left another.
         for comment in previous[1:]:
             request("DELETE", f"{comments_url}/{comment['id']}", token)
-    else:
+    elif create:
         request("POST", f"{API_URL}/repos/{repo}/issues/{pr}/comments", token, json_body={"body": body})
+    else:
+        return False
+    return True
 
 
 def graphql(query: str, variables: dict[str, Any], token: str) -> dict[str, Any]:
