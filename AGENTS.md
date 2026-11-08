@@ -517,7 +517,7 @@ The findings are for information only: `--exit-zero` means findings never fail t
 
 ## Linting config
 
-Ruff: rules E, F, W, I, UP, TID252, PLC0415, RUF100; line length 120; migrations excluded. djlint: profile=django, indent=2.
+Ruff: rules E, F, W, I, UP, TID252, PLC0415, RUF100, TC005; line length 120; migrations excluded. djlint: profile=django, indent=2.
 
 ## Type checking
 
