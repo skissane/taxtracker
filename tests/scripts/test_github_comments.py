@@ -11,6 +11,9 @@ from django.test import SimpleTestCase
 
 from scripts.github_comments import request as github_request
 
+# What request() opens URLs with; wait_for_base_coverage's tests use it too.
+NO_REDIRECT_OPEN = "scripts.github_comments.no_redirect_opener.open"
+
 
 class GitHubCommentsRequestTests(SimpleTestCase):
     def _response(self, payload: bytes) -> mock.MagicMock:
@@ -24,7 +27,7 @@ class GitHubCommentsRequestTests(SimpleTestCase):
         return urllib.error.HTTPError(url, code, "Redirect", headers, None)
 
     def test_sends_json_with_token(self) -> None:
-        with mock.patch("scripts.github_comments._opener.open", return_value=self._response(b'{"a": 1}')) as urlopen:
+        with mock.patch(NO_REDIRECT_OPEN, return_value=self._response(b'{"a": 1}')) as urlopen:
             result = github_request("POST", "https://api.github.com/x", "tok", json_body={"b": 2})
         self.assertEqual(result, {"a": 1})
         request = urlopen.call_args.args[0]
@@ -35,7 +38,7 @@ class GitHubCommentsRequestTests(SimpleTestCase):
         self.assertEqual(request.get_header("Authorization"), "Bearer tok")
 
     def test_empty_response_is_none(self) -> None:
-        with mock.patch("scripts.github_comments._opener.open", return_value=self._response(b"")):
+        with mock.patch(NO_REDIRECT_OPEN, return_value=self._response(b"")):
             self.assertIsNone(github_request("DELETE", "https://api.github.com/x", "tok"))
 
     def test_follows_redirects_dropping_token_off_host(self) -> None:
@@ -49,7 +52,7 @@ class GitHubCommentsRequestTests(SimpleTestCase):
             self._redirect("https://uploads.github.com/b", "https://elsewhere.example/c", code),
             self._response(b'{"url": "u"}'),
         ]
-        with mock.patch("scripts.github_comments._opener.open", side_effect=responses) as urlopen:
+        with mock.patch(NO_REDIRECT_OPEN, side_effect=responses) as urlopen:
             result = github_request("POST", "https://uploads.github.com/a", "tok", data=b"png")
         self.assertEqual(result, {"url": "u"})
         sent = [c.args[0] for c in urlopen.call_args_list]
@@ -73,7 +76,7 @@ class GitHubCommentsRequestTests(SimpleTestCase):
             self._redirect("https://api.github.com/a", "http://api.github.com/b", 301),
             self._response(b"{}"),
         ]
-        with mock.patch("scripts.github_comments._opener.open", side_effect=responses) as urlopen:
+        with mock.patch(NO_REDIRECT_OPEN, side_effect=responses) as urlopen:
             github_request("GET", "https://api.github.com/a", "tok")
         self.assertEqual(
             [c.args[0].get_header("Authorization") for c in urlopen.call_args_list],
@@ -83,7 +86,7 @@ class GitHubCommentsRequestTests(SimpleTestCase):
     def test_too_many_redirects(self) -> None:
         redirect = self._redirect("https://api.github.com/x", "/x")
         with (
-            mock.patch("scripts.github_comments._opener.open", side_effect=[redirect] * 5),
+            mock.patch(NO_REDIRECT_OPEN, side_effect=[redirect] * 5),
             self.assertRaisesRegex(RuntimeError, "too many redirects"),
         ):
             github_request("GET", "https://api.github.com/x", "tok")
@@ -129,7 +132,7 @@ class GitHubCommentsRequestTests(SimpleTestCase):
         error = urllib.error.HTTPError("https://api.github.com/x", 404, "Not Found", Message(), None)
         with (
             error,
-            mock.patch("scripts.github_comments._opener.open", side_effect=error),
+            mock.patch(NO_REDIRECT_OPEN, side_effect=error),
             self.assertRaises(urllib.error.HTTPError),
         ):
             github_request("GET", "https://api.github.com/x", "tok")

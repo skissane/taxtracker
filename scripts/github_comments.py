@@ -1,5 +1,6 @@
 """GitHub API helpers for the scripts that post a PR comment and edit it in
-place on later runs (post_screenshots, post_patch_coverage, long_files).
+place on later runs (post_screenshots, post_patch_coverage, long_files), and
+the no-redirect opener wait_for_base_coverage uses.
 Stdlib-only; run those scripts as modules (`python -m scripts.<name>`) from
 the repo root, so they can import this."""
 
@@ -32,7 +33,8 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         return None
 
 
-_opener = urllib.request.build_opener(_NoRedirectHandler)
+# Public for other scripts that send a token (wait_for_base_coverage).
+no_redirect_opener = urllib.request.build_opener(_NoRedirectHandler)
 
 
 def _origin(url: str) -> tuple[str, str]:
@@ -65,7 +67,7 @@ def request(
         if _origin(url) == origin:
             req.add_header("Authorization", f"Bearer {token}")
         try:
-            with _opener.open(req, timeout=60) as response:
+            with no_redirect_opener.open(req, timeout=60) as response:
                 payload = response.read()
             return json.loads(payload) if payload else None
         except urllib.error.HTTPError as e:
