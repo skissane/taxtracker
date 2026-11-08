@@ -176,6 +176,13 @@ class PostPatchCoverageTests(SimpleTestCase):
             ],
         )
 
+    def test_awkward_path(self) -> None:
+        # A pipe would end the cell, and a backtick the code span.
+        report = self.HEAD.replace("- a&#46;py (50.0%)", "- a|b`c&#46;py (50.0%)")
+        code, _, requests = self._run(report=report)
+        self.assertEqual(code, 0)
+        self.assertIn("| `` a\\|b`c.py `` | 50.0% | 2 |", self._writes(requests)[0][3]["body"])
+
     def test_long_report_truncated(self) -> None:
         lines = "\n".join(f"  {n} x = {n}" for n in range(20_000))
         report = f"{self.HEAD}\n## a.py\n\n```python\n{lines}\n```\n"
