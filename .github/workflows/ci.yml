@@ -521,6 +521,8 @@ jobs:
   # checkout doesn't persist credentials, and nothing installs the project or its
   # dependencies (requirements-fix needs only the standard library). GITHUB_TOKEN
   # is read-only on Dependabot runs whatever this job asks for, so ask for read.
+  # Checks .github/workflows/actions.lock, which pins every action the
+  # workflows use, transitive ones included, to a commit.
   actions-lock:
     runs-on: ubuntu-latest
     permissions:
@@ -536,14 +538,11 @@ jobs:
       - name: Install gh-actions-lock
         run: gh extension install github/gh-actions-lock --pin v0.4.1
 
-      # TEMPORARY: generate the lockfile, as sessions can't reach GitHub's GraphQL API.
-      - name: Lock
-        run: gh actions-lock --no-interactive || true
-
-      - uses: actions/upload-artifact@v4.6.2
-        with:
-          name: actions-lock
-          path: .github/workflows/
+      # Fails if actions.lock is missing an action a workflow uses, or a
+      # locked commit no longer verifies upstream. Rerun `gh actions-lock`
+      # after changing any `uses:`.
+      - name: Verify actions.lock
+        run: gh actions-lock --verify
 
   dependabot-fix:
     if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
@@ -651,8 +650,8 @@ jobs:
   # success(), because success() also checks transitive dependencies, and
   # dependabot-fix (test's dependency) is always skipped on master pushes.
   publish:
-    needs: test
-    if: ${{ !cancelled() && needs.test.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+    needs: [test, actions-lock]
+    if: ${{ !cancelled() && needs.test.result == 'success' && needs.actions-lock.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
     runs-on: ubuntu-latest
     permissions:
       packages: write

@@ -16,10 +16,10 @@ workflows:
         - 'superfly/flyctl-actions@1.6'
     '.github/workflows/claude-code-review.yml':
         - 'actions/checkout@v4.4.0'
-        - 'anthropics/claude-code-action@v1.0.269'
+        - 'anthropics/claude-code-action@v1.0.266'
     '.github/workflows/claude.yml':
         - 'actions/checkout@v4.4.0'
-        - 'anthropics/claude-code-action@v1.0.269'
+        - 'anthropics/claude-code-action@v1.0.266'
     '.github/workflows/fix.yml':
         - 'actions/checkout@v4.4.0'
         - 'astral-sh/setup-uv@v6.8.0'
@@ -50,9 +50,9 @@ dependencies:
         commit: 'sha1-ea165f8d65b6e75b540449e92b4886f43607fa02'
         owner_id: 44036562
         repo_id: 192625955
-    'anthropics/claude-code-action@v1.0.269':
-        ref: 'v1.0.269'
-        commit: 'sha1-61a9c274fa7110a66dfafc1bbbced03833eb25fe'
+    'anthropics/claude-code-action@v1.0.266':
+        ref: 'v1.0.266'
+        commit: 'sha1-d535f5172dec02b204866b393d6b20b9b2aaf98d'
         owner_id: 76263028
         repo_id: 986421638
         uses:
