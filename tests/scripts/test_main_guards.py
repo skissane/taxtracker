@@ -44,7 +44,7 @@ def run_as_main(monkeypatch: pytest.MonkeyPatch, module: str, *args: str) -> obj
         ("scripts.check_sentence_per_line", [], "one-sentence-per-line"),
         ("scripts.check_whitespace", [], "clean whitespace"),
         ("scripts.long_files", ["--base", ""], "500 lines"),
-        ("scripts.requirements_min_versions", ["check"], ""),
+        ("scripts.requirements_min_versions", ["check"], "Dependency minimum versions match uv.lock."),
         ("scripts.validate_uv_lock_os_arch", [], "uv.lock"),
     ],
 )
