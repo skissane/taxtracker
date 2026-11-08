@@ -516,11 +516,6 @@ jobs:
         # GITHUB_TOKEN can't look up its own login, so name it.
         run: just long-files --base "$BASE" --commit "$HEAD_SHA" --post "$PR_NUMBER" --author 'github-actions[bot]'
 
-  # Runs on a Dependabot branch, whose bumped dependency we don't trust, so the
-  # write-capable DEPENDABOT_FIX_TOKEN is only exposed to the final push step:
-  # checkout doesn't persist credentials, and nothing installs the project or its
-  # dependencies (requirements-fix needs only the standard library). GITHUB_TOKEN
-  # is read-only on Dependabot runs whatever this job asks for, so ask for read.
   # Checks .github/workflows/actions.lock, which pins every action the
   # workflows use, transitive ones included, to a commit.
   actions-lock:
@@ -552,6 +547,11 @@ jobs:
       - name: Verify actions.lock
         run: '"$RUNNER_TEMP/gh-actions-lock" --verify'
 
+  # Runs on a Dependabot branch, whose bumped dependency we don't trust, so the
+  # write-capable DEPENDABOT_FIX_TOKEN is only exposed to the final push step:
+  # checkout doesn't persist credentials, and nothing installs the project or its
+  # dependencies (requirements-fix needs only the standard library). GITHUB_TOKEN
+  # is read-only on Dependabot runs whatever this job asks for, so ask for read.
   dependabot-fix:
     if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
     runs-on: ubuntu-latest
