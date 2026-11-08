@@ -52,26 +52,38 @@ def _wheel_platforms(filename: str) -> list[str]:
     return filename.removesuffix(".whl").split("-")[-1].split(".")
 
 
-def main() -> int:
-    lock = tomllib.loads(Path("uv.lock").read_text(encoding="utf-8"))
+def _classify_tag(platform: str) -> PlatformClassification:
+    """How _classify_platform treats a wheel's platform tag; one it can't split is UNSUPPORTED."""
+    try:
+        return _classify_platform(_split_platform(platform))
+    except ValueError:
+        return PlatformClassification.UNSUPPORTED
+
+
+def _wheel_filename(package_name: str, wheel: dict[str, Any]) -> str:
+    # Registry wheels have a `url`; local ones a `path` or `filename`.
+    location: str | None = wheel.get("url") or wheel.get("path") or wheel.get("filename")
+    if location is None:
+        raise ValueError(f"wheel in {package_name} has no url, path or filename")
+    return location.rsplit("/", 1)[-1]
+
+
+def _disallowed_wheels(lock: dict[str, Any]) -> list[tuple[str, str, str]]:
+    """``(package, wheel filename, platform tag)`` for each of *lock*'s wheels for an UNSUPPORTED platform."""
     disallowed = []
     packages: list[dict[str, Any]] = lock.get("package", [])
     for package in packages:
         wheels: list[dict[str, Any]] = package.get("wheels", [])
         for wheel in wheels:
-            # Registry wheels have a `url`; local ones a `path` or `filename`.
-            location: str | None = wheel.get("url") or wheel.get("path") or wheel.get("filename")
-            if location is None:
-                raise ValueError(f"wheel in {package['name']} has no url, path or filename")
-            filename = location.rsplit("/", 1)[-1]
+            filename = _wheel_filename(package["name"], wheel)
             for platform in _wheel_platforms(filename):
-                try:
-                    classification = _classify_platform(_split_platform(platform))
-                except ValueError:
-                    classification = PlatformClassification.UNSUPPORTED
-                if classification == PlatformClassification.UNSUPPORTED:
+                if _classify_tag(platform) == PlatformClassification.UNSUPPORTED:
                     disallowed.append((package["name"], filename, platform))
+    return disallowed
 
+
+def main() -> int:
+    disallowed = _disallowed_wheels(tomllib.loads(Path("uv.lock").read_text(encoding="utf-8")))
     if disallowed:
         print("uv.lock has wheels for platforms that aren't allowed:")
         for name, filename, platform in disallowed:
