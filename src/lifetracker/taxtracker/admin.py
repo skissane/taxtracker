@@ -24,7 +24,6 @@ from lifetracker.taxtracker.archives import (
     UnsupportedArchiveError,
     extract_from_archive_with_skips,
 )
-from lifetracker.taxtracker.financial_year import financial_year_for_date
 from lifetracker.taxtracker.forms import (
     AttachmentForm,
     ImportArchiveForm,
@@ -36,6 +35,12 @@ from lifetracker.taxtracker.models import (
     FinancialYearStatusHistory,
     Item,
     ReceivedDocument,
+)
+from lifetracker.taxtracker.reassign import (
+    apply_reassignments,
+    find_equivalent_item,
+    item_path_signature,
+    plan_reassignments,
 )
 from lifetracker.taxtracker.zip_export import (
     build_multi_index_md,
@@ -73,38 +78,6 @@ def _attachment_date_warning(obj: Attachment) -> str:
 # Matches a leading 4-digit financial year in a filename, e.g. "2024-notice.pdf".
 # The negative lookahead excludes longer digit runs like "20245-notice.pdf".
 _RECEIVED_DOC_YEAR_RE = re.compile(r"^(\d{4})(?!\d)")
-
-
-def _item_path_signature(item: Item) -> list[tuple[str, int]]:
-    """Return root→leaf signature for an item path as ``[(title, order), ...]``."""
-    signature = []
-    current: Item | None = item
-    visited = set()
-    while current is not None and current.pk not in visited:
-        visited.add(current.pk)
-        signature.append((current.title, current.order))
-        current = current.parent
-    return list(reversed(signature))
-
-
-def _find_equivalent_item(path_signature: list[tuple[str, int]], target_fy: FinancialYear) -> Item | None:
-    """Find the equivalent item in ``target_fy`` by matching title/order path."""
-    parent_id = None
-    current = None
-    for title, order in path_signature:
-        matches = list(
-            Item.objects.filter(
-                year=target_fy,
-                parent_id=parent_id,
-                title=title,
-                order=order,
-            ).order_by("pk")[:2]
-        )
-        if len(matches) != 1:
-            return None
-        current = matches[0]
-        parent_id = current.pk
-    return current
 
 
 def _existing_attachment_names(**filters: Any) -> set[str]:
@@ -328,7 +301,7 @@ class ItemAdmin(admin.ModelAdmin[Item]):
         if item is None:
             return response
 
-        path_signature = _item_path_signature(item)
+        path_signature = item_path_signature(item)
         prev_fy = FinancialYear.objects.filter(year=item.year.year - 1).first()
         next_fy = FinancialYear.objects.filter(year=item.year.year + 1).first()
 
@@ -336,8 +309,8 @@ class ItemAdmin(admin.ModelAdmin[Item]):
         response.context_data["reassign_attachments_url"] = reverse(
             "admin:taxtracker_item_reassign_attachments", args=[item.pk]
         )
-        response.context_data["prev_item"] = _find_equivalent_item(path_signature, prev_fy) if prev_fy else None
-        response.context_data["next_item"] = _find_equivalent_item(path_signature, next_fy) if next_fy else None
+        response.context_data["prev_item"] = find_equivalent_item(path_signature, prev_fy) if prev_fy else None
+        response.context_data["next_item"] = find_equivalent_item(path_signature, next_fy) if next_fy else None
         return response
 
     # ------------------------------------------------------------------
@@ -414,74 +387,26 @@ class ItemAdmin(admin.ModelAdmin[Item]):
             raise PermissionDenied
 
         attachments = list(item.attachments.all().order_by("date", "title", "pk"))
-        path_signature = _item_path_signature(item)
-        target_cache = {}
-        rows: list[dict[str, Any]] = []
-
-        for attachment in attachments:
-            if attachment.date is None or item.year.start_date <= attachment.date <= item.year.end_date:
-                continue
-
-            target_year_num = financial_year_for_date(attachment.date)
-            target_fy = FinancialYear.objects.filter(year=target_year_num).first()
-
-            if target_fy is None:
-                target_item = None
-                warning = f"Financial year FY{target_year_num} not found."
-            else:
-                if target_fy.pk not in target_cache:
-                    target_cache[target_fy.pk] = _find_equivalent_item(path_signature, target_fy)
-                target_item = target_cache[target_fy.pk]
-                if target_item is None:
-                    warning = f"Equivalent item not found in FY{target_year_num}."
-                else:
-                    warning = ""
-
-            rows.append(
-                {
-                    "attachment": attachment,
-                    "target_year_num": target_year_num,
-                    "target_item": target_item,
-                    "warning": warning,
-                    "movable": target_item is not None,
-                }
-            )
-
+        rows = plan_reassignments(item, attachments)
+        movable_count = sum(1 for row in rows if row.movable)
         initial_summary = {
             "total_attachments": len(attachments),
             "correct_item_count": len(attachments) - len(rows),
-            "unmovable_count": sum(1 for row in rows if not row["movable"]),
-            "movable_count": sum(1 for row in rows if row["movable"]),
+            "unmovable_count": len(rows) - movable_count,
+            "movable_count": movable_count,
         }
 
         result_rows = []
         result_summary = None
         if request.method == "POST":
             selected_ids = {int(v) for v in request.POST.getlist("move_attachment_ids") if v.isdigit()}
-            with transaction.atomic():
-                for row in rows:
-                    attachment = row["attachment"]
-                    if row["movable"] and attachment.pk in selected_ids:
-                        attachment.item = row["target_item"]
-                        attachment.save(update_fields=["item"])
-                        status = "Moved"
-                    elif row["movable"]:
-                        status = "Not selected"
-                    else:
-                        status = "Unmovable"
-
-                    result_rows.append(
-                        {
-                            **row,
-                            "status": status,
-                        }
-                    )
-
+            result_rows = apply_reassignments(rows, selected_ids)
+            statuses = [row.status for row in result_rows]
             result_summary = {
                 "total_out_of_year": len(rows),
-                "moved_count": sum(1 for row in result_rows if row.get("status") == "Moved"),
-                "not_selected_count": sum(1 for row in result_rows if row.get("status") == "Not selected"),
-                "unmovable_count": sum(1 for row in result_rows if row.get("status") == "Unmovable"),
+                "moved_count": statuses.count("Moved"),
+                "not_selected_count": statuses.count("Not selected"),
+                "unmovable_count": statuses.count("Unmovable"),
             }
 
         context = {
