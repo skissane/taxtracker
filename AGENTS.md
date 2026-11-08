@@ -12,7 +12,7 @@ Keep to this when editing them: put each new sentence on its own line, don't rew
 
 ## Commands
 
-CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `sentence-per-line-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `mypy`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `coverage`, `patch-coverage`, `patch-coverage-post`, `screenshots`, `screenshots-post`, `exolot`, `exolot-post`, `long-files`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
+CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `sentence-per-line-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `mypy`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `check-pins`, `check-checkout-credentials`, `just-fmt`, `just-fmt-check`, `coverage`, `patch-coverage`, `patch-coverage-post`, `screenshots`, `screenshots-post`, `exolot`, `exolot-post`, `long-files`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
 `just ci` is maintained by hand, so when you change the `test` job's steps in `ci.yml`, change the `ci` recipe to match.
 After `just coverage` runs, CI uploads `coverage.xml` to Codecov (`codecov/codecov-action`), and also uploads the `junit.xml` test results it writes for Codecov Test Analytics (`report_type: test_results`, even if the tests failed; not `codecov/test-results-action`, which is deprecated); these steps need a `CODECOV_TOKEN` repo secret from codecov.io.
 Codecov works out a PR's comparison with its base commit's report only when the PR's own upload is processed, and never redoes it when the base's report arrives later, so a stacked PR rebased onto `master` as its parent merges (whose CI races `master`'s, which uploads last as it saves the Docker image first) got "Please upload report for BASE".
@@ -48,6 +48,14 @@ Outside fenced code blocks, table rows, headings, HTML lines and inline code, it
 
 **Workflow lint:** `just lint-workflows` (part of `just check`, `just ci` and the `test` job) runs `jactionlint --profile correctness` over the workflows, composite actions and Dependabot config.
 It uses the `correctness` profile (what actionlint checks); jactionlint's default profile also enables security rules (`unpinned-uses`, `artipacked`, `missing-timeout`, etc.) that the existing workflows don't yet satisfy.
+
+**Pins and checkout credentials:** `just check-pins` (part of `just check`, `just ci` and the `test` job; `scripts/check_pins.py`, stdlib-only, run as `python -m scripts.check_pins`, ported from exolot) fails unless every `astral-sh/setup-uv` step in the workflows (and any local composite actions under `.github/actions`) sets `version` to `[tool.uv] required-version`'s minimum, every `extractions/setup-just` step sets `just-version` to the `justfile`'s `minimum-version`, and the `Dockerfile`'s `ghcr.io/astral-sh/uv` stage has the same uv tag; it also fails if it finds no such step or stage, as that more likely means it no longer recognises them.
+It reads the YAML with regexes rather than a YAML library, so it needs nothing installed.
+`just check-checkout-credentials` (likewise; `scripts/check_checkout_credentials.py`, which shares `check_pins.py`'s step parser) fails on any `actions/checkout` step that doesn't set `persist-credentials` to `false` or `true`.
+Set `true` only in a job that pushes with the checkout's token, with a comment saying so; the check can't tell whether a job pushes, so that part is left to review (no job does yet: `fix.yml` and `dependabot-fix` push with their own tokens, so check out with `false`).
+Left unset, checkout keeps the token where every later step can read it, including the PR's own code in `test` and `screenshots`; jactionlint's `artipacked` rule doesn't catch it, as it skips checkout v6 and later.
+
+**justfile formatting:** `just just-fmt-check` (part of `just check`, `just ci` and the `test` job) fails unless the `justfile` is as `just --fmt` would write it, and `just just-fmt` (part of `just fix`) rewrites it so.
 
 **Git config and `git blame`:** the `justfile`'s top-level `_ := shell('./scripts/git-config-setup.sh')` runs that script whenever `just` runs a recipe (plain `just` included, as it runs `default`; not `just --list`, which evaluates no assignments), so it sets the repo's local `blame.ignoreRevsFile` to `.git-blame-ignore-revs` if it isn't already, printing an `INFO:` line to stderr when it changes it.
 Outside a Git checkout (e.g. a `git archive` copy) the script does nothing, rather than failing every recipe.
@@ -126,7 +134,7 @@ uv run lifetracker-cli --help
 ## Architecture
 
 **Stack:** Django 6.x, Python 3.14, SQLite, `uv` for package management.
-`pyproject.toml`'s `[tool.uv] required-version` sets the oldest uv allowed (older ones write `uv.lock` in an older format); the `version:` of each `setup-uv` step in `ci.yml` and the `ghcr.io/astral-sh/uv` image tag in the `Dockerfile` pin one exact uv, so raise all three together.
+`pyproject.toml`'s `[tool.uv] required-version` sets the oldest uv allowed (older ones write `uv.lock` in an older format); the `version:` of each `setup-uv` step in `ci.yml` and the `ghcr.io/astral-sh/uv` image tag in the `Dockerfile` pin one exact uv, so raise all three together; `just check-pins` fails if they differ.
 The entire UI is the Django admin — there are no custom non-admin views (except file serving, the `/healthz/` health check, and the web app manifest and app icon), and `/` redirects to `/admin/`.
 No frontend framework.
 
