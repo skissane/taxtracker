@@ -3,6 +3,7 @@ import http.client
 import http.server
 import io
 import json
+import threading
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -12,8 +13,10 @@ from unittest import mock
 
 from django.test import SimpleTestCase
 
+from scripts import wait_for_base_coverage
 from scripts.wait_for_base_coverage import base_ci_state, codecov_coverage
 from scripts.wait_for_base_coverage import main as wait_for_base_coverage_main
+from tests.scripts.test_github_comments import NO_REDIRECT_OPEN
 
 
 class WaitForBaseCoverageTests(SimpleTestCase):
@@ -29,9 +32,11 @@ class WaitForBaseCoverageTests(SimpleTestCase):
     def _http_error(self, status: int, payload: bytes) -> urllib.error.HTTPError:
         return urllib.error.HTTPError("https://example/", status, "Error", Message(), io.BytesIO(payload))
 
-    def _call(self, func: Callable[..., Any], result: object, *args: Any) -> tuple[Any, urllib.request.Request]:
+    def _call(
+        self, func: Callable[..., Any], result: object, *args: Any, target: str = "urllib.request.urlopen"
+    ) -> tuple[Any, urllib.request.Request]:
         kwargs: dict[str, Any] = {"side_effect" if isinstance(result, Exception) else "return_value": result}
-        with mock.patch("urllib.request.urlopen", **kwargs) as urlopen:
+        with mock.patch(target, **kwargs) as urlopen:
             outcome = func(self.REPO, self.SHA, *args, 7)
         self.assertEqual(urlopen.call_args.kwargs, {"timeout": 7})
         return outcome, urlopen.call_args.args[0]
@@ -61,7 +66,7 @@ class WaitForBaseCoverageTests(SimpleTestCase):
         self, *runs: dict[str, Any], token: str | None = None
     ) -> tuple[tuple[str, str], urllib.request.Request]:
         body = json.dumps({"total_count": len(runs), "check_runs": list(runs)}).encode()
-        with mock.patch("urllib.request.urlopen", return_value=self._response(200, body)) as urlopen:
+        with mock.patch(NO_REDIRECT_OPEN, return_value=self._response(200, body)) as urlopen:
             outcome = base_ci_state(self.REPO, self.SHA, "test", token, 7)
         return outcome, urlopen.call_args.args[0]
 
@@ -94,12 +99,45 @@ class WaitForBaseCoverageTests(SimpleTestCase):
 
     def test_base_ci_errors(self) -> None:
         self.assertEqual(
-            self._call(base_ci_state, self._http_error(403, b'{"message": "no"}'), "test", None)[0],
+            self._call(
+                base_ci_state, self._http_error(403, b'{"message": "no"}'), "test", None, target=NO_REDIRECT_OPEN
+            )[0],
             ("running", "HTTP 403"),
         )
         self.assertEqual(
-            self._call(base_ci_state, http.client.IncompleteRead(b""), "test", None)[0],
+            self._call(base_ci_state, http.client.IncompleteRead(b""), "test", None, target=NO_REDIRECT_OPEN)[0],
             ("running", "request failed: IncompleteRead(0 bytes read)"),
+        )
+
+    def test_base_ci_redirect_not_followed(self) -> None:
+        # A real server, as it's urllib's own redirect handling (which would
+        # send the token on to another host) that mustn't run.
+        seen: list[tuple[str, str | None]] = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                seen.append((self.path, self.headers.get("Authorization")))
+                self.send_response(302)
+                assert isinstance(self.server, http.server.HTTPServer)
+                self.send_header("Location", f"http://localhost:{self.server.server_port}/elsewhere")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, format: str, *args: Any) -> None:
+                pass
+
+        with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            try:
+                with mock.patch.object(wait_for_base_coverage, "GITHUB_API", f"http://127.0.0.1:{server.server_port}"):
+                    outcome = base_ci_state(self.REPO, self.SHA, "test", "t0k", 7)
+            finally:
+                server.shutdown()
+                thread.join()
+        self.assertEqual(outcome, ("running", "HTTP 302"))
+        self.assertEqual(
+            seen, [("/repos/owner/repo/commits/abc123/check-runs?check_name=test&filter=latest", "Bearer t0k")]
         )
 
     def _main(
