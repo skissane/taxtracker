@@ -13,6 +13,7 @@ from lifetracker.cli.extract_eml import (
     extract_eml_command,
     get_attachment_payload,
     get_email_date_prefix,
+    get_entry_name,
     get_unique_filename,
     iter_parts_with_date_prefix,
 )
@@ -120,6 +121,18 @@ class ExtractEmlTests(TestCase):
 
             with zipfile.ZipFile(zip_path) as zf:
                 self.assertTrue(any(n.startswith("case1-doc") for n in zf.namelist()))
+
+    def test_get_entry_name(self) -> None:
+        cases = [
+            ("My Payslip (June).PDF", "", "", "my-payslip-june.PDF"),
+            ("doc.pdf", "case1", "2024-06-30-", "2024-06-30-case1-doc.pdf"),
+            ("archive.tar.gz", "", "", "archive-tar.gz"),
+            ("no extension", "", "", "no-extension"),
+            ("trailing.", "", "", "trailing"),
+        ]
+        for filename, prefix, date_prefix, expected in cases:
+            with self.subTest(filename=filename):
+                self.assertEqual(get_entry_name(filename, prefix, date_prefix), expected)
 
     def test_get_unique_filename_deduplicates(self) -> None:
         used: dict[str, int] = {}
