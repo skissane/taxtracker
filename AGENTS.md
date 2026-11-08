@@ -32,6 +32,13 @@ It fails unless the branch has an open PR from this repo (`gh pr list --head`), 
 Like `dependabot-fix`, it checks out with `persist-credentials: false`, as `just fix` runs the branch's own `justfile` and dependencies, and only the push step sees its token, the `AUTOFIX_TOKEN` Actions secret (a fine-grained PAT with Contents: read and write; the job fails if it's unset), not `GITHUB_TOKEN`, whose pushes wouldn't trigger CI.
 If the branch moves after checkout, the push isn't a fast-forward and fails.
 
+**Claude workflows:** `.github/workflows/claude.yml` runs claude-code-action when a comment, review, issue or review comment mentions `@claude`, and `claude-code-review.yml` reviews a PR when its owner, a member or a collaborator comments `@claude review` (ported from exolot).
+Both set `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`, which strips secrets from the environment of the commands Claude runs, as what it reads may hold a prompt injection; that isolates the commands with bubblewrap, so each job first installs `bubblewrap` and `socat` and allows unprivileged user namespaces, without which Claude has no Bash at all.
+They allow only `git diff`, `git log` and `git show` beyond the action's defaults (`--allowedTools`), with the full history checked out, and deliberately not `just`: the action puts its write-capable token in `.git/config`, where the PR's own recipes and tests could read it, so CI runs them and Claude reads the results (`actions: read`).
+Each self-tests: a PR from this repository that changes the workflow (not Dependabot's, as the action refuses bot actors and Dependabot's runs get no `CLAUDE_CODE_OAUTH_TOKEN`) runs the PR's copy with a prompt asking Claude to check its tools, the allowed and a denied command, the sandbox and which secrets it can see, and posts the report as a `github-actions[bot]` comment, hiding that workflow's earlier ones (found by a `<!-- self-test:<file> -->` marker and the author).
+A self-test uses the job's own `GITHUB_TOKEN`, as the Claude app refuses a token to a workflow that differs from master's, and a new push cancels a running one (a per-PR `concurrency` group; other events get one each).
+`claude.yml`'s job can't write to PRs, so its report is posted by a second job.
+
 **Recreate PR:** `scripts/recreate_pr.py <PR URL>` (stdlib-only, run with `uv run --no-project python -m scripts.recreate_pr`) closes an open same-repo PR and opens a draft PR from the same branch with its title, body, labels and milestone, then comments "Superseded by #N" on the original.
 It isn't specific to this repo; it lives here until there's a better place for general utility scripts.
 It never copies assignees or reviewers, as GitHub rejects assigning a bot.

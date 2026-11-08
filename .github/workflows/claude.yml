@@ -9,15 +9,61 @@ on:
     types: [opened, assigned]
   pull_request_review:
     types: [submitted]
+  # Self-test: a PR that changes this workflow runs its own copy of it, so the
+  # change can be checked before it reaches master. See SELF_TEST_PROMPT.
+  pull_request:
+    paths: ['.github/workflows/claude.yml']
+
+# A new push supersedes a running self-test, so only the latest report is posted.
+# This is set on the workflow rather than the job, so a superseded run's later
+# jobs are cancelled too. Other events get a unique group, so they never queue
+# or cancel each other.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('self-test-claude.yml-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   claude:
+    # Self-tests skip Dependabot's runs: claude-code-action refuses bot actors, and
+    # Dependabot's runs get only Dependabot secrets, so no CLAUDE_CODE_OAUTH_TOKEN.
     if: |
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && !contains(github.event.comment.body, '@claude review')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]')
     runs-on: ubuntu-latest
+    outputs:
+      self-test-report: ${{ steps.self-test-report.outputs.report }}
+    env:
+      # Strip secrets (including the OAuth token) from the environment of
+      # commands Claude runs, as the issue or PR it reads may contain a prompt injection.
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
+      SELF_TEST_PROMPT: |
+        This is a self-test, not a normal request. Pull request #${{ github.event.pull_request.number }}
+        changes .github/workflows/claude.yml, and this run uses the PR's copy of that
+        workflow so its changes can be checked before they reach master. A normal run
+        does what an "@claude" comment on an issue or PR asks.
+
+        Don't review the PR's code and don't change any files. Instead, check that your
+        environment works as the workflow intends:
+
+        1. Read the PR's copy of .github/workflows/claude.yml.
+        2. List the tools you have. For each Bash command pattern the workflow allows,
+           try one harmless command, e.g. `git diff --stat origin/${{ github.base_ref }}...HEAD`,
+           `git log -3 --oneline` and `git show --stat HEAD`, and say whether it worked.
+        3. Try one Bash command that should be denied, e.g. `curl -sI https://example.com`,
+           and say whether it was blocked.
+        4. Say whether the Bash sandbox started, and if not, what error you saw.
+        5. If you can run a command that shows environment variables, say whether
+           CLAUDE_CODE_OAUTH_TOKEN, GITHUB_TOKEN, GH_TOKEN and ACTIONS_ID_TOKEN_REQUEST_TOKEN
+           are set. Never print their values.
+        6. Note anything in the workflow that looks likely to stop a normal "@claude" run working.
+
+        Your final message is posted as a comment on the PR, so make it a short Markdown
+        report with no heading, as the workflow adds one: a table of each check with pass,
+        fail or skipped, then any problems found.
     permissions:
       contents: read
       pull-requests: read
@@ -30,22 +76,96 @@ jobs:
         with:
           # claude-code-action sets up its own git credentials.
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 0
+
+      # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB isolates Claude's commands with
+      # bubblewrap, which needs these packages and unprivileged user namespaces.
+      # Without them Claude has no Bash at all. Mirrors the step the action runs
+      # itself when allowed_non_write_users is set.
+      - name: Install subprocess isolation dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap socat
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
 
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # A self-test's workflow differs from master's, so the Claude app refuses
+          # to give it a token; use the job's own token for those runs only.
+          github_token: ${{ github.event_name == 'pull_request' && github.token || '' }}
 
           # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
             actions: read
 
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
+          # Without a prompt, Claude does what the comment that tagged it asks.
+          prompt: ${{ github.event_name == 'pull_request' && env.SELF_TEST_PROMPT || '' }}
 
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr *)'
+          # The action's default tools can't diff, only commit and push. No just:
+          # the action puts its write-capable token in .git/config, where the
+          # PR's own recipes and tests could read it. CI runs them instead, and
+          # Claude can read the results. See
+          # https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://code.claude.com/docs/en/cli-reference for available options.
+          claude_args: '--allowedTools "Bash(git diff:*),Bash(git log:*),Bash(git show:*)"'
+
+      - name: Extract self-test report
+        id: self-test-report
+        if: always() && github.event_name == 'pull_request'
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          report=$(jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXECUTION_FILE" 2>/dev/null || true)
+          if [ -z "$report" ]; then
+            report="Claude produced no report. See the [workflow run]($RUN_URL)."
+          fi
+          report="### Self-test of claude.yml"$'\n\n'"$report"
+          printf '%s\n' "$report" >> "$GITHUB_STEP_SUMMARY"
+          delimiter="EOF_$(openssl rand -hex 16)"
+          printf 'report<<%s\n%s\n%s\n' "$delimiter" "$report" "$delimiter" >> "$GITHUB_OUTPUT"
+
+  # Posted from its own job, as the job that runs Claude can't write to PRs.
+  self-test-report:
+    needs: claude
+    if: always() && github.event_name == 'pull_request' && needs.claude.outputs.self-test-report != ''
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Comment self-test report on PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPORT: ${{ needs.claude.outputs.self-test-report }}
+          MARKER: '<!-- self-test:claude.yml -->'
+        run: |
+          # shellcheck disable=SC2016 # $vars in the GraphQL queries are GraphQL's, not the shell's
+          # Hide this workflow's earlier reports as outdated. Matching on the author
+          # too means nobody else's comment can be hidden by copying the marker.
+          gh api graphql --paginate -F owner="${GH_REPO%/*}" -F name="${GH_REPO#*/}" -F pr="$PR_NUMBER" -f query='
+            query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) {
+              repository(owner: $owner, name: $name) {
+                pullRequest(number: $pr) {
+                  comments(first: 100, after: $endCursor) {
+                    nodes { id isMinimized body author { login } }
+                    pageInfo { hasNextPage endCursor }
+                  }
+                }
+              }
+            }' --jq '.data.repository.pullRequest.comments.nodes[]
+              | select(.author.login == "github-actions" and (.isMinimized | not)
+                and (.body | startswith(env.MARKER))) | .id' |
+          while read -r id; do
+            gh api graphql -F id="$id" -f query='
+              mutation($id: ID!) {
+                minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { clientMutationId }
+              }' >/dev/null
+          done
+          printf '%s\n\n%s\n' "$MARKER" "$REPORT" | gh pr comment "$PR_NUMBER" --body-file -
