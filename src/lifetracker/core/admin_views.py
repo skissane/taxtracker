@@ -93,10 +93,11 @@ def idle_watchdog_page_context(now: datetime.datetime | None = None) -> dict[str
         return context
     try:
         status = _parse_watchdog_status(raw)
+        # Here too, as a time without a time zone only fails when compared with now.
+        _add_watchdog_times(status, now, config.request_file)
     except (KeyError, TypeError, ValueError) as exc:
         context["status_error"] = f"Unexpected contents in {config.status_file}: {exc!r}"
         return context
-    _add_watchdog_times(status, now, config.request_file)
     context["status"] = status
     return context
 
