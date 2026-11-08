@@ -3,6 +3,7 @@ import os
 import tempfile
 import typing
 from pathlib import Path
+from typing import override
 from unittest import mock
 
 from django.contrib.auth.models import User
@@ -45,6 +46,7 @@ class InitialAdminPasswordFileTests(TestCase):
 class EnsureSuperuserCommandTests(TestCase):
     """Tests for the ensure_superuser management command."""
 
+    @override
     def setUp(self) -> None:
         # Point the initial-admin-password lookup at a file inside a fresh
         # temp dir that doesn't exist unless a test writes to it, so this

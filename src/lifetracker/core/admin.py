@@ -1,6 +1,6 @@
 import logging
 import mimetypes
-from typing import Any
+from typing import Any, override
 from urllib.parse import quote
 
 from django.conf import settings
@@ -57,6 +57,7 @@ class _AtLeastOnePrimaryFormSet[M: MimeType | FileExtension](BaseInlineFormSet[M
     _nonempty_error: str | None = None  # if set, raised when there are no non-deleted rows
     _auto_primary_form: ModelForm[M] | None = None  # set in clean() when auto-setting a single row
 
+    @override
     def clean(self) -> None:
         super().clean()
         if any(self.errors):
@@ -81,6 +82,7 @@ class _AtLeastOnePrimaryFormSet[M: MimeType | FileExtension](BaseInlineFormSet[M
             else:
                 raise ValidationError(f"At least one {self._primary_label} must be marked as primary.")
 
+    @override
     def save(self, commit: bool = True) -> list[M]:
         instances = super().save(commit=commit)
         # For the auto-set-primary case, ensure the DB is updated even when the
@@ -185,18 +187,23 @@ INLINE_CONTENT_TYPES = frozenset(
 class DBStoredFileAdmin(admin.ModelAdmin[DBStoredFile]):
     """Registered only to host the serve-file URL; hidden from the admin index."""
 
+    @override
     def has_module_permission(self, request: HttpRequest) -> bool:
         return False
 
+    @override
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
 
+    @override
     def has_change_permission(self, request: HttpRequest, obj: DBStoredFile | None = None) -> bool:
         return False
 
+    @override
     def has_delete_permission(self, request: HttpRequest, obj: DBStoredFile | None = None) -> bool:
         return False
 
+    @override
     def get_urls(self) -> list[URLPattern]:
         custom = [
             path(
@@ -266,21 +273,27 @@ class CloudBackupStatusAdmin(admin.ModelAdmin[CloudBackupStatus]):
     entry (under Core) leads there.
     """
 
+    @override
     def has_module_permission(self, request: HttpRequest) -> bool:
         return request.user.is_active and request.user.is_superuser
 
+    @override
     def has_view_permission(self, request: HttpRequest, obj: CloudBackupStatus | None = None) -> bool:
         return request.user.is_active and request.user.is_superuser
 
+    @override
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
 
+    @override
     def has_change_permission(self, request: HttpRequest, obj: CloudBackupStatus | None = None) -> bool:
         return False
 
+    @override
     def has_delete_permission(self, request: HttpRequest, obj: CloudBackupStatus | None = None) -> bool:
         return False
 
+    @override
     def get_urls(self) -> list[URLPattern]:
         # Only these: the single status row has no add/change/delete pages.
         return [

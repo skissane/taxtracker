@@ -10,7 +10,7 @@ import os
 import re
 import sqlite3
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 from unittest import mock
 
 import requests
@@ -156,6 +156,7 @@ class ParseLineTests(SimpleTestCase):
 
 
 class RequestLogReaderTests(TempDirMixin, SimpleTestCase):
+    @override
     def setUp(self) -> None:
         super().setUp()
         self.path = self.temp / "requests.jsonl"
@@ -203,6 +204,7 @@ class RequestLogReaderTests(TempDirMixin, SimpleTestCase):
 
 
 class RecordTests(TempDirMixin, SimpleTestCase):
+    @override
     def setUp(self) -> None:
         super().setUp()
         self.db_path = self.temp / "client_ips.sqlite3"
@@ -832,6 +834,7 @@ class UpdateGeoIPCommandTests(TempDirMixin, SimpleTestCase):
 
 
 class ClientIPsExportCommandTests(TempDirMixin, SimpleTestCase):
+    @override
     def setUp(self) -> None:
         super().setUp()
         self.db_path = self.temp / "client_ips.sqlite3"
@@ -894,6 +897,7 @@ class ClientIPsExportCommandTests(TempDirMixin, SimpleTestCase):
 class ClientIPsAdminViewTests(TempDirMixin, TestCase):
     URL = "/admin/client-ips/"
 
+    @override
     def setUp(self) -> None:
         super().setUp()
         User.objects.create_superuser("admin", "admin@example.com", "password")

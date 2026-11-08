@@ -14,7 +14,7 @@ import os
 import socket
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, override
 
 SOCKET_PATH = "/.fly/api"
 
@@ -37,6 +37,7 @@ class _UnixHTTPConnection(http.client.HTTPConnection):
         super().__init__(HOST, timeout=timeout)
         self.socket_path = socket_path
 
+    @override
     def connect(self) -> None:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:

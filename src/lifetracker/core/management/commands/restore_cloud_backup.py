@@ -20,7 +20,7 @@ the backup of the current database fails.
 
 import os
 import tempfile
-from typing import Any
+from typing import Any, override
 
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError, CommandParser
@@ -40,6 +40,7 @@ from lifetracker.core.models import CLOUD_BACKUP_STATUS_PK, CloudBackupStatus
 class Command(BaseCommand):
     help = "Replace the database with a cloud backup, after uploading a cloud backup of the current one."
 
+    @override
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "object_key",
@@ -53,6 +54,7 @@ class Command(BaseCommand):
             help="Don't ask for confirmation.",
         )
 
+    @override
     def handle(self, *args: Any, object_key: str, interactive: bool, **options: Any) -> None:
         with tempfile.TemporaryDirectory(prefix="lifetracker-restore-") as tmp_dir:
             path = os.path.join(tmp_dir, "restore.sqlite3")

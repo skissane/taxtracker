@@ -2,6 +2,7 @@ import datetime
 import io
 import json
 import zipfile
+from typing import override
 from unittest import mock
 
 from django.contrib.auth.models import Permission, User
@@ -15,6 +16,7 @@ from tests.taxtracker.test_archives import PDF_MAGIC, _make_fidelity_har, _make_
 
 
 class CopyItemsTests(TestCase):
+    @override
     def setUp(self) -> None:
         self.fy = FinancialYear.objects.create(year=2024)
         self.root = Item.objects.create(
@@ -111,6 +113,7 @@ class CopyItemsTests(TestCase):
 
 
 class ReceivedDocumentAdminViewTests(TestCase):
+    @override
     def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "admin@example.com", "password")
         self.client = Client()
@@ -193,6 +196,7 @@ class ReceivedDocumentAdminViewTests(TestCase):
 class AdminLoginMixin(SimpleTestCase):
     """Logs a superuser in, with one financial year and one item, for the admin view tests."""
 
+    @override
     def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "admin@example.com", "password")
         self.client = Client()
@@ -621,6 +625,7 @@ class AdminViewTests(AdminLoginMixin, TestCase):
 class ItemChildInlineTests(TestCase):
     """Tests for child-item year-inheritance fixes in ItemAdmin."""
 
+    @override
     def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "admin@example.com", "pass")
         self.client = Client()
@@ -722,6 +727,7 @@ class AttachmentDateWarningHelperTests(TestCase):
     """Tests for _attachment_date_warning covering both Item and
     ReceivedDocument parents."""
 
+    @override
     def setUp(self) -> None:
         self.fy = FinancialYear.objects.create(year=2024)
         self.item = Item.objects.create(year=self.fy, title="Income", order=1)
@@ -775,6 +781,7 @@ class AttachmentDateWarningHelperTests(TestCase):
 class ImportArchiveViewTests(TestCase):
     """Tests for the Item admin 'Import Archive' view."""
 
+    @override
     def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "a@b.com", "pass")
         self.client = Client()
@@ -953,6 +960,7 @@ class ImportArchiveViewTests(TestCase):
 class ReceivedDocumentImportArchiveViewTests(TestCase):
     """Tests for the ReceivedDocument admin 'Import Archive' view."""
 
+    @override
     def setUp(self) -> None:
         self.user = User.objects.create_superuser("admin", "a@b.com", "pass")
         self.client = Client()

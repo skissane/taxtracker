@@ -3,7 +3,7 @@ import datetime
 import re
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, override
 
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
@@ -128,8 +128,8 @@ def _extract_archive(
 
 def _warn_skipped(request: HttpRequest, names: Iterable[str], reason: str) -> None:
     """Add a warning listing the distinct *names* skipped for *reason*, if there are any."""
-    if names:
-        unique_names = list(dict.fromkeys(names))
+    unique_names = list(dict.fromkeys(names))
+    if unique_names:
         messages.warning(request, f"Skipped {len(unique_names)} {reason}: {', '.join(unique_names)}.")
 
 
@@ -219,6 +219,7 @@ class AttachmentInlineBase[P: Item | ReceivedDocument](admin.TabularInline[Attac
     autocomplete_fields = ("file_type",)
     select_related_path: str
 
+    @override
     def get_queryset(self, request: HttpRequest) -> QuerySet[Attachment]:
         return super().get_queryset(request).select_related(self.select_related_path)
 
@@ -271,6 +272,7 @@ class ItemAdmin(admin.ModelAdmin[Item]):
     # Custom URLs
     # ------------------------------------------------------------------
 
+    @override
     def get_urls(self) -> list[URLPattern]:
         custom = [
             path(
@@ -291,9 +293,11 @@ class ItemAdmin(admin.ModelAdmin[Item]):
         url = reverse("admin:taxtracker_financialyear_change", args=[obj.year_id])
         return format_html('<a href="{}">{}</a>', url, obj.year)
 
+    @override
     def get_queryset(self, request: HttpRequest) -> QuerySet[Item]:
         return super().get_queryset(request).select_related("year", "parent")
 
+    @override
     def get_fields(self, request: HttpRequest, obj: Any = None) -> list[str | list[str] | tuple[str, ...] | tuple[()]]:
         fields = list(super().get_fields(request, obj))
         # Child items cannot have a different year from their parent — hide the field.
@@ -301,6 +305,7 @@ class ItemAdmin(admin.ModelAdmin[Item]):
             fields = [f for f in fields if f != "year"]
         return fields
 
+    @override
     def save_formset(self, request: HttpRequest, form: Any, formset: Any, change: Any) -> None:
         instances = formset.save(commit=False)
         # Batch-fetch year_id for all parent IDs to avoid N+1 queries.
@@ -318,6 +323,7 @@ class ItemAdmin(admin.ModelAdmin[Item]):
         for obj in formset.deleted_objects:
             obj.delete()
 
+    @override
     def change_view(
         self, request: HttpRequest, object_id: Any, form_url: Any = "", extra_context: Any = None
     ) -> HttpResponse:
@@ -517,6 +523,7 @@ class ReceivedDocumentAdmin(admin.ModelAdmin[ReceivedDocument]):
         url = reverse("admin:taxtracker_financialyear_change", args=[obj.year_id])
         return format_html('<a href="{}">{}</a>', url, obj.year)
 
+    @override
     def get_queryset(self, request: HttpRequest) -> QuerySet[ReceivedDocument]:
         return super().get_queryset(request).select_related("year")
 
@@ -524,6 +531,7 @@ class ReceivedDocumentAdmin(admin.ModelAdmin[ReceivedDocument]):
     # Custom URLs
     # ------------------------------------------------------------------
 
+    @override
     def get_urls(self) -> list[URLPattern]:
         custom = [
             path(
@@ -632,6 +640,7 @@ class FinancialYearAdmin(admin.ModelAdmin[FinancialYear]):
     # Custom URLs
     # ------------------------------------------------------------------
 
+    @override
     def get_urls(self) -> list[URLPattern]:
         custom = [
             path(
@@ -710,6 +719,7 @@ class FinancialYearAdmin(admin.ModelAdmin[FinancialYear]):
         dt = obj.current_status_transitioned_at
         return timezone.localdate(dt) if dt else "—"
 
+    @override
     def get_queryset(self, request: HttpRequest) -> QuerySet[FinancialYear]:
         return super().get_queryset(request).prefetch_related("status_history")
 
@@ -717,6 +727,7 @@ class FinancialYearAdmin(admin.ModelAdmin[FinancialYear]):
     # Changelist view override (inject multi-year ZIP URL)
     # ------------------------------------------------------------------
 
+    @override
     def changelist_view(self, request: HttpRequest, extra_context: Any = None) -> HttpResponse:
         extra_context = extra_context or {}
         extra_context["download_multi_zip_url"] = reverse("admin:taxtracker_financialyear_download_multi_zip")
@@ -879,6 +890,7 @@ class FinancialYearAdmin(admin.ModelAdmin[FinancialYear]):
     # Change-object buttons
     # ------------------------------------------------------------------
 
+    @override
     def change_view(
         self, request: HttpRequest, object_id: Any, form_url: Any = "", extra_context: Any = None
     ) -> HttpResponse:

@@ -4,7 +4,7 @@ import socketserver
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 from click.testing import CliRunner, Result
 from django.test import SimpleTestCase
@@ -31,10 +31,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     do_POST = do_GET
 
+    @override
     def address_string(self) -> str:
         # A Unix socket's client address is "", not (host, port).
         return "unix"
 
+    @override
     def log_message(self, format: str, *args: Any) -> None:
         pass
 
@@ -51,6 +53,7 @@ class FakeFlyApiMixin(SimpleTestCase):
     recording each request's method, path and Host in ``self.requests``, and
     each POST's Content-Length, Content-Type and body in ``self.posts``."""
 
+    @override
     def setUp(self) -> None:
         super().setUp()
         # Under /tmp, as a Unix socket's path is limited to about 100 bytes.

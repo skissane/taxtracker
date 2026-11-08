@@ -1,5 +1,6 @@
 import datetime
 import typing
+from typing import override
 
 from django.core.exceptions import SuspiciousFileOperation, ValidationError
 from django.core.files.base import ContentFile
@@ -23,6 +24,7 @@ from lifetracker.core.models import (
 class FileTypeModelTests(TestCase):
     """Tests for FileType, MimeType, and FileExtension models."""
 
+    @override
     def setUp(self) -> None:
         self.ft = FileType.objects.create(short_name="PDF", full_name="PDF Document")
 
@@ -132,6 +134,7 @@ class FileTypeModelTests(TestCase):
 class DatabaseStorageTests(TestCase):
     """Tests for the DatabaseStorage custom storage backend."""
 
+    @override
     def setUp(self) -> None:
         self.storage = DatabaseStorage()
 
@@ -256,6 +259,7 @@ class CloudBackupStatusMoveMigrationTests(TransactionTestCase):
         executor.migrate(targets)
         return executor.loader.project_state(targets).apps
 
+    @override
     def tearDown(self) -> None:
         # Leave the schema fully migrated for the tests that follow.
         call_command("migrate", verbosity=0)

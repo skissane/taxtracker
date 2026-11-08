@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, override
 
 from django.conf import settings
 from django.contrib import admin
@@ -68,6 +68,7 @@ class LifetrackerAdminSite(admin.AdminSite):
     # enabled, and renders the stock admin login (no Google button) when it isn't.
     login_template = "google_sso/login.html"
 
+    @override
     def get_urls(self) -> list[URLPattern | URLResolver]:
         # Imported here: core.admin_views imports core.app_icon, which imports
         # core's models, and those can't be imported until the app registry is
@@ -111,6 +112,7 @@ class LifetrackerAdminSite(admin.AdminSite):
             *super().get_urls(),
         ]
 
+    @override
     def each_context(self, request: HttpRequest) -> dict[str, Any]:
         context = super().each_context(request)
         authenticated = request.user.is_authenticated

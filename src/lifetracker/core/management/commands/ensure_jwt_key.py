@@ -5,7 +5,7 @@ don't exist yet, so the JWKS is there for the front proxy before the first
 request. Run at startup by ``docker-entrypoint.sh`` and ``run.sh``.
 """
 
-from typing import Any
+from typing import Any, override
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
@@ -16,6 +16,7 @@ from lifetracker.core.jwt_auth import signing_key
 class Command(BaseCommand):
     help = "Create the JWT signing key and write its public key as a JWKS."
 
+    @override
     def handle(self, *args: Any, **options: Any) -> None:
         signing_key()
         self.stdout.write(f"JWKS: {settings.LIFETRACKER_JWT_JWKS_FILE}")

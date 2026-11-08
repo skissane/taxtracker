@@ -1,4 +1,5 @@
 import datetime
+from typing import override
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -9,6 +10,7 @@ from lifetracker.core.forms import FlexibleDateField
 class FlexibleDateFieldTests(TestCase):
     """Tests for FlexibleDateField and the extra English date-input formats."""
 
+    @override
     def setUp(self) -> None:
         self.field = FlexibleDateField(required=False)
 

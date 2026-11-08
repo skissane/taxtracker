@@ -124,6 +124,9 @@ filterwarnings = ["error"]
 
 [tool.coverage.run]
 source = ["src/lifetracker", "scripts"]
+# So the reports, and diff-cover's patch coverage (--branch-coverage), show
+# untaken branches, such as an if whose else never runs.
+branch = true
 omit = ["*/migrations/*"]
 parallel = true
 
@@ -150,6 +153,27 @@ files = ["src", "scripts", "tests", "screenshot_tests"]
 # one module name (otherwise scripts/github_comments.py is both `github_comments` and `scripts.github_comments`).
 mypy_path = "src"
 explicit_package_bases = true
+# Beyond --strict, as in skissane/exolot: unreachable code, unimported types
+# that would be Any, and the optional error codes below. explicit-override
+# makes every method that overrides one say so with @override, so one that
+# stops overriding (the base renamed or removed it) is an error rather than
+# silently dead. Not mutable-override, which flags every Django Meta and
+# ModelAdmin attribute against django-stubs' types, or disallow_any_decorated,
+# which flags Django's view decorators.
+warn_unreachable = true
+disallow_any_unimported = true
+enable_error_code = [
+    "deprecated",
+    "exhaustive-match",
+    "explicit-override",
+    "ignore-without-code",
+    "possibly-undefined",
+    "redundant-expr",
+    "redundant-self",
+    "truthy-bool",
+    "truthy-iterable",
+    "unused-awaitable",
+]
 
 [[tool.mypy.overrides]]
 module = "*.migrations.*"

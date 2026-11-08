@@ -1,3 +1,5 @@
+from typing import override
+
 from django.contrib import admin
 from django.contrib.auth.models import User
 from django.test import RequestFactory, TestCase
@@ -11,6 +13,7 @@ class TaskTypeAdminGenericProtectionTests(TestCase):
     """The built-in 'Generic' TaskType (pk=1) should be uneditable and
     undeletable through the admin."""
 
+    @override
     def setUp(self) -> None:
         self.admin = TaskTypeAdmin(TaskType, admin.site)
         self.generic = TaskType.objects.get(pk=TaskType.GENERIC_PK)

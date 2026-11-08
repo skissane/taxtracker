@@ -2,7 +2,7 @@
 
 import hashlib
 import zlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -158,6 +158,7 @@ class AppIconPageTests(TestCase):
 
     url = "/admin/app-icon/"
 
+    @override
     def setUp(self) -> None:
         self.admin = User.objects.create_superuser("admin", "a@example.com", "pw")
         self.client.force_login(self.admin)
