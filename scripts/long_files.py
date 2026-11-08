@@ -168,7 +168,11 @@ def render(report: Report, *, base: str | None, commit: str | None, repo: str | 
     """report as the Markdown of a PR comment, without the marker."""
     link = f"https://github.com/{repo}/blob/{commit}" if repo and commit else None
     total = len(report.changed) + len(report.unchanged)
-    lines = [f"## Files over {report.default_limit} lines", "", POLICY, ""]
+    if any(f.limit != report.default_limit for f in report.changed + report.unchanged):
+        title = f"## Files over their line limit ({report.default_limit} unless shown)"
+    else:
+        title = f"## Files over {report.default_limit} lines"
+    lines = [title, "", POLICY, ""]
     if commit:
         lines += [f"Counted at {commit}" + (f", compared with `{base}`." if base else "."), ""]
     if not total:
@@ -190,9 +194,8 @@ def render(report: Report, *, base: str | None, commit: str | None, repo: str | 
     return "\n".join(lines) + "\n"
 
 
-def _post(args: argparse.Namespace, report: Report, body: str) -> None:
+def _post(args: argparse.Namespace, repo: str, report: Report, body: str) -> None:
     token = os.environ.get("GITHUB_TOKEN") or github_comments.gh_output("auth", "token")
-    repo = args.repo or github_comments.gh_output("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
     author = args.author or github_comments.request("GET", f"{github_comments.API_URL}/user", token)["login"]
     if args.commit:
         # An older commit's run can finish after a newer one's, and mustn't
@@ -202,7 +205,7 @@ def _post(args: argparse.Namespace, report: Report, body: str) -> None:
             print(f"Not posting: the report is for {args.commit}, but PR #{args.post}'s head is now {head}.")
             return
     # With no long files, only replace an earlier report, never start a new one.
-    create = bool(report.changed or report.unchanged)
+    create = bool(report.unchanged) or any(f.lines > f.limit for f in report.changed)
     if github_comments.upsert_comment(repo, args.post, author, MARKER, f"{MARKER}\n{body}", token, create=create):
         print(f"Posted the long files report to PR #{args.post}.")
     else:
@@ -243,11 +246,15 @@ def main(argv: list[str]) -> int:
         config = load_config(cwd / "pyproject.toml")
         report = find_long_files(cwd, config, args.base or None)
         commit = args.commit or _git(cwd, "rev-parse", "HEAD").strip()
-        body = render(report, base=args.base or None, commit=commit, repo=args.repo)
+        repo = args.repo
+        if args.post is not None and not repo:
+            repo = github_comments.gh_output("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
+        body = render(report, base=args.base or None, commit=commit, repo=repo)
         if args.post is None:
             print(body, end="")
         else:
-            _post(args, report, body)
+            assert repo
+            _post(args, repo, report, body)
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace") if isinstance(e.stderr, bytes) else e.stderr
         print(f"{' '.join(e.cmd)} failed:\n{stderr}", file=sys.stderr)

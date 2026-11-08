@@ -184,6 +184,7 @@ class RenderTests(SimpleTestCase):
     def test_limit_column_when_a_limit_differs(self) -> None:
         report = Report(changed=[], unchanged=[LongFile("t.py", 30, 20), LongFile("d.py", 12, 10)], default_limit=10)
         body = render(report, base=None, commit=None, repo=None)
+        self.assertIn("## Files over their line limit (10 unless shown)\n", body)
         self.assertIn("| File | Lines | Limit |\n| --- | ---: | ---: |", body)
         self.assertIn("| `t.py` | 30 | 20 |", body)
 
@@ -277,6 +278,29 @@ class MainTests(_GitRepoTestCase):
             [(method, _, body)] = gh.writes()
             self.assertEqual(method, "PATCH")
             self.assertIn("No files are over the limit.", body["body"])
+
+    def test_now_under_only_replaces_an_earlier_report(self) -> None:
+        self.git("checkout", "-qb", "feature")
+        self.write("src/big.py", _lines(2))
+        self.commit()
+        gh = FakeGitHub([])
+        code, out, _ = self._run(["--base", "main", "--post", "7", "--author", "bot"], gh)
+        self.assertEqual(code, 0)
+        self.assertIn("Not posting", out)
+        self.assertEqual(gh.writes(), [])
+
+    def test_post_looks_up_repo_for_links(self) -> None:
+        gh = FakeGitHub([])
+        with (
+            mock.patch.dict("os.environ", {"GITHUB_REPOSITORY": ""}),
+            mock.patch.object(github_comments, "gh_output", return_value="o/r") as gh_output,
+        ):
+            code, _, _ = self._run(["--base", "", "--repo", "", "--post", "7", "--author", "bot"], gh)
+        self.assertEqual(code, 0)
+        gh_output.assert_called_once_with("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
+        [(_, url, body)] = gh.writes()
+        self.assertEqual(url, f"{github_comments.API_URL}/repos/o/r/issues/7/comments")
+        self.assertIn("](https://github.com/o/r/blob/", body["body"])
 
     def test_bad_base_fails(self) -> None:
         code, _, err = self._run(["--base", "no-such-branch"])
