@@ -81,8 +81,8 @@ Its `uv lock` runs can still build a dependency's sdist to read its metadata, ru
 uv run pytest
 
 # Run a single test class or method
-uv run pytest tests/taxtracker/tests.py::ItemModelTests
-uv run pytest tests/taxtracker/tests.py::ItemModelTests::test_str_root
+uv run pytest tests/taxtracker/test_models.py::ItemModelTests
+uv run pytest tests/taxtracker/test_models.py::ItemModelTests::test_str_root
 
 # Run tests under coverage, print a report, and write coverage.xml and junit.xml (no minimum enforced)
 just coverage
@@ -138,14 +138,17 @@ It contains three apps:
 
 `taxtracker` and `tasktracker` depend on `core` (via their attachments' `file_type` FK and `DatabaseStorage`); `core` depends on neither, and they don't depend on each other.
 
-Tests live outside `src/`, in a top-level `tests/` tree mirroring the package layout (`tests/core/tests.py`, `tests/taxtracker/tests.py`, `tests/tasktracker/tests.py`, `tests/cli/tests.py`), each importing the code under test via absolute `lifetracker.*` imports.
-Envoy's tests are in `tests/core/test_envoy.py` (see Auth front layer).
-The exception is `tests/scripts/tests.py`, which tests the standalone scripts in `scripts/` via `scripts.*` imports, e.g. `from scripts.requirements_min_versions import main`.
+Tests live outside `src/`, in a top-level `tests/` tree mirroring the package layout (`tests/core/`, `tests/taxtracker/`, `tests/tasktracker/`, `tests/cli/`, with tests of `src/lifetracker/`'s own modules, such as `settings.py`, directly in `tests/`), each importing the code under test via absolute `lifetracker.*` imports.
+Aim for one test file per source file, named `test_<module>.py` after the module it tests (e.g. `tests/core/test_backup.py` for `core/backup.py`), as a guideline rather than an absolute rule.
+A management command's tests go in the file of the module it wraps (e.g. `cloud_backup`'s in `test_backup.py`), and a page in `core/admin_views.py` is tested with its feature (e.g. the Uptime pages in `test_uptime_log.py`), as that module is a collection of unrelated pages.
+Other exceptions are fine where they read better: `tests/core/test_envoy.py` covers `envoy_config.py`, its command and `envoy/envoy.yaml` together, and `tests/test_docker_entrypoint.py` tests `docker-entrypoint.sh`.
+A helper that tests in several files need lives in the file of the tests it belongs with, and the others import it (e.g. `tests/core/test_jwt_auth.py`'s `_decode_jwt`), or, if it belongs with none of them in particular, in a helper module not named like a test file (e.g. `tests/core/client_ip_helpers.py`); never import a `TestCase` that has tests from another file, as pytest would then run them twice.
+`tests/scripts/` likewise has one `test_<script>.py` per script in `scripts/`, testing it via `scripts.*` imports, e.g. `from scripts.requirements_min_versions import main`.
 `scripts/` has no `__init__.py`; it resolves as an implicit namespace package from the repo root, which both pytest and `manage.py test` put on `sys.path`.
 (Importing by bare module name with `scripts` on `pytest`'s `pythonpath` also works at runtime, but Pylance can't resolve it.)
 Coverage measures `scripts` alongside `src/lifetracker`.
 Run via `pytest` (using `pytest-django`, configured in `pyproject.toml`'s `[tool.pytest.ini_options]` with `testpaths = ["tests"]`), parallelised across CPU cores by `pytest-xdist` (`-n auto`, set as a default in `addopts`).
-`manage.py test tests.core tests.taxtracker tests.tasktracker tests.cli tests.scripts` still works as an unparallelised fallback, referencing these as `tests.*` labels rather than the `lifetracker.*` app labels.
+`manage.py test tests` still works as an unparallelised fallback, using the `tests` package as its label rather than the `lifetracker.*` app labels.
 
 **Patch coverage:** `just patch-coverage [<base>] [<diff-cover option>...]` runs diff-cover over `coverage.xml` against `<base>` (default `origin/$GITHUB_BASE_REF`, else `origin/master`), passing it any further arguments.
 On a PR, the `test` job runs it after the tests, as `just patch-coverage "origin/<base>" --format markdown:patch-coverage.md`, and uploads `patch-coverage.md` as a `patch-coverage` workflow artifact (kept 14 days); both steps are `continue-on-error`, as the report is informational and `codecov/patch` stays the gate.
