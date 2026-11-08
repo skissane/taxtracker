@@ -13,7 +13,7 @@ from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError
 
-from lifetracker.core import client_ips
+from lifetracker.core import client_ips, ip_location
 
 
 class Command(BaseCommand):
@@ -24,20 +24,20 @@ class Command(BaseCommand):
         if config.db_path is None or config.geoip_dir is None:
             raise CommandError("Client IPs aren't recorded: set LIFETRACKER_CLIENT_IP_DB or LIFETRACKER_DATA_DIR.")
         try:
-            statuses = client_ips.update_geoip(config.geoip_dir)
+            statuses = ip_location.update_geoip(config.geoip_dir)
         except OSError as exc:
             raise CommandError(f"Couldn't update the DB-IP databases: {exc}")
         failed = []
         for name, status in statuses.items():
-            if status["outcome"] == client_ips.DOWNLOADED:
+            if status["outcome"] == ip_location.DOWNLOADED:
                 self.stdout.write(f"Downloaded {status['file']}")
-            elif status["outcome"] == client_ips.FAILED:
+            elif status["outcome"] == ip_location.FAILED:
                 self.stderr.write(f"Couldn't download {name}: {status['error']}")
                 failed.append(name)
-        if all(s["outcome"] == client_ips.UP_TO_DATE for s in statuses.values()):
+        if all(s["outcome"] == ip_location.UP_TO_DATE for s in statuses.values()):
             self.stdout.write("Already up to date")
         connection = client_ips.connect(config.db_path)
-        geoip = client_ips.GeoIP(config.geoip_dir)
+        geoip = ip_location.GeoIP(config.geoip_dir)
         try:
             found = client_ips.fill_in_locations(connection, geoip)
             checked = client_ips.fill_in_relay(connection, geoip)

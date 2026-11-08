@@ -11,7 +11,7 @@ from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
-from lifetracker.core import client_ips
+from lifetracker.core import client_ips, sqlite_helpers
 
 
 class Command(BaseCommand):
@@ -29,7 +29,7 @@ class Command(BaseCommand):
         if config.db_path is None:
             raise CommandError("Client IPs aren't recorded: set LIFETRACKER_CLIENT_IP_DB or LIFETRACKER_DATA_DIR.")
         try:
-            connection = client_ips.connect_read_only(config.db_path)
+            connection = sqlite_helpers.connect_read_only(config.db_path)
         except sqlite3.OperationalError as exc:
             raise CommandError(f"Couldn't open {config.db_path}: {exc}")
         try:
