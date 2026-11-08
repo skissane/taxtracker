@@ -163,6 +163,32 @@ def _unique_folder_paths(items: Sequence[Item]) -> tuple[dict[int, str], default
     return folder_paths, used_names
 
 
+def _copy_attachment(attachment: Attachment, zf: zipfile.ZipFile | None, entry_path: str) -> bool:
+    """Copy *attachment*'s file into *zf* as *entry_path*, or without *zf* just check it opens.
+
+    Returns False if the file is missing or its stored blob reference is invalid or corrupt.
+    """
+    try:
+        if zf is not None:
+            with attachment.file.open("rb") as fh, zf.open(entry_path, "w") as dest:
+                shutil.copyfileobj(fh, dest)
+        else:
+            attachment.file.open("rb").close()
+    except OSError, DBStoredFile.DoesNotExist, ValueError:
+        return False
+    return True
+
+
+def _attachment_index_lines(attachment: Attachment, zip_path: str | None) -> list[str]:
+    """Return index.md's lines for *attachment*, at *zip_path* in the ZIP, or None if its file is missing."""
+    file_type = f" ({attachment.file_type})" if attachment.file_type else ""
+    location = f" → `{zip_path}`" if zip_path else " [MISSING]"
+    lines = [f"- **{attachment.title}**{file_type}{location}\n"]
+    if attachment.notes:
+        lines.append(f"  {attachment.notes}\n")
+    return lines
+
+
 def build_fy_index_md(fy: FinancialYear, prefix: str = "", zf: zipfile.ZipFile | None = None) -> str:
     """Return the index.md content string for one FinancialYear.
 
@@ -200,32 +226,8 @@ def build_fy_index_md(fy: FinancialYear, prefix: str = "", zf: zipfile.ZipFile |
             safe_name = _safe_component((attachment.file.name or "").split("/")[-1])
             safe_name = _dedupe_name(safe_name, used_names[fp], keep_extension=True)
             entry_path = f"{prefix}{fp}/{safe_name}"
-            zip_path: str | None = entry_path
-            missing = False
-            try:
-                if zf is not None:
-                    with (
-                        attachment.file.open("rb") as fh,
-                        zf.open(entry_path, "w") as dest,
-                    ):
-                        shutil.copyfileobj(fh, dest)
-                else:
-                    attachment.file.open("rb").close()
-            except OSError, DBStoredFile.DoesNotExist, ValueError:
-                # File missing or stored blob reference is invalid/corrupt –
-                # skip but record in index.
-                missing = True
-                zip_path = None
-            index_lines.append(f"- **{attachment.title}**")
-            if attachment.file_type:
-                index_lines[-1] += f" ({attachment.file_type})"
-            if zip_path:
-                index_lines[-1] += f" → `{zip_path}`"
-            elif missing:
-                index_lines[-1] += " [MISSING]"
-            index_lines[-1] += "\n"
-            if attachment.notes:
-                index_lines.append(f"  {attachment.notes}\n")
+            copied = _copy_attachment(attachment, zf, entry_path)
+            index_lines += _attachment_index_lines(attachment, entry_path if copied else None)
         if item.notes:
             adjusted_notes = adjust_notes_headings(item.notes, 2)
             index_lines.append(f"\n{adjusted_notes}\n\n")
