@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tomllib
 import urllib.error
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeIs
@@ -122,6 +123,14 @@ def _base_paths(cwd: Path, merge_base: str) -> dict[str, str | None]:
     return changed
 
 
+def _counted_files(cwd: Path, config: Config) -> Iterator[tuple[str, Path]]:
+    """Each tracked regular file config covers, as its path and the file in cwd."""
+    for path in _git(cwd, "ls-files", "-z").split("\0"):
+        file = cwd / path
+        if path and config.covers(path) and not file.is_symlink() and file.is_file():
+            yield path, file
+
+
 def find_long_files(cwd: Path, config: Config, base: str | None) -> Report:
     """The files config covers that are over their limit in the working tree,
     or were on base and the working tree changes them. Without base, every
@@ -132,10 +141,7 @@ def find_long_files(cwd: Path, config: Config, base: str | None) -> Report:
         merge_base = _git(cwd, "merge-base", base, "HEAD").strip()
         changed_paths = _base_paths(cwd, merge_base)
     changed, unchanged = [], []
-    for path in _git(cwd, "ls-files", "-z").split("\0"):
-        file = cwd / path
-        if not path or not config.covers(path) or file.is_symlink() or not file.is_file():
-            continue
+    for path, file in _counted_files(cwd, config):
         lines, limit = _count_lines(file.read_bytes()), config.limit_for(path)
         if path not in changed_paths:
             if lines > limit:
