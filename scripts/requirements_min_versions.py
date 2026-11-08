@@ -112,19 +112,25 @@ def _check(mismatches: list[_Mismatch]) -> int:
     return 0
 
 
+def _replace_dependency(text: str, old: str, new: str) -> tuple[str, int]:
+    """Replace the first TOML string in *text* that is exactly *old*, in either quote style, with *new*.
+
+    Returns the new text and the number of replacements (0 or 1).
+    """
+    return re.subn(
+        rf"""(["']){re.escape(old)}\1""",
+        lambda match: f"{match.group(1)}{new}{match.group(1)}",
+        text,
+        count=1,
+    )
+
+
 def _fix(mismatches: list[_Mismatch], pyproject_path: Path, pyproject_text: str) -> int:
     if not mismatches:
         print("No dependency minimum version updates needed.")
         return 0
     for m in mismatches:
-        new_dep = m.fixed_dep
-        # Match the dependency as a whole TOML string, in either quote style.
-        pyproject_text, count = re.subn(
-            rf"""(["']){re.escape(m.dep)}\1""",
-            lambda match: f"{match.group(1)}{new_dep}{match.group(1)}",
-            pyproject_text,
-            count=1,
-        )
+        pyproject_text, count = _replace_dependency(pyproject_text, m.dep, m.fixed_dep)
         if count == 0:
             print(f"Couldn't find {m.dep!r} in pyproject.toml", file=sys.stderr)
             return 1
