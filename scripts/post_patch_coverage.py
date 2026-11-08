@@ -33,13 +33,23 @@ class UnexpectedReport(ValueError):
     pass
 
 
+def _code_cell(text: str) -> str:
+    """text as a code span in a table cell: with its pipes escaped, as they'd
+    end the cell even in a code span, and delimited by more backticks than it
+    has in a row."""
+    ticks = "`" * (max(map(len, re.findall("`+", text)), default=0) + 1)
+    pad = " " if "`" in text else ""
+    escaped = text.replace("|", "\\|")
+    return f"{ticks}{pad}{escaped}{pad}{ticks}"
+
+
 def _file_table(matches: list[re.Match[str]]) -> list[str]:
     rows = ["| File | Coverage | Missing lines |", "| --- | ---: | --- |"]
     for m in matches:
         path = m["path"].replace("&#46;", ".")
         # A space after each comma, so a long list can wrap.
         missing = ", ".join((m["missing"] or "").split(","))
-        rows.append(f"| `{path}` | {m['percent']} | {missing} |")
+        rows.append(f"| {_code_cell(path)} | {m['percent']} | {missing} |")
     return rows
 
 
