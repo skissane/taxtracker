@@ -22,7 +22,9 @@ master is broken and this PR fixes it) mustn't fail the PR's own ``test``
 check, which branch protection requires. Codecov's ``if_not_found: failure``
 then fails ``codecov/project``.
 
-Standard library only, run with ``uv run --no-project``.
+Standard library only; run it as a module
+(``uv run --no-project python -m scripts.wait_for_base_coverage``) from the
+repo root, so it can import ``scripts.github_comments``.
 """
 
 import argparse
@@ -36,15 +38,21 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable
 
+from scripts.github_comments import no_redirect_opener
+
 CODECOV_API = "https://api.codecov.io/api/v2/github"
 GITHUB_API = "https://api.github.com"
 
 
-def _get_json(url: str, headers: dict[str, str], timeout: float) -> tuple[int, object]:
-    """GET ``url``, returning its status and JSON body (``None`` if not JSON)."""
+def _get_json(
+    url: str, headers: dict[str, str], timeout: float, opener: urllib.request.OpenerDirector | None = None
+) -> tuple[int, object]:
+    """GET ``url`` with ``opener`` (default: ``urlopen``'s), returning its
+    status and JSON body (``None`` if not JSON)."""
     request = urllib.request.Request(url, headers={"Accept": "application/json", **headers})
+    open_url = opener.open if opener else urllib.request.urlopen
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with open_url(request, timeout=timeout) as response:
             status, raw = response.status, response.read()
     except urllib.error.HTTPError as e:
         with e:
@@ -87,7 +95,9 @@ def base_ci_state(repo: str, sha: str, check_name: str, token: str | None, timeo
     if token:
         headers["Authorization"] = f"Bearer {token}"
     try:
-        status, body = _get_json(url, headers, timeout)
+        # A redirect is reported as its status rather than followed, as
+        # urlopen would follow it with the token, even to another host.
+        status, body = _get_json(url, headers, timeout, no_redirect_opener)
     except (OSError, http.client.HTTPException) as e:
         return "running", f"request failed: {getattr(e, 'reason', e)}"
     runs = body.get("check_runs") if status == 200 and isinstance(body, dict) else None

@@ -145,7 +145,7 @@ jobs:
       # fails the job, only warns, and is quick when the base's CI has finished.
       - name: Wait for the PR base's coverage on Codecov
         if: github.event_name == 'pull_request'
-        run: uv run --no-project scripts/wait_for_base_coverage.py "$GITHUB_REPOSITORY" "$BASE_SHA"
+        run: uv run --no-project python -m scripts.wait_for_base_coverage "$GITHUB_REPOSITORY" "$BASE_SHA"
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GITHUB_TOKEN: ${{ github.token }}
