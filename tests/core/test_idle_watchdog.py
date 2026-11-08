@@ -1152,6 +1152,15 @@ class IdleWatchdogPageContextTests(SimpleTestCase):
         self.assertIn("Unexpected contents", context["status_error"])
         self.assertIsNone(context["status"])
 
+    def test_status_with_times_without_time_zone(self) -> None:
+        for field in ("started_at", "checked_at"):
+            with self.subTest(field=field):
+                naive = (self.NOW - datetime.timedelta(seconds=10)).replace(tzinfo=None).isoformat()
+                context = self._context(_watchdog_status(self.NOW, **{field: naive}))
+
+                self.assertIn("Unexpected contents", context["status_error"])
+                self.assertIsNone(context["status"])
+
     def test_status_without_start_time(self) -> None:
         status = _watchdog_status(self.NOW, started_at=None)
 

@@ -24,7 +24,6 @@ from lifetracker.taxtracker.archives import (
     UnsupportedArchiveError,
     extract_from_archive_with_skips,
 )
-from lifetracker.taxtracker.financial_year import financial_year_for_date
 from lifetracker.taxtracker.forms import (
     AttachmentForm,
     ImportArchiveForm,
@@ -36,6 +35,12 @@ from lifetracker.taxtracker.models import (
     FinancialYearStatusHistory,
     Item,
     ReceivedDocument,
+)
+from lifetracker.taxtracker.reassign import (
+    apply_reassignments,
+    find_equivalent_item,
+    item_path_signature,
+    plan_reassignments,
 )
 from lifetracker.taxtracker.zip_export import (
     build_multi_index_md,
@@ -75,36 +80,17 @@ def _attachment_date_warning(obj: Attachment) -> str:
 _RECEIVED_DOC_YEAR_RE = re.compile(r"^(\d{4})(?!\d)")
 
 
-def _item_path_signature(item: Item) -> list[tuple[str, int]]:
-    """Return root→leaf signature for an item path as ``[(title, order), ...]``."""
-    signature = []
-    current: Item | None = item
-    visited = set()
-    while current is not None and current.pk not in visited:
-        visited.add(current.pk)
-        signature.append((current.title, current.order))
-        current = current.parent
-    return list(reversed(signature))
-
-
-def _find_equivalent_item(path_signature: list[tuple[str, int]], target_fy: FinancialYear) -> Item | None:
-    """Find the equivalent item in ``target_fy`` by matching title/order path."""
-    parent_id = None
-    current = None
-    for title, order in path_signature:
-        matches = list(
-            Item.objects.filter(
-                year=target_fy,
-                parent_id=parent_id,
-                title=title,
-                order=order,
-            ).order_by("pk")[:2]
-        )
-        if len(matches) != 1:
-            return None
-        current = matches[0]
-        parent_id = current.pk
-    return current
+def _posted_pks(request: HttpRequest, name: str) -> set[int]:
+    """The primary keys posted as *name*, ignoring any that aren't one."""
+    pks = set()
+    for value in request.POST.getlist(name):
+        try:
+            pk = int(value)
+        except ValueError:
+            continue
+        if 0 < pk < 2**63:  # SQLite raises OverflowError for anything over 64 bits
+            pks.add(pk)
+    return pks
 
 
 def _existing_attachment_names(**filters: Any) -> set[str]:
@@ -145,6 +131,21 @@ def _warn_skipped(request: HttpRequest, names: Iterable[str], reason: str) -> No
     if names:
         unique_names = list(dict.fromkeys(names))
         messages.warning(request, f"Skipped {len(unique_names)} {reason}: {', '.join(unique_names)}.")
+
+
+def _import_into_item(item: Item, extracted: list[tuple[str, bytes]]) -> tuple[int, list[str]]:
+    """Attach each of an archive's *extracted* PDFs to *item*, in one transaction.
+
+    Skips names already attached to it; returns how many were imported, and the skipped names.
+    """
+    duplicate_names: list[str] = []
+    if not extracted:
+        return 0, duplicate_names
+    importable = select_importable_files(extracted, _existing_attachment_names(item=item), duplicate_names)
+    with transaction.atomic():
+        for pdf_filename, pdf_bytes in importable:
+            _save_imported_attachment(Attachment(item=item), pdf_filename, pdf_bytes)
+    return len(importable), duplicate_names
 
 
 @dataclasses.dataclass
@@ -328,7 +329,7 @@ class ItemAdmin(admin.ModelAdmin[Item]):
         if item is None:
             return response
 
-        path_signature = _item_path_signature(item)
+        path_signature = item_path_signature(item)
         prev_fy = FinancialYear.objects.filter(year=item.year.year - 1).first()
         next_fy = FinancialYear.objects.filter(year=item.year.year + 1).first()
 
@@ -336,8 +337,8 @@ class ItemAdmin(admin.ModelAdmin[Item]):
         response.context_data["reassign_attachments_url"] = reverse(
             "admin:taxtracker_item_reassign_attachments", args=[item.pk]
         )
-        response.context_data["prev_item"] = _find_equivalent_item(path_signature, prev_fy) if prev_fy else None
-        response.context_data["next_item"] = _find_equivalent_item(path_signature, next_fy) if next_fy else None
+        response.context_data["prev_item"] = find_equivalent_item(path_signature, prev_fy) if prev_fy else None
+        response.context_data["next_item"] = find_equivalent_item(path_signature, next_fy) if next_fy else None
         return response
 
     # ------------------------------------------------------------------
@@ -367,19 +368,12 @@ class ItemAdmin(admin.ModelAdmin[Item]):
 
             extracted, archive_skipped_names, had_error = _extract_archive(request, file_bytes, filename)
 
-            duplicate_names: list[str] = []
-            if extracted:
-                existing_names = _existing_attachment_names(item=item)
-                importable = select_importable_files(extracted, existing_names, duplicate_names)
-
-                with transaction.atomic():
-                    for pdf_filename, pdf_bytes in importable:
-                        _save_imported_attachment(Attachment(item=item), pdf_filename, pdf_bytes)
-                if importable:
-                    messages.success(
-                        request,
-                        f"Imported {len(importable)} attachment(s) from '{filename}'.",
-                    )
+            imported_count, duplicate_names = _import_into_item(item, extracted)
+            if imported_count:
+                messages.success(
+                    request,
+                    f"Imported {imported_count} attachment(s) from '{filename}'.",
+                )
 
             _warn_skipped(request, archive_skipped_names, "non-PDF, too large or unreadable file(s)")
             _warn_skipped(request, duplicate_names, "file(s) already attached to this item")
@@ -414,74 +408,25 @@ class ItemAdmin(admin.ModelAdmin[Item]):
             raise PermissionDenied
 
         attachments = list(item.attachments.all().order_by("date", "title", "pk"))
-        path_signature = _item_path_signature(item)
-        target_cache = {}
-        rows: list[dict[str, Any]] = []
-
-        for attachment in attachments:
-            if attachment.date is None or item.year.start_date <= attachment.date <= item.year.end_date:
-                continue
-
-            target_year_num = financial_year_for_date(attachment.date)
-            target_fy = FinancialYear.objects.filter(year=target_year_num).first()
-
-            if target_fy is None:
-                target_item = None
-                warning = f"Financial year FY{target_year_num} not found."
-            else:
-                if target_fy.pk not in target_cache:
-                    target_cache[target_fy.pk] = _find_equivalent_item(path_signature, target_fy)
-                target_item = target_cache[target_fy.pk]
-                if target_item is None:
-                    warning = f"Equivalent item not found in FY{target_year_num}."
-                else:
-                    warning = ""
-
-            rows.append(
-                {
-                    "attachment": attachment,
-                    "target_year_num": target_year_num,
-                    "target_item": target_item,
-                    "warning": warning,
-                    "movable": target_item is not None,
-                }
-            )
-
+        rows = plan_reassignments(item, attachments)
+        movable_count = sum(1 for row in rows if row.movable)
         initial_summary = {
             "total_attachments": len(attachments),
             "correct_item_count": len(attachments) - len(rows),
-            "unmovable_count": sum(1 for row in rows if not row["movable"]),
-            "movable_count": sum(1 for row in rows if row["movable"]),
+            "unmovable_count": len(rows) - movable_count,
+            "movable_count": movable_count,
         }
 
         result_rows = []
         result_summary = None
         if request.method == "POST":
-            selected_ids = {int(v) for v in request.POST.getlist("move_attachment_ids") if v.isdigit()}
-            with transaction.atomic():
-                for row in rows:
-                    attachment = row["attachment"]
-                    if row["movable"] and attachment.pk in selected_ids:
-                        attachment.item = row["target_item"]
-                        attachment.save(update_fields=["item"])
-                        status = "Moved"
-                    elif row["movable"]:
-                        status = "Not selected"
-                    else:
-                        status = "Unmovable"
-
-                    result_rows.append(
-                        {
-                            **row,
-                            "status": status,
-                        }
-                    )
-
+            result_rows = apply_reassignments(rows, _posted_pks(request, "move_attachment_ids"))
+            statuses = [row.status for row in result_rows]
             result_summary = {
                 "total_out_of_year": len(rows),
-                "moved_count": sum(1 for row in result_rows if row.get("status") == "Moved"),
-                "not_selected_count": sum(1 for row in result_rows if row.get("status") == "Not selected"),
-                "unmovable_count": sum(1 for row in result_rows if row.get("status") == "Unmovable"),
+                "moved_count": statuses.count("Moved"),
+                "not_selected_count": statuses.count("Not selected"),
+                "unmovable_count": statuses.count("Unmovable"),
             }
 
         context = {
@@ -646,6 +591,14 @@ class ReceivedDocumentAdmin(admin.ModelAdmin[ReceivedDocument]):
 # ---------------------------------------------------------------------------
 # FinancialYear Admin
 # ---------------------------------------------------------------------------
+
+
+def _multi_zip_filename(fys: Sequence[FinancialYear]) -> str:
+    """The download name for a ZIP of *fys*: the year, or the first and last years."""
+    years = sorted(fy.year for fy in fys)
+    if len(years) == 1:
+        return f"FY{years[0]}_attachments.zip"
+    return f"FY{years[0]}-FY{years[-1]}_multi_attachments.zip"
 
 
 def _zip_response(buf: IO[bytes], filename: str) -> FileResponse:
@@ -837,28 +790,14 @@ class FinancialYearAdmin(admin.ModelAdmin[FinancialYear]):
         error = None
 
         if request.method == "POST":
-            selected_pks: list[int] = []
-            for value in request.POST.getlist("fy_ids"):
-                try:
-                    pk = int(value)
-                except ValueError:
-                    continue
-                if 0 < pk < 2**63:  # SQLite raises OverflowError for anything over 64 bits
-                    selected_pks.append(pk)
-            selected_fys = list(FinancialYear.objects.filter(pk__in=selected_pks).order_by("year"))
+            selected_fys = list(FinancialYear.objects.filter(pk__in=_posted_pks(request, "fy_ids")).order_by("year"))
             if not selected_fys:
                 error = "Please select at least one financial year."
             elif request.POST.get("action") == "view_index":
                 content = build_multi_index_md(selected_fys)
                 return HttpResponse(content, content_type="text/markdown; charset=utf-8")
             else:
-                buf = build_multi_zip(selected_fys)
-                years = sorted(fy.year for fy in selected_fys)
-                if len(years) == 1:
-                    fname = f"FY{years[0]}_attachments.zip"
-                else:
-                    fname = f"FY{years[0]}-FY{years[-1]}_multi_attachments.zip"
-                return _zip_response(buf, fname)
+                return _zip_response(build_multi_zip(selected_fys), _multi_zip_filename(selected_fys))
 
         context = {
             **self.admin_site.each_context(request),

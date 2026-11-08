@@ -42,21 +42,8 @@ def extract_pdfs_from_har(
     - The ``fileContent`` value is not valid base64.
     - The decoded bytes do not start with the PDF magic bytes (``%PDF-``).
     """
-    try:
-        har = json.loads(file_bytes.decode("utf-8"))
-    except ValueError as exc:  # UnicodeDecodeError, JSONDecodeError, or an int over Python's digit limit
-        raise UnsupportedArchiveError(f"Could not parse file as a HAR archive: {exc}") from exc
-    if not isinstance(har, dict):
-        raise UnsupportedArchiveError("Could not parse file as a HAR archive: top-level JSON value must be an object")
-    log = har.get("log", {})
-    if not isinstance(log, dict):
-        raise UnsupportedArchiveError("Could not parse file as a HAR archive: 'log' must be an object")
-    entries = log.get("entries", [])
-    if not isinstance(entries, list):
-        raise UnsupportedArchiveError("Could not parse file as a HAR archive: 'entries' must be a list")
-
     results: list[tuple[str, bytes]] = []
-    for entry in entries:
+    for entry in _har_entries(file_bytes):
         if not isinstance(entry, dict):
             continue
         request = _field(entry, "request", dict)
@@ -71,6 +58,27 @@ def extract_pdfs_from_har(
             if on_skip is not None:
                 on_skip(url, str(exc))
     return results
+
+
+def _har_entries(file_bytes: bytes) -> list[Any]:
+    """Return a HAR file's ``log.entries``.
+
+    Raises ``UnsupportedArchiveError`` if the file isn't JSON, or its top level, ``log`` or ``log.entries`` has
+    the wrong type.
+    """
+    try:
+        har = json.loads(file_bytes.decode("utf-8"))
+    except ValueError as exc:  # UnicodeDecodeError, JSONDecodeError, or an int over Python's digit limit
+        raise UnsupportedArchiveError(f"Could not parse file as a HAR archive: {exc}") from exc
+    if not isinstance(har, dict):
+        raise UnsupportedArchiveError("Could not parse file as a HAR archive: top-level JSON value must be an object")
+    log = har.get("log", {})
+    if not isinstance(log, dict):
+        raise UnsupportedArchiveError("Could not parse file as a HAR archive: 'log' must be an object")
+    entries = log.get("entries", [])
+    if not isinstance(entries, list):
+        raise UnsupportedArchiveError("Could not parse file as a HAR archive: 'entries' must be a list")
+    return entries
 
 
 class _SkippedEntry(Exception):

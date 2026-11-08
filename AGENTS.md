@@ -375,6 +375,7 @@ Both ZIPs are built in a `SpooledTemporaryFile` (in memory up to `ZIP_SPOOL_MAX_
   Skips a PDF whose filename is already attached to that item (not to any other item).
   `ReceivedDocumentAdmin`'s import, which picks each PDF's FY from its filename's year prefix, likewise skips only names already attached to a received document of that FY.
 - **Reassign attachments** (`<pk>/reassign-attachments/`) — detects attachments whose `date` is outside the item's FY and offers to move them to the equivalent item in the correct FY (matched by title/order path signature).
+  The matching, planning and moving are in `taxtracker/reassign.py`, which the Prev/Next Year links below also use.
 - Prev/Next Year navigation links on the change form (matched by path signature).
 
 ## ZIP export rules
@@ -510,15 +511,19 @@ Like them it posts nothing unless `--commit` is still the PR's head, and runs on
 The `exolot` job checks out the PR's head rather than its merge with the base, so the findings' line numbers and links match the PR's code.
 The findings are for information only: `--exit-zero` means findings never fail the job, though a failed analysis still does.
 
-- Use your judgement: fix a finding when fixing it makes the code better, e.g. a real bug, or a cognitive-complexity warning where splitting the function up would make it clearer.
-  When the fix wouldn't, e.g. a complex function that already reads clearly, or a suggestion that would change behaviour (`Number.isNaN(date)` is always false for a `Date`), leave it.
+- Use your judgement: fix a finding when fixing it makes the code better, e.g. a real bug, and leave it when it wouldn't, e.g. a suggestion that would change behaviour (`Number.isNaN(date)` is always false for a `Date`).
+- For a cognitive complexity finding (`python:S3776`), the threshold only decides which functions get looked at; whether to refactor depends only on whether the refactored code would read better than the current code.
+  How far the score is over the threshold isn't a reason either way: don't leave a function because it's only just over, or refactor one only because it's far over.
+  Refactoring helps when it pulls out a step with its own name and purpose (e.g. a view's planning apart from applying it, or a formatting step inside a loop), or removes redundant state.
+  It hurts when the pieces only make sense together, e.g. a sequential parser sharing a cursor or a flat list of commented guard clauses, so a reader would have to jump between functions to follow one idea.
+  When you recommend leaving one, say which of these applies, not how close to the threshold it is.
 - Pay most attention to findings on lines your PR changes.
   Don't widen a PR to fix findings elsewhere unless asked.
 - A finding you've chosen to ignore doesn't block a PR, and needs no reply or explanation.
 - Don't suppress a single finding with a `NOSONAR` or `noqa` comment.
 - `pyproject.toml`'s `[tool.exolot.rules]` turns off rules, or changes their parameters, project-wide, each with a comment saying why.
   Add one only for a rule whose findings in this repo are consistently noise, not to clear one finding.
-  It raises cognitive complexity's (`python:S3776`) threshold from 15 to 25, rather than turning it off, as the functions above 25 are the ones worth checking for a refactor.
+  Cognitive complexity (`python:S3776`) keeps Sonar's default threshold of 15: the threshold only picks which functions to look at, so it isn't raised to hide ones that merely score low.
   The app has one user, its owner, and runs only in its own container or on the owner's machine, so rules that guard against other local users (`/tmp` use, file modes) or are about accessibility are off; turn off any others like them that appear.
 
 ## Long files

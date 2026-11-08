@@ -108,6 +108,32 @@ def get_unique_filename(filename: str, used_filenames: dict[str, int]) -> str:
     return f"{stem}_{index}"
 
 
+def get_entry_name(filename: str, prefix: str, date_prefix: str) -> str:
+    """Return the ZIP entry name for an attachment called *filename*.
+
+    That's ``<date_prefix><prefix>-<filename>`` (without *prefix* and its ``-`` if it's empty), lowercased
+    with each run of anything but letters and digits before the extension turned into one ``-``.
+    """
+    if prefix:
+        filename = f"{prefix}-{filename}"
+    filename = f"{date_prefix}{filename}"
+    stem, dot, file_ext = filename.rpartition(".")
+    if not dot or not file_ext:
+        stem, file_ext = filename, ""
+    stem = "-".join(re.sub(r"[^A-Za-z0-9]", " ", stem).lower().split())
+    return f"{stem}.{file_ext}" if file_ext else stem
+
+
+def describe_content_type(part: MIMEPart) -> str:
+    """Return *part*'s content type, or for an attached email, that of the email's own body."""
+    content_type = part.get_content_type()
+    if content_type == "message/rfc822":
+        payload = part.get_payload()
+        if isinstance(payload, list) and len(payload) == 1:
+            return cast(Message, payload[0]).get_content_type()
+    return content_type
+
+
 def eml_to_zip(eml_file_path: str, output_zip_path: str, prefix: str = "") -> None:
     """
     Extracts all attachments from a .eml file and writes them directly into a .zip file.
@@ -135,14 +161,7 @@ def eml_to_zip(eml_file_path: str, output_zip_path: str, prefix: str = "") -> No
                     # Not an attachment, skip
                     continue
 
-            if prefix:
-                filename = f"{prefix}-{filename}"
-
-            filename = f"{date_prefix}{filename}"
-            file_ext = filename.rsplit(".")[-1] if "." in filename else ""
-            filename = filename.removesuffix(f".{file_ext}") if file_ext else filename
-            filename = "-".join(re.sub(r"[^A-Za-z0-9]", " ", filename).lower().split())
-            filename = f"{filename}.{file_ext}" if file_ext else filename
+            filename = get_entry_name(filename, prefix, date_prefix)
 
             # 4. Extract the payload (the actual file data)
             payload = get_attachment_payload(part)
@@ -153,13 +172,7 @@ def eml_to_zip(eml_file_path: str, output_zip_path: str, prefix: str = "") -> No
             zip_filename = get_unique_filename(filename, used_filenames)
             zipf.writestr(zip_filename, payload)
             attachment_count += 1
-            content_type = part.get_content_type()
-            if content_type == "message/rfc822":
-                part_payload = part.get_payload()
-                if isinstance(part_payload, list) and len(part_payload) == 1:
-                    message_body = cast(Message, part_payload[0])
-                    content_type = message_body.get_content_type()
-            click.echo(f"Added to ZIP: {zip_filename} ({content_type})")
+            click.echo(f"Added to ZIP: {zip_filename} ({describe_content_type(part)})")
 
     click.echo(f"\nSUCCESS: Extracted {attachment_count} attachments to {output_zip_path!r}")
 

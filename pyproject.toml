@@ -67,8 +67,6 @@ See [AGENTS.md](https://github.com/skissane/taxtracker/blob/master/AGENTS.md) fo
 
 # Project-wide rule settings (see AGENTS.md): only for rules whose findings here are consistently noise.
 [tool.exolot.rules]
-# Cognitive complexity: the default of 15 flags many functions that read fine; above 25 is worth a look.
-"python:S3776" = { level = "on", parameters = { threshold = 25 } }
 # Duplicated string literals: mostly URL names reversed a few times, clearer than a constant.
 "python:S1192" = { level = "off" }
 # Unused parameters: gunicorn hooks and django-google-sso callbacks have fixed signatures.

@@ -103,12 +103,7 @@ def base_ci_state(repo: str, sha: str, check_name: str, token: str | None, timeo
     return ("succeeded" if conclusion == "success" else "failed"), f"{check_name} {conclusion}"
 
 
-def main(
-    argv: list[str] | None = None,
-    *,
-    clock: Callable[[], float] = time.monotonic,
-    sleep: Callable[[float], None] = time.sleep,
-) -> int:
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("repo", help="the repository, as owner/name")
     parser.add_argument("sha", help="the PR's base commit")
@@ -141,24 +136,33 @@ def main(
         default=30,
         help="seconds to wait for one response (default: %(default)s)",
     )
-    args = parser.parse_args(argv)
+    return parser.parse_args(argv)
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> int:
+    args = _parse_args(argv)
     token = os.environ.get("GITHUB_TOKEN") or None
 
     deadline = clock() + args.timeout
+
+    def request_timeout() -> float:
+        # Don't let slow requests run far past the deadline.
+        return float(min(args.request_timeout, max(deadline - clock(), 1)))
+
     finished_at = None
     attempt = 0
     while True:
         attempt += 1
-        # Don't let slow requests run far past the deadline.
-        has_coverage, coverage = codecov_coverage(
-            args.repo, args.sha, min(args.request_timeout, max(deadline - clock(), 1))
-        )
+        has_coverage, coverage = codecov_coverage(args.repo, args.sha, request_timeout())
         if has_coverage:
             print(f"Attempt {attempt}: Codecov has the base report for {args.sha} ({coverage})")
             return 0
-        state, ci = base_ci_state(
-            args.repo, args.sha, args.check_name, token, min(args.request_timeout, max(deadline - clock(), 1))
-        )
+        state, ci = base_ci_state(args.repo, args.sha, args.check_name, token, request_timeout())
         print(f"Attempt {attempt}: Codecov: {coverage}; base CI: {ci}", flush=True)
         if state == "failed":
             print(f"::warning::Codecov has no coverage for base commit {args.sha}, whose CI didn't succeed ({ci})")
