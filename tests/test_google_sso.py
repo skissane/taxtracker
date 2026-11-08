@@ -105,7 +105,8 @@ class GoogleSSOSettingsTests(TestCase):
 
         def routes(module_name: str) -> set[tuple[object, str, object]]:
             spec = importlib.util.find_spec(module_name)
-            assert spec is not None and spec.origin is not None
+            assert spec is not None
+            assert spec.origin is not None
             tree = ast.parse(Path(spec.origin).read_text())
             found: set[tuple[object, str, object]] = set()
             for node in ast.walk(tree):

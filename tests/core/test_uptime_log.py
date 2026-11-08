@@ -63,7 +63,8 @@ class UptimeLogTests(SimpleTestCase):
             after = uptime_log.read_day(Path(tempdir), self.DAY)
             first = uptime_log.first_recorded_day(Path(tempdir))
 
-        assert before is not None and after is not None
+        assert before is not None
+        assert after is not None
         self.assertEqual(before[-1], 0x03)
         self.assertEqual(after[0], 0xC0)
         self.assertEqual(first, self.DAY - 1)
