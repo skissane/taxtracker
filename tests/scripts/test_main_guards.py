@@ -40,6 +40,8 @@ def run_as_main(monkeypatch: pytest.MonkeyPatch, module: str, *args: str) -> obj
 @pytest.mark.parametrize(
     ("module", "args", "expected"),
     [
+        ("scripts.check_checkout_credentials", [], "set persist-credentials"),
+        ("scripts.check_pins", [], "pin uv"),
         ("scripts.check_screenshots_dir", [], "screenshots/"),
         ("scripts.check_sentence_per_line", [], "one-sentence-per-line"),
         ("scripts.check_whitespace", [], "clean whitespace"),
