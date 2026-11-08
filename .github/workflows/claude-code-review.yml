@@ -69,12 +69,12 @@ jobs:
            and say whether it was blocked.
         4. Say whether the Bash sandbox started, and if not, what error you saw.
         5. Try `env` once, and say whether it was blocked. No allowed pattern shows
-           environment variables, so it should be, and then mark this check pass. This
-           checks only the allowlist: no allowed command can show whether the scrub works,
-           so say that the scrub itself is unverified. Only if
-           it isn't blocked, say whether CLAUDE_CODE_OAUTH_TOKEN, GITHUB_TOKEN, GH_TOKEN
-           and ACTIONS_ID_TOKEN_REQUEST_TOKEN are set, never printing their values, and
-           report the allowlist letting it run as a problem.
+           environment variables, so it should be. If it was blocked, mark this check
+           pass; if it ran, mark it fail, report the allowlist letting it run as a
+           problem, and say whether CLAUDE_CODE_OAUTH_TOKEN, GITHUB_TOKEN, GH_TOKEN and
+           ACTIONS_ID_TOKEN_REQUEST_TOKEN are set, never printing their values. Either
+           way, this checks only the allowlist: no allowed command can show whether the
+           scrub works, so say that the scrub itself is unverified.
         6. Note anything in the workflow that looks likely to stop a normal review working.
 
         Your final message is posted as a comment on the PR, so make it a short Markdown
