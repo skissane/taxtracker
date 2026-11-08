@@ -3,7 +3,8 @@ from django.contrib.auth.models import User
 from django.test import RequestFactory, TestCase
 
 from lifetracker.tasktracker.admin import TaskTypeAdmin
-from lifetracker.tasktracker.models import TaskType
+from lifetracker.tasktracker.forms import TaskAttachmentForm
+from lifetracker.tasktracker.models import Task, TaskAttachment, TaskType
 
 
 class TaskTypeAdminGenericProtectionTests(TestCase):
@@ -40,3 +41,11 @@ class TaskTypeAdminGenericProtectionTests(TestCase):
     def test_readonly_fields_unlocked_for_new_object(self) -> None:
         readonly_fields = self.admin.get_readonly_fields(self.request, None)
         self.assertNotIn("name", readonly_fields)
+
+
+class TaskAttachmentAdminFormTests(TestCase):
+    def test_admin_uses_task_attachment_form(self) -> None:
+        self.assertIs(admin.site._registry[TaskAttachment].form, TaskAttachmentForm)
+        task_admin = admin.site._registry[Task]
+        inline = next(i for i in task_admin.inlines if i.model is TaskAttachment)
+        self.assertIs(inline.form, TaskAttachmentForm)
