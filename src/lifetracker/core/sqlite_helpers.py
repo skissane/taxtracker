@@ -24,9 +24,7 @@ def transaction(connection: sqlite3.Connection) -> Iterator[None]:
     ``isolation_level=None``, rolling it back if the block raises."""
     # IMMEDIATE, so a read then a write never fails with "database is locked".
     connection.execute("BEGIN IMMEDIATE")
-    try:
+    # The connection's own context manager commits, or rolls back if the
+    # block raises.
+    with connection:
         yield
-    except BaseException:
-        connection.execute("ROLLBACK")
-        raise
-    connection.execute("COMMIT")
