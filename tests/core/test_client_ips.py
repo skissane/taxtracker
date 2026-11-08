@@ -21,14 +21,14 @@ from django.core.management import CommandError, call_command
 from django.test import Client, SimpleTestCase, TestCase
 from django.urls import reverse
 
-from lifetracker.core import client_ips
+from lifetracker.core import client_ips, ip_location
 from tests.core.mmdb_writer import write_geoip, write_mmdb
 
 if TYPE_CHECKING:
     from django.test.client import _MonkeyPatchedWSGIResponse as TestResponse
 
 # tests/conftest.py replaces it in every test, so it never downloads anything.
-download_relay_ranges = client_ips._download_relay_ranges
+download_relay_ranges = ip_location._download_relay_ranges
 
 
 def envoy_line(**fields: object) -> str:
@@ -75,11 +75,11 @@ RELAY_LINES = [
 
 def write_relay_ranges(geoip_dir: Path, lines: list[str] = RELAY_LINES) -> int:
     geoip_dir.mkdir(parents=True, exist_ok=True)
-    return client_ips.build_relay_ranges(lines, geoip_dir / client_ips.RELAY_RANGES_FILE)
+    return ip_location.build_relay_ranges(lines, geoip_dir / ip_location.RELAY_RANGES_FILE)
 
 
-def relay_lookup(geoip_dir: Path | None, ip: str) -> client_ips.Relay:
-    relay = client_ips.RelayRanges(geoip_dir)
+def relay_lookup(geoip_dir: Path | None, ip: str) -> ip_location.Relay:
+    relay = ip_location.RelayRanges(geoip_dir)
     try:
         return relay.lookup(ip)
     finally:
@@ -238,22 +238,22 @@ class RequestLogReaderTests(TempDirMixin, SimpleTestCase):
 class GeoIPTests(TempDirMixin, SimpleTestCase):
     def test_lookup(self) -> None:
         write_geoip(self.temp)
-        geoip = client_ips.GeoIP(self.temp)
+        geoip = ip_location.GeoIP(self.temp)
         self.addCleanup(geoip.close)
         self.assertEqual(
             geoip.lookup("203.0.113.7"),
-            client_ips.Location("AU", "Australia", 64500, "Example ISP"),
+            ip_location.Location("AU", "Australia", 64500, "Example ISP"),
         )
-        self.assertEqual(geoip.lookup("2001:db8::1"), client_ips.Location("NZ", "NZ", None, None))
+        self.assertEqual(geoip.lookup("2001:db8::1"), ip_location.Location("NZ", "NZ", None, None))
         self.assertFalse(geoip.lookup("198.51.100.1"))
 
     def test_no_databases(self) -> None:
-        self.assertFalse(client_ips.GeoIP(self.temp).lookup("203.0.113.7"))
-        self.assertFalse(client_ips.GeoIP(None).lookup("203.0.113.7"))
+        self.assertFalse(ip_location.GeoIP(self.temp).lookup("203.0.113.7"))
+        self.assertFalse(ip_location.GeoIP(None).lookup("203.0.113.7"))
 
     def test_uses_newest_and_reopens_for_a_newer_one(self) -> None:
         write_geoip(self.temp, "2026-09")
-        geoip = client_ips.GeoIP(self.temp)
+        geoip = ip_location.GeoIP(self.temp)
         self.addCleanup(geoip.close)
         self.assertEqual(geoip.lookup("203.0.113.7").asn, 64500)
         write_mmdb(
@@ -269,7 +269,7 @@ class GeoIPTests(TempDirMixin, SimpleTestCase):
 
     def test_unreadable_database_is_skipped(self) -> None:
         (self.temp / "dbip-asn-lite-2026-10.mmdb").write_bytes(b"junk")
-        self.assertFalse(client_ips.GeoIP(self.temp).lookup("203.0.113.7"))
+        self.assertFalse(ip_location.GeoIP(self.temp).lookup("203.0.113.7"))
 
 
 class UpdateGeoIPTests(TempDirMixin, SimpleTestCase):
@@ -293,16 +293,16 @@ class UpdateGeoIPTests(TempDirMixin, SimpleTestCase):
         return download, calls
 
     def _url(self, name: str, month: str) -> str:
-        return client_ips.GEOIP_URL.format(name=name, month=month)
+        return ip_location.GEOIP_URL.format(name=name, month=month)
 
     def _update(self, download: Callable[[str, Path], bool], now: float = NOW) -> dict[str, dict[str, Any]]:
-        return client_ips.update_geoip(self.temp, now=now, download=download)
+        return ip_location.update_geoip(self.temp, now=now, download=download)
 
     def _files(self) -> list[str]:
         return sorted(path.name for path in self.temp.glob("*.mmdb"))
 
     def test_downloads_this_month(self) -> None:
-        available = {self._url(name, "2026-01") for name in client_ips.GEOIP_DATABASES}
+        available = {self._url(name, "2026-01") for name in ip_location.GEOIP_DATABASES}
         download, calls = self._fake_download(available)
         (self.temp / "dbip-asn-lite-2025-11.mmdb").write_bytes(b"old")
         statuses = self._update(download)
@@ -310,7 +310,7 @@ class UpdateGeoIPTests(TempDirMixin, SimpleTestCase):
             statuses["dbip-country-lite"],
             {
                 "attempted": self.NOW,
-                "outcome": client_ips.DOWNLOADED,
+                "outcome": ip_location.DOWNLOADED,
                 "fell_back": False,
                 "url": self._url("dbip-country-lite", "2026-01"),
                 "file": "dbip-country-lite-2026-01.mmdb",
@@ -324,26 +324,26 @@ class UpdateGeoIPTests(TempDirMixin, SimpleTestCase):
             self._files(),
             ["dbip-asn-lite-2026-01.mmdb", "dbip-country-lite-2026-01.mmdb"],
         )
-        self.assertEqual(client_ips.read_geoip_status(self.temp), statuses)
+        self.assertEqual(ip_location.read_geoip_status(self.temp), statuses)
         # Already there: nothing to download.
         statuses = self._update(download, now=self.NOW + 60)
         self.assertEqual(len(calls), 2)
         self.assertEqual(
             {status["outcome"] for status in statuses.values()},
-            {client_ips.UP_TO_DATE},
+            {ip_location.UP_TO_DATE},
         )
         self.assertEqual(statuses["dbip-asn-lite"]["url"], None)
         self.assertEqual(statuses["dbip-asn-lite"]["succeeded"], self.NOW + 60)
 
     def test_falls_back_to_last_month(self) -> None:
-        available = {self._url(name, "2025-12") for name in client_ips.GEOIP_DATABASES}
+        available = {self._url(name, "2025-12") for name in ip_location.GEOIP_DATABASES}
         download, calls = self._fake_download(available)
         statuses = self._update(download)
         self.assertEqual(
-            [statuses[name]["file"] for name in client_ips.GEOIP_DATABASES],
+            [statuses[name]["file"] for name in ip_location.GEOIP_DATABASES],
             ["dbip-country-lite-2025-12.mmdb", "dbip-asn-lite-2025-12.mmdb"],
         )
-        self.assertEqual(statuses["dbip-asn-lite"]["outcome"], client_ips.DOWNLOADED)
+        self.assertEqual(statuses["dbip-asn-lite"]["outcome"], ip_location.DOWNLOADED)
         self.assertTrue(statuses["dbip-asn-lite"]["fell_back"])
         self.assertEqual(statuses["dbip-asn-lite"]["url"], self._url("dbip-asn-lite", "2025-12"))
         # Next time, this month's is tried again, but last month's is kept.
@@ -351,9 +351,9 @@ class UpdateGeoIPTests(TempDirMixin, SimpleTestCase):
         self.assertEqual(len(calls), 6)
         self.assertEqual(
             calls[4:],
-            [self._url(name, "2026-01") for name in client_ips.GEOIP_DATABASES],
+            [self._url(name, "2026-01") for name in ip_location.GEOIP_DATABASES],
         )
-        self.assertEqual(statuses["dbip-asn-lite"]["outcome"], client_ips.UP_TO_DATE)
+        self.assertEqual(statuses["dbip-asn-lite"]["outcome"], ip_location.UP_TO_DATE)
         self.assertTrue(statuses["dbip-asn-lite"]["fell_back"])
         self.assertEqual(statuses["dbip-asn-lite"]["url"], self._url("dbip-asn-lite", "2026-01"))
 
@@ -361,7 +361,7 @@ class UpdateGeoIPTests(TempDirMixin, SimpleTestCase):
         download, _ = self._fake_download(set())
         statuses = self._update(download)
         status = statuses["dbip-country-lite"]
-        self.assertEqual(status["outcome"], client_ips.FAILED)
+        self.assertEqual(status["outcome"], ip_location.FAILED)
         self.assertEqual(
             status["error"],
             "OSError(\"Neither 2026-01's nor 2025-12's dbip-country-lite is available\")",
@@ -383,7 +383,7 @@ class UpdateGeoIPTests(TempDirMixin, SimpleTestCase):
         download, _ = self._fake_download({asn}, fail={country})
         statuses = self._update(download, now=later)
         status = statuses["dbip-country-lite"]
-        self.assertEqual(status["outcome"], client_ips.FAILED)
+        self.assertEqual(status["outcome"], ip_location.FAILED)
         self.assertEqual(status["attempted"], later)
         self.assertEqual(status["succeeded"], self.NOW)
         self.assertEqual(status["url"], country)
@@ -391,33 +391,33 @@ class UpdateGeoIPTests(TempDirMixin, SimpleTestCase):
         self.assertIn("requests.exceptions.ConnectionError", status["traceback"])
         # The old one stays in use.
         self.assertEqual(status["file"], "dbip-country-lite-2026-01.mmdb")
-        self.assertEqual(statuses["dbip-asn-lite"]["outcome"], client_ips.DOWNLOADED)
+        self.assertEqual(statuses["dbip-asn-lite"]["outcome"], ip_location.DOWNLOADED)
         self.assertEqual(
             self._files(),
             ["dbip-asn-lite-2026-02.mmdb", "dbip-country-lite-2026-01.mmdb"],
         )
 
     def test_unreadable_previous_status_is_ignored(self) -> None:
-        (self.temp / client_ips.GEOIP_STATUS_NAME).write_text("not json")
+        (self.temp / ip_location.GEOIP_STATUS_NAME).write_text("not json")
         download, _ = self._fake_download(set(), fail={self._url("dbip-asn-lite", "2026-01")})
         statuses = self._update(download)
         self.assertIsNone(statuses["dbip-asn-lite"]["succeeded"])
-        self.assertEqual(client_ips.read_geoip_status(self.temp), statuses)
+        self.assertEqual(ip_location.read_geoip_status(self.temp), statuses)
 
     def test_read_geoip_status(self) -> None:
-        self.assertIsNone(client_ips.read_geoip_status(self.temp))
-        path = self.temp / client_ips.GEOIP_STATUS_NAME
+        self.assertIsNone(ip_location.read_geoip_status(self.temp))
+        path = self.temp / ip_location.GEOIP_STATUS_NAME
         for contents in ("{}", '{"databases": []}', '{"databases": {"x": 1}}'):
             path.write_text(contents)
             with (
                 self.subTest(contents),
                 self.assertRaisesMessage(ValueError, "doesn't hold each database's status"),
             ):
-                client_ips.read_geoip_status(self.temp)
+                ip_location.read_geoip_status(self.temp)
         for contents in ("[]", "{"):
             path.write_text(contents)
             with self.subTest(contents), self.assertRaises(ValueError):
-                client_ips.read_geoip_status(self.temp)
+                ip_location.read_geoip_status(self.temp)
 
 
 class DownloadTests(TempDirMixin, SimpleTestCase):
@@ -437,27 +437,27 @@ class DownloadTests(TempDirMixin, SimpleTestCase):
             "get",
             return_value=self._response(200, gzip.compress(source.read_bytes())),
         ) as get:
-            self.assertTrue(client_ips._download("https://x/y.gz", destination))
-        get.assert_called_once_with("https://x/y.gz", stream=True, timeout=client_ips.GEOIP_TIMEOUT_SECONDS)
+            self.assertTrue(ip_location._download("https://x/y.gz", destination))
+        get.assert_called_once_with("https://x/y.gz", stream=True, timeout=ip_location.GEOIP_TIMEOUT_SECONDS)
         self.assertEqual(destination.read_bytes(), source.read_bytes())
         self.assertEqual(destination.stat().st_mode & 0o777, 0o644)
 
     def test_not_found(self) -> None:
         destination = self.temp / "x.mmdb"
         with mock.patch.object(requests, "get", return_value=self._response(404)):
-            self.assertFalse(client_ips._download("https://x/y.gz", destination))
+            self.assertFalse(ip_location._download("https://x/y.gz", destination))
         self.assertFalse(destination.exists())
 
     def test_error(self) -> None:
         with mock.patch.object(requests, "get", return_value=self._response(500)):
             with self.assertRaises(requests.HTTPError):
-                client_ips._download("https://x/y.gz", self.temp / "x.mmdb")
+                ip_location._download("https://x/y.gz", self.temp / "x.mmdb")
 
     def test_not_a_database_is_left_out(self) -> None:
         destination = self.temp / "x.mmdb"
         with mock.patch.object(requests, "get", return_value=self._response(200, gzip.compress(b"junk"))):
             with self.assertRaises(maxminddb.InvalidDatabaseError):
-                client_ips._download("https://x/y.gz", destination)
+                ip_location._download("https://x/y.gz", destination)
         self.assertEqual(list(self.temp.iterdir()), [])
 
 
@@ -475,18 +475,18 @@ class RelayRangesTests(TempDirMixin, SimpleTestCase):
             ],
         )
         self.assertEqual(count, 4)
-        relay = client_ips.RelayRanges(self.temp)
+        relay = ip_location.RelayRanges(self.temp)
         self.addCleanup(relay.close)
-        sydney = client_ips.Relay(True, "AU", "AU-NSW", "Sydney")
-        not_relay = client_ips.Relay(False)
+        sydney = ip_location.Relay(True, "AU", "AU-NSW", "Sydney")
+        not_relay = ip_location.Relay(False)
         for ip, expected in (
             ("203.0.113.0", sydney),
             ("203.0.113.31", sydney),
             ("203.0.113.32", not_relay),
-            ("203.0.113.65", client_ips.Relay(True, "AU", "AU-VIC", "Melbourne")),
+            ("203.0.113.65", ip_location.Relay(True, "AU", "AU-VIC", "Melbourne")),
             ("203.0.113.66", not_relay),
-            ("198.51.100.11", client_ips.Relay(True)),
-            ("2001:db8:1::abcd", client_ips.Relay(True, "NZ", "NZ-AUK", "Auckland")),
+            ("198.51.100.11", ip_location.Relay(True)),
+            ("2001:db8:1::abcd", ip_location.Relay(True, "NZ", "NZ-AUK", "Auckland")),
             ("2001:db8:1:1::", not_relay),
             ("192.0.2.1", not_relay),
             ("::1", not_relay),
@@ -495,31 +495,31 @@ class RelayRangesTests(TempDirMixin, SimpleTestCase):
                 self.assertEqual(relay.lookup(ip), expected)
 
     def test_no_ranges(self) -> None:
-        self.assertEqual(relay_lookup(self.temp, "203.0.113.1"), client_ips.Relay())
-        self.assertEqual(relay_lookup(None, "203.0.113.1"), client_ips.Relay())
-        (self.temp / client_ips.RELAY_RANGES_FILE).write_bytes(b"junk" * 100)
-        self.assertEqual(relay_lookup(self.temp, "203.0.113.1"), client_ips.Relay())
+        self.assertEqual(relay_lookup(self.temp, "203.0.113.1"), ip_location.Relay())
+        self.assertEqual(relay_lookup(None, "203.0.113.1"), ip_location.Relay())
+        (self.temp / ip_location.RELAY_RANGES_FILE).write_bytes(b"junk" * 100)
+        self.assertEqual(relay_lookup(self.temp, "203.0.113.1"), ip_location.Relay())
 
     def test_unreadable_once_open(self) -> None:
         write_relay_ranges(self.temp)
-        relay = client_ips.RelayRanges(self.temp)
+        relay = ip_location.RelayRanges(self.temp)
         self.addCleanup(relay.close)
         self.assertTrue(relay.lookup("203.0.113.1").private_relay)
         assert relay._connection is not None
         relay._connection.close()
         relay._connection = mock.Mock(execute=mock.Mock(side_effect=sqlite3.DatabaseError("disk I/O error")))
-        self.assertEqual(relay.lookup("203.0.113.1"), client_ips.Relay())
+        self.assertEqual(relay.lookup("203.0.113.1"), ip_location.Relay())
 
     def test_reopens_when_replaced(self) -> None:
         write_relay_ranges(self.temp)
-        geoip = client_ips.GeoIP(self.temp)
+        geoip = ip_location.GeoIP(self.temp)
         self.addCleanup(geoip.close)
         self.assertTrue(geoip.relay("203.0.113.1").private_relay)
         write_relay_ranges(self.temp, ["192.0.2.0/24,US,US-CA,Los Angeles,"])
         self.assertFalse(geoip.relay("203.0.113.1").private_relay)
         self.assertEqual(geoip.relay("192.0.2.1").relay_city, "Los Angeles")
-        (self.temp / client_ips.RELAY_RANGES_FILE).unlink()
-        self.assertEqual(geoip.relay("192.0.2.1"), client_ips.Relay())
+        (self.temp / ip_location.RELAY_RANGES_FILE).unlink()
+        self.assertEqual(geoip.relay("192.0.2.1"), ip_location.Relay())
 
     def test_empty_list_keeps_the_old_ranges(self) -> None:
         write_relay_ranges(self.temp)
@@ -527,7 +527,7 @@ class RelayRangesTests(TempDirMixin, SimpleTestCase):
             write_relay_ranges(self.temp, ["", "junk"])
         self.assertEqual(
             sorted(path.name for path in self.temp.iterdir()),
-            [client_ips.RELAY_RANGES_FILE],
+            [ip_location.RELAY_RANGES_FILE],
         )
         self.assertTrue(relay_lookup(self.temp, "203.0.113.1").private_relay)
 
@@ -540,7 +540,7 @@ class RelayRangesTests(TempDirMixin, SimpleTestCase):
         return response
 
     def test_download(self) -> None:
-        destination = self.temp / client_ips.RELAY_RANGES_FILE
+        destination = self.temp / ip_location.RELAY_RANGES_FILE
         body = "\n".join(RELAY_LINES).encode()
         with mock.patch.object(
             requests,
@@ -552,7 +552,7 @@ class RelayRangesTests(TempDirMixin, SimpleTestCase):
             "https://x/y.csv",
             headers={},
             stream=True,
-            timeout=client_ips.GEOIP_TIMEOUT_SECONDS,
+            timeout=ip_location.GEOIP_TIMEOUT_SECONDS,
         )
         self.assertEqual(destination.stat().st_mode & 0o777, 0o644)
         self.assertTrue(relay_lookup(self.temp, "203.0.113.1").private_relay)
@@ -577,12 +577,12 @@ class UpdateRelayRangesTests(TempDirMixin, SimpleTestCase):
     NOW = 1_800_000_000.0
 
     def _update(self, download: Callable[[str, Path, str | None], str | None], now: float = NOW) -> dict[str, Any]:
-        return client_ips.update_geoip(
+        return ip_location.update_geoip(
             self.temp,
             now=now,
             download=lambda url, destination: False,
             download_relay_ranges=download,
-        )[client_ips.RELAY_RANGES]
+        )[ip_location.RELAY_RANGES]
 
     def test_downloads_then_checks_etag(self) -> None:
         etags = []
@@ -599,10 +599,10 @@ class UpdateRelayRangesTests(TempDirMixin, SimpleTestCase):
             status,
             {
                 "attempted": self.NOW,
-                "url": client_ips.RELAY_RANGES_URL,
-                "outcome": client_ips.DOWNLOADED,
+                "url": ip_location.RELAY_RANGES_URL,
+                "outcome": ip_location.DOWNLOADED,
                 "fell_back": False,
-                "file": client_ips.RELAY_RANGES_FILE,
+                "file": ip_location.RELAY_RANGES_FILE,
                 "succeeded": self.NOW,
                 "etag": '"v1"',
                 "error": None,
@@ -611,17 +611,17 @@ class UpdateRelayRangesTests(TempDirMixin, SimpleTestCase):
         )
         status = self._update(download, now=self.NOW + 60)
         self.assertEqual(etags, [None, '"v1"'])
-        self.assertEqual(status["outcome"], client_ips.UP_TO_DATE)
+        self.assertEqual(status["outcome"], ip_location.UP_TO_DATE)
         self.assertEqual(status["etag"], '"v1"')
         self.assertEqual(status["succeeded"], self.NOW + 60)
-        statuses = client_ips.read_geoip_status(self.temp)
+        statuses = ip_location.read_geoip_status(self.temp)
         assert statuses is not None
-        self.assertEqual(statuses[client_ips.RELAY_RANGES], status)
+        self.assertEqual(statuses[ip_location.RELAY_RANGES], status)
         # Without the file, its ETag is no use.
-        (self.temp / client_ips.RELAY_RANGES_FILE).unlink()
+        (self.temp / ip_location.RELAY_RANGES_FILE).unlink()
         status = self._update(download)
         self.assertEqual(etags[-1], None)
-        self.assertEqual(status["outcome"], client_ips.DOWNLOADED)
+        self.assertEqual(status["outcome"], ip_location.DOWNLOADED)
 
     def test_failure_keeps_the_last_list(self) -> None:
         def download(url: str, destination: Path, etag: str | None) -> str:
@@ -634,11 +634,11 @@ class UpdateRelayRangesTests(TempDirMixin, SimpleTestCase):
             raise requests.ConnectionError("offline")
 
         status = self._update(fail, now=self.NOW + 60)
-        self.assertEqual(status["outcome"], client_ips.FAILED)
+        self.assertEqual(status["outcome"], ip_location.FAILED)
         self.assertEqual(status["error"], "ConnectionError('offline')")
         self.assertIn("requests.exceptions.ConnectionError", status["traceback"])
         self.assertEqual(status["succeeded"], self.NOW)
-        self.assertEqual(status["file"], client_ips.RELAY_RANGES_FILE)
+        self.assertEqual(status["file"], ip_location.RELAY_RANGES_FILE)
         self.assertEqual(status["etag"], '"v1"')
 
     def test_failure_without_a_list(self) -> None:
@@ -646,7 +646,7 @@ class UpdateRelayRangesTests(TempDirMixin, SimpleTestCase):
             raise ValueError("no ranges in the list")
 
         status = self._update(fail)
-        self.assertEqual(status["outcome"], client_ips.FAILED)
+        self.assertEqual(status["outcome"], ip_location.FAILED)
         self.assertIsNone(status["succeeded"])
         self.assertIsNone(status["file"])
         self.assertIsNone(status["etag"])
@@ -659,7 +659,7 @@ class RecordTests(TempDirMixin, SimpleTestCase):
         self.connection = client_ips.connect(self.db_path)
         self.addCleanup(self.connection.close)
         self.geoip_dir = self.temp / "geoip"
-        self.geoip = client_ips.GeoIP(self.geoip_dir)
+        self.geoip = ip_location.GeoIP(self.geoip_dir)
         self.addCleanup(self.geoip.close)
 
     def _row(self, ip: str = "203.0.113.7") -> dict[str, Any]:
@@ -753,8 +753,8 @@ class RecordTests(TempDirMixin, SimpleTestCase):
 
     def test_failed_batch_is_rolled_back(self) -> None:
         geoip = mock.Mock(
-            lookup=mock.Mock(side_effect=[client_ips.Location(), ValueError]),
-            relay=mock.Mock(return_value=client_ips.Relay()),
+            lookup=mock.Mock(side_effect=[ip_location.Location(), ValueError]),
+            relay=mock.Mock(return_value=ip_location.Relay()),
         )
         with self.assertRaises(ValueError):
             client_ips.record(self.connection, [request(), request(ip="198.51.100.1")], geoip)
@@ -875,7 +875,7 @@ class RecordTests(TempDirMixin, SimpleTestCase):
         # Without a list, what it had is kept.
         write_relay_ranges(self.geoip_dir)
         client_ips.record(self.connection, [request(time=3000)], self.geoip)
-        (self.geoip_dir / client_ips.RELAY_RANGES_FILE).unlink()
+        (self.geoip_dir / ip_location.RELAY_RANGES_FILE).unlink()
         client_ips.record(self.connection, [request(time=4000)], self.geoip)
         self.assertEqual(self._row()["private_relay"], 1)
         self.assertEqual(self._row()["relay_city"], "Sydney")
@@ -1015,14 +1015,14 @@ class RunTests(TempDirMixin, SimpleTestCase):
         config = self._config(download=True)
         assert config.db_path is not None
         connection = client_ips.connect(config.db_path)
-        client_ips.record(connection, [request()], client_ips.GeoIP(None))
+        client_ips.record(connection, [request()], ip_location.GeoIP(None))
         connection.close()
 
         def update(geoip_dir: Path) -> dict[str, dict[str, Any]]:
             write_geoip(geoip_dir)
             return {
-                "dbip-country-lite": {"outcome": client_ips.UP_TO_DATE},
-                "dbip-asn-lite": {"outcome": client_ips.DOWNLOADED, "file": "x.mmdb"},
+                "dbip-country-lite": {"outcome": ip_location.UP_TO_DATE},
+                "dbip-asn-lite": {"outcome": ip_location.DOWNLOADED, "file": "x.mmdb"},
             }
 
         with (
@@ -1038,7 +1038,7 @@ class RunTests(TempDirMixin, SimpleTestCase):
         config = self._config(download=True)
         assert config.db_path is not None
         connection = client_ips.connect(config.db_path)
-        client_ips.record(connection, [request()], client_ips.GeoIP(None))
+        client_ips.record(connection, [request()], ip_location.GeoIP(None))
         connection.close()
 
         def update(geoip_dir: Path) -> dict[str, dict[str, Any]]:
@@ -1100,11 +1100,11 @@ class RunTests(TempDirMixin, SimpleTestCase):
         assert config.geoip_dir is not None
         self.assertEqual(
             [path.name for path in config.geoip_dir.iterdir()],
-            [client_ips.GEOIP_STATUS_NAME],
+            [ip_location.GEOIP_STATUS_NAME],
         )
-        statuses = client_ips.read_geoip_status(config.geoip_dir)
+        statuses = ip_location.read_geoip_status(config.geoip_dir)
         assert statuses is not None
-        self.assertEqual(statuses["dbip-asn-lite"]["outcome"], client_ips.FAILED)
+        self.assertEqual(statuses["dbip-asn-lite"]["outcome"], ip_location.FAILED)
         self.assertIn("EOFError", statuses["dbip-asn-lite"]["traceback"])
 
     def test_fill_in_failure_is_logged(self) -> None:
@@ -1197,14 +1197,14 @@ class UpdateGeoIPCommandTests(TempDirMixin, SimpleTestCase):
         db_path = self.temp / "client_ips.sqlite3"
         connection = client_ips.connect(db_path)
         self.addCleanup(connection.close)
-        client_ips.record(connection, [request()], client_ips.GeoIP(None))
+        client_ips.record(connection, [request()], ip_location.GeoIP(None))
 
         def update(geoip_dir: Path) -> dict[str, dict[str, Any]]:
             write_geoip(geoip_dir)
             return {
-                "dbip-country-lite": {"outcome": client_ips.UP_TO_DATE},
+                "dbip-country-lite": {"outcome": ip_location.UP_TO_DATE},
                 "dbip-asn-lite": {
-                    "outcome": client_ips.DOWNLOADED,
+                    "outcome": ip_location.DOWNLOADED,
                     "file": "dbip-asn-lite-2026-10.mmdb",
                 },
             }
@@ -1212,7 +1212,7 @@ class UpdateGeoIPCommandTests(TempDirMixin, SimpleTestCase):
         stdout = io.StringIO()
         with (
             mock.patch.dict(os.environ, {"LIFETRACKER_CLIENT_IP_DB": str(db_path)}),
-            mock.patch.object(client_ips, "update_geoip", side_effect=update),
+            mock.patch.object(ip_location, "update_geoip", side_effect=update),
         ):
             call_command("update_geoip", stdout=stdout)
         self.assertEqual(
@@ -1232,9 +1232,9 @@ class UpdateGeoIPCommandTests(TempDirMixin, SimpleTestCase):
                 {"LIFETRACKER_CLIENT_IP_DB": str(self.temp / "client_ips.sqlite3")},
             ),
             mock.patch.object(
-                client_ips,
+                ip_location,
                 "update_geoip",
-                return_value={name: {"outcome": client_ips.UP_TO_DATE} for name in client_ips.GEOIP_DATABASES},
+                return_value={name: {"outcome": ip_location.UP_TO_DATE} for name in ip_location.GEOIP_DATABASES},
             ),
         ):
             call_command("update_geoip", stdout=stdout)
@@ -1248,14 +1248,14 @@ class UpdateGeoIPCommandTests(TempDirMixin, SimpleTestCase):
                 {"LIFETRACKER_CLIENT_IP_DB": str(self.temp / "client_ips.sqlite3")},
             ),
             mock.patch.object(
-                client_ips,
+                ip_location,
                 "update_geoip",
                 return_value={
                     "dbip-country-lite": {
-                        "outcome": client_ips.FAILED,
+                        "outcome": ip_location.FAILED,
                         "error": "ConnectionError('x')",
                     },
-                    "dbip-asn-lite": {"outcome": client_ips.UP_TO_DATE},
+                    "dbip-asn-lite": {"outcome": ip_location.UP_TO_DATE},
                 },
             ),
         ):
@@ -1275,7 +1275,7 @@ class UpdateGeoIPCommandTests(TempDirMixin, SimpleTestCase):
                 os.environ,
                 {"LIFETRACKER_CLIENT_IP_DB": str(self.temp / "client_ips.sqlite3")},
             ),
-            mock.patch.object(client_ips, "update_geoip", side_effect=PermissionError("read-only")),
+            mock.patch.object(ip_location, "update_geoip", side_effect=PermissionError("read-only")),
         ):
             with self.assertRaisesMessage(CommandError, "Couldn't update the DB-IP databases: read-only"):
                 call_command("update_geoip")
@@ -1309,7 +1309,7 @@ class ClientIPsExportCommandTests(TempDirMixin, SimpleTestCase):
         self.addCleanup(connection.close)
         geoip_dir = self.temp / "geoip"
         write_geoip(geoip_dir)
-        geoip = client_ips.GeoIP(geoip_dir)
+        geoip = ip_location.GeoIP(geoip_dir)
         self.addCleanup(geoip.close)
         client_ips.record(
             connection,
@@ -1356,7 +1356,7 @@ class ClientIPsAdminViewTests(TempDirMixin, TestCase):
     def _record(self) -> None:
         write_geoip(self.temp / "geoip")
         connection = client_ips.connect(self.db_path)
-        geoip = client_ips.GeoIP(self.temp / "geoip")
+        geoip = ip_location.GeoIP(self.temp / "geoip")
         client_ips.record(
             connection,
             [
@@ -1429,7 +1429,7 @@ class ClientIPsAdminViewTests(TempDirMixin, TestCase):
         write_geoip(self.temp / "geoip")
         write_relay_ranges(self.temp / "geoip")
         connection = client_ips.connect(self.db_path)
-        geoip = client_ips.GeoIP(self.temp / "geoip")
+        geoip = ip_location.GeoIP(self.temp / "geoip")
         client_ips.record(
             connection,
             [
@@ -1451,14 +1451,14 @@ class ClientIPsAdminViewTests(TempDirMixin, TestCase):
         )
         self.assertContains(response, "(Sydney, AU-NSW)")
         self.assertContains(response, "(NZ)")
-        self.assertContains(response, client_ips.RELAY_RANGES_URL)
+        self.assertContains(response, ip_location.RELAY_RANGES_URL)
         networks = response.content.decode().split("<h2>IPs</h2>")[0]
         self.assertIn('<th scope="col" class="lt-num">Private Relay IPs</th>', networks)
         self.assertIn('<td class="lt-num">1</td>', networks)
 
     def test_ipv6_wraps_after_colons(self) -> None:
         connection = client_ips.connect(self.db_path)
-        client_ips.record(connection, [request(ip="2001:db8::1")], client_ips.GeoIP(None))
+        client_ips.record(connection, [request(ip="2001:db8::1")], ip_location.GeoIP(None))
         connection.close()
         response = self.client.get(self.URL)
         self.assertContains(response, '<td class="lt-ip">2001:<wbr>db8:<wbr>:<wbr>1</td>')
@@ -1493,11 +1493,11 @@ class ClientIPsAdminViewTests(TempDirMixin, TestCase):
 
     def _write_geoip_status(self, contents: str) -> None:
         (self.temp / "geoip").mkdir(exist_ok=True)
-        (self.temp / "geoip" / client_ips.GEOIP_STATUS_NAME).write_text(contents)
+        (self.temp / "geoip" / ip_location.GEOIP_STATUS_NAME).write_text(contents)
 
     def test_geoip_status(self) -> None:
         now = datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC).timestamp()
-        country = client_ips.GEOIP_URL.format(name="dbip-country-lite", month="2026-10")
+        country = ip_location.GEOIP_URL.format(name="dbip-country-lite", month="2026-10")
 
         def download(url: str, destination: Path) -> bool:
             if url == country:
@@ -1506,7 +1506,7 @@ class ClientIPsAdminViewTests(TempDirMixin, TestCase):
 
         (self.temp / "geoip").mkdir()
         (self.temp / "geoip" / "dbip-asn-lite-2026-09.mmdb").write_bytes(b"db")
-        client_ips.update_geoip(self.temp / "geoip", now=now, download=download)
+        ip_location.update_geoip(self.temp / "geoip", now=now, download=download)
         response = self.client.get(self.URL)
         self.assertContains(response, "<strong>Failed</strong>: ConnectionError(&#x27;offline&#x27;)")
         self.assertContains(response, f"<code>{country}</code>", html=True)

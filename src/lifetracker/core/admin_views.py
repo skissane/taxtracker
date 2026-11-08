@@ -22,7 +22,7 @@ from django.utils.html import format_html_join
 from django.utils.safestring import mark_safe
 from django.utils.timesince import timesince
 
-from lifetracker.core import app_icon, client_ips, idle_watchdog, uptime_log
+from lifetracker.core import app_icon, client_ips, idle_watchdog, ip_location, uptime_log
 
 # ---------------------------------------------------------------------------
 # Idle watchdog status page
@@ -349,23 +349,23 @@ def _client_ip_row(row: sqlite3.Row | Mapping[str, Any]) -> dict[str, Any]:
 def _geoip_status_rows(geoip_dir: Path) -> tuple[list[dict[str, Any]] | None, str | None]:
     """The client IPs page's table of DB-IP downloads, from ``update_geoip``'s
     status file (None if there's none), and an error message or None."""
-    path = geoip_dir / client_ips.GEOIP_STATUS_NAME
+    path = geoip_dir / ip_location.GEOIP_STATUS_NAME
     try:
-        statuses = client_ips.read_geoip_status(geoip_dir)
+        statuses = ip_location.read_geoip_status(geoip_dir)
     except (OSError, ValueError) as exc:
         return None, f"Couldn't read {path}: {exc}"
     if statuses is None:
         return None, None
     rows = []
     try:
-        for name in client_ips.GEOIP_SOURCES:
+        for name in ip_location.GEOIP_SOURCES:
             if name in statuses:
                 status = statuses[name]
                 rows.append(
                     {
                         **status,
                         "name": name,
-                        "failed": status.get("outcome") == client_ips.FAILED,
+                        "failed": status.get("outcome") == ip_location.FAILED,
                         "attempted": _utc_iso_from_timestamp(status.get("attempted")),
                         "succeeded": _utc_iso_from_timestamp(status.get("succeeded")),
                     }
@@ -389,15 +389,15 @@ def client_ips_page_context(logged_in_only: bool = False) -> dict[str, Any]:
         "geoip_files": [],
         "geoip_status": None,
         "geoip_status_error": None,
-        "relay_ranges_url": client_ips.RELAY_RANGES_URL,
+        "relay_ranges_url": ip_location.RELAY_RANGES_URL,
     }
     if config.db_path is None:
         return context
     if config.geoip_dir is not None and config.geoip_dir.is_dir():
         context["geoip_files"] = [
             path.name
-            for name in client_ips.GEOIP_DATABASES
-            for path in client_ips.geoip_files(config.geoip_dir, name)[:1]
+            for name in ip_location.GEOIP_DATABASES
+            for path in ip_location.geoip_files(config.geoip_dir, name)[:1]
         ]
     if config.geoip_dir is not None:
         context["geoip_status"], context["geoip_status_error"] = _geoip_status_rows(config.geoip_dir)
