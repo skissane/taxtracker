@@ -1,9 +1,13 @@
-"""Decides whether a GitHub comment or review asks for "@claude review".
+"""Decides which Claude workflow, if any, a GitHub comment or review is for.
 
-Reads the comment's text from stdin and prints ``review`` if it does, else
-``other``. ``claude-code-review.yml`` runs only for ``review``, and
-``claude.yml`` only for ``other``, so the two workflows share one rule and
-every comment goes to exactly one of them.
+Reads the comment's text from stdin and prints ``review`` if it asks for
+"@claude review", ``other`` if it's some other request to @claude, or
+``none`` if it isn't one at all. ``claude-code-review.yml`` runs only for
+``review``, and ``claude.yml`` only for ``other``, so the two workflows share
+one rule and every request goes to exactly one of them.
+
+A request must start the text, with only whitespace before it, so quoting
+"@claude" mid-sentence, in backticks or in a blockquote never starts a run.
 
 Workflow expressions have no regex (only ``contains``, ``startsWith`` and
 ``endsWith``), hence this script. The workflows run it with the runner's own
@@ -14,22 +18,28 @@ runner image's Python as well as ours.
 import re
 import sys
 
-# "@claude" and "review" as words of their own, separated by whitespace:
-# starting the text or after whitespace, and ending the text or followed by
-# whitespace or punctuation that ends a phrase ("@claude review." or
-# "@claude review, focus on X"). So quoting it in backticks or parentheses,
-# or writing "@claude reviewing" or "foo@claude review", doesn't count.
+# "@claude" as a word of its own, at the start (after any whitespace), and
+# then followed by whitespace, punctuation that ends a phrase or the end:
+# "@claude, fix this" or "@claude." count, "@claudebot" doesn't.
 # On str patterns, \s is Unicode whitespace (as str.isspace()), and
-# IGNORECASE matches contains(), which "@Claude Review" used to satisfy.
-REVIEW_REQUEST = re.compile(r"(?:^|\s)@claude\s+review(?=$|\s|[.,!?;:])", re.IGNORECASE)
+# IGNORECASE matches contains(), which "@Claude" used to satisfy.
+_END = r"(?=$|\s|[.,!?;:])"
+REQUEST = re.compile(r"\s*@claude" + _END, re.IGNORECASE)
+# The same, with "review" as the next word: "@claude review." or
+# "@claude review, focus on X", but not "@claude reviewing".
+REVIEW_REQUEST = re.compile(r"\s*@claude\s+review" + _END, re.IGNORECASE)
 
 
-def is_review_request(text: str) -> bool:
-    return REVIEW_REQUEST.search(text) is not None
+def classify(text: str) -> str:
+    if REVIEW_REQUEST.match(text):
+        return "review"
+    if REQUEST.match(text):
+        return "other"
+    return "none"
 
 
 def main() -> int:
-    print("review" if is_review_request(sys.stdin.read()) else "other")
+    print(classify(sys.stdin.read()))
     return 0
 
 

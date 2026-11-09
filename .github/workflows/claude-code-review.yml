@@ -23,10 +23,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Decides whether the comment or review asks for "@claude review", by the rule
-  # in scripts/claude_review_request.py, which claude.yml shares, so each goes to
-  # exactly one of the two workflows. Workflow expressions have no regex, hence a
-  # job. On a self-test it runs too, with no text, so the self-test covers it.
+  # Decides whether the comment or review asks for "@claude review" (it must
+  # start with it), by the rule in scripts/claude_review_request.py, which
+  # claude.yml shares, so each request goes to exactly one of the two workflows.
+  # Workflow expressions have no regex, hence a job. On a self-test it runs too,
+  # with no text, so the self-test covers it.
   route:
     # Only PR comments (not plain issues), review comments and reviews that
     # mention @claude, and only from commenters trusted enough to grant
