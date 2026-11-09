@@ -385,7 +385,7 @@ jobs:
           echo "version=$(uv run --no-sync python -c 'from exolot.server import DEFAULT_SERVER_VERSION as v; print(v)')" >> "$GITHUB_OUTPUT"
 
       - name: Cache language server
-        uses: actions/cache@v4.3.0
+        uses: actions/cache@v6.1.0
         with:
           path: .exolot-cache/servers
           key: exolot-server-${{ runner.os }}-${{ runner.arch }}-${{ steps.server.outputs.version }}
