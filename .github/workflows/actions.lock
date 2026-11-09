@@ -9,7 +9,7 @@ workflows:
         - 'actions/checkout@v7.0.1'
         - 'actions/download-artifact@v4.3.0'
         - 'actions/upload-artifact@v7.0.2'
-        - 'astral-sh/setup-uv@v6.8.0'
+        - 'astral-sh/setup-uv@v10.3.3'
         - 'codecov/codecov-action@v5.5.5'
         - 'docker/login-action@v4.7.0'
         - 'extractions/setup-just@v3.1.0'
@@ -22,7 +22,7 @@ workflows:
         - 'anthropics/claude-code-action@v1.0.266'
     '.github/workflows/fix.yml':
         - 'actions/checkout@v7.0.1'
-        - 'astral-sh/setup-uv@v6.8.0'
+        - 'astral-sh/setup-uv@v10.3.3'
         - 'extractions/setup-just@v3.1.0'
 dependencies:
     'actions/cache@v6.1.0':
@@ -57,9 +57,9 @@ dependencies:
         repo_id: 986421638
         uses:
             - 'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6'
-    'astral-sh/setup-uv@v6.8.0':
-        ref: 'v6.8.0'
-        commit: 'sha1-d0cc045d04ccac9d8b7881df0226f9e82c39688e'
+    'astral-sh/setup-uv@v10.3.3':
+        ref: 'v10.3.3'
+        commit: 'sha1-68559e99cc807c1eb7e9238fd43a15bba460eec2'
         owner_id: 115962839
         repo_id: 846733598
     'codecov/codecov-action@v5.5.5':
