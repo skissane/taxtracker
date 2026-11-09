@@ -122,7 +122,7 @@ jobs:
       - name: Upload patch coverage report
         if: github.event_name == 'pull_request' && hashFiles('patch-coverage.md') != ''
         continue-on-error: true
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: patch-coverage
           path: patch-coverage.md
@@ -143,7 +143,7 @@ jobs:
 
       - name: Upload Docker image
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: docker-image
           path: lifetracker-image.tar
@@ -214,7 +214,7 @@ jobs:
       # Even if a screenshot test failed, the ones taken may show why.
       - name: Upload screenshots
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: screenshots
           path: screenshots/*.png
@@ -409,7 +409,7 @@ jobs:
       # For post-exolot to post to the PR.
       - name: Upload report
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: exolot
           path: exolot.md
