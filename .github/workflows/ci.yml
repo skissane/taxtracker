@@ -17,13 +17,13 @@ jobs:
       checks: read
 
     steps:
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6.8.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.13.5"
 
@@ -122,7 +122,7 @@ jobs:
       - name: Upload patch coverage report
         if: github.event_name == 'pull_request' && hashFiles('patch-coverage.md') != ''
         continue-on-error: true
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: patch-coverage
           path: patch-coverage.md
@@ -143,7 +143,7 @@ jobs:
 
       - name: Upload Docker image
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: docker-image
           path: lifetracker-image.tar
@@ -180,12 +180,12 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6.8.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.13.5"
 
@@ -214,7 +214,7 @@ jobs:
       # Even if a screenshot test failed, the ones taken may show why.
       - name: Upload screenshots
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: screenshots
           path: screenshots/*.png
@@ -253,12 +253,12 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6.8.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.13.5"
 
@@ -305,12 +305,12 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6.8.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.13.5"
 
@@ -357,14 +357,14 @@ jobs:
       # The PR's head rather than its merge with the base, so the findings'
       # line numbers and links match the PR's code. Full history so --diff-base
       # can find the lines the PR changes.
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6.8.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.13.5"
 
@@ -385,7 +385,7 @@ jobs:
           echo "version=$(uv run --no-sync python -c 'from exolot.server import DEFAULT_SERVER_VERSION as v; print(v)')" >> "$GITHUB_OUTPUT"
 
       - name: Cache language server
-        uses: actions/cache@v4.3.0
+        uses: actions/cache@v6.1.0
         with:
           path: .exolot-cache/servers
           key: exolot-server-${{ runner.os }}-${{ runner.arch }}-${{ steps.server.outputs.version }}
@@ -409,7 +409,7 @@ jobs:
       # For post-exolot to post to the PR.
       - name: Upload report
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: exolot
           path: exolot.md
@@ -434,12 +434,12 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6.8.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.13.5"
 
@@ -482,14 +482,14 @@ jobs:
     steps:
       # The PR's head, as for exolot, so line counts and links match the PR's
       # code. Full history for the merge base with the base branch.
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6.8.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.13.5"
 
@@ -526,7 +526,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
 
     steps:
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -570,7 +570,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.head_ref }}
           # Fetch the base branch and history too, for dependabot-relock's merge base.
@@ -578,7 +578,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6.8.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.13.5"
 
@@ -678,7 +678,7 @@ jobs:
         run: docker load -i lifetracker-image.tar
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3.7.0
+        uses: docker/login-action@v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -721,7 +721,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -739,7 +739,7 @@ jobs:
           FLY_APP: ${{ secrets.FLY_APP }}
           IMAGE: ${{ needs.publish.outputs.image }}
 
-      - uses: astral-sh/setup-uv@v6.8.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.13.5"
 
