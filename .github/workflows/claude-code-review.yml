@@ -56,7 +56,7 @@ jobs:
       kind: ${{ steps.route.outputs.kind }}
     steps:
       - name: Checkout the routing script
-        uses: actions/checkout@v4.4.0
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: scripts/claude_review_request.py
@@ -120,7 +120,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4.4.0
+        uses: actions/checkout@v7.0.1
         with:
           # claude-code-action sets up its own git credentials.
           persist-credentials: false

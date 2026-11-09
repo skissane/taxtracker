@@ -17,7 +17,7 @@ jobs:
       checks: read
 
     steps:
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -180,7 +180,7 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -253,7 +253,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -305,7 +305,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -357,7 +357,7 @@ jobs:
       # The PR's head rather than its merge with the base, so the findings'
       # line numbers and links match the PR's code. Full history so --diff-base
       # can find the lines the PR changes.
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -434,7 +434,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -482,7 +482,7 @@ jobs:
     steps:
       # The PR's head, as for exolot, so line counts and links match the PR's
       # code. Full history for the merge base with the base branch.
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -526,7 +526,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
 
     steps:
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -570,7 +570,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.head_ref }}
           # Fetch the base branch and history too, for dependabot-relock's merge base.
@@ -721,7 +721,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
