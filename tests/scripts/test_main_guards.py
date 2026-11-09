@@ -105,6 +105,12 @@ def test_comment_posters(
     assert "missing" in capsys.readouterr().err
 
 
+def test_claude_review_request(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(sys, "stdin", io.StringIO("@claude review"))
+    assert run_as_main(monkeypatch, "scripts.claude_review_request") == 0
+    assert capsys.readouterr().out == "review\n"
+
+
 def test_recreate_pr(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     # An invalid URL fails before anything runs gh.
     assert run_as_main(monkeypatch, "scripts.recreate_pr", "https://github.com/o/r/issues/1") == 1
