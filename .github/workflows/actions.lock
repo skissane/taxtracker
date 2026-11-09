@@ -12,7 +12,7 @@ workflows:
         - 'astral-sh/setup-uv@v10.3.3'
         - 'codecov/codecov-action@v7.1.1'
         - 'docker/login-action@v4.7.0'
-        - 'extractions/setup-just@v3.1.0'
+        - 'extractions/setup-just@v4.0.0'
         - 'superfly/flyctl-actions@1.6'
     '.github/workflows/claude-code-review.yml':
         - 'actions/checkout@v7.0.1'
@@ -23,7 +23,7 @@ workflows:
     '.github/workflows/fix.yml':
         - 'actions/checkout@v7.0.1'
         - 'astral-sh/setup-uv@v10.3.3'
-        - 'extractions/setup-just@v3.1.0'
+        - 'extractions/setup-just@v4.0.0'
 dependencies:
     'actions/cache@v6.1.0':
         ref: 'v6.1.0'
@@ -74,18 +74,18 @@ dependencies:
         commit: 'sha1-81c6f93d4bc991e510b342a00b419b3bb4efc5c6'
         owner_id: 5429470
         repo_id: 287743349
-    'extractions/setup-crate@4993624604c307fbca528d28a3c8b60fa5ecc859':
-        ref: 'v1.4.0'
-        commit: 'sha1-4993624604c307fbca528d28a3c8b60fa5ecc859'
+    'extractions/setup-crate@0551596312d4008a6dfbc4d3c38fa20eaef46d2d':
+        ref: 'v2.0.0'
+        commit: 'sha1-0551596312d4008a6dfbc4d3c38fa20eaef46d2d'
         owner_id: 64203070
         repo_id: 341105718
-    'extractions/setup-just@v3.1.0':
-        ref: 'v3.1.0'
-        commit: 'sha1-f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b'
+    'extractions/setup-just@v4.0.0':
+        ref: 'v4.0.0'
+        commit: 'sha1-53165ef7e734c5c07cb06b3c8e7b647c5aa16db3'
         owner_id: 64203070
         repo_id: 258510356
         uses:
-            - 'extractions/setup-crate@4993624604c307fbca528d28a3c8b60fa5ecc859'
+            - 'extractions/setup-crate@0551596312d4008a6dfbc4d3c38fa20eaef46d2d'
     'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6':
         ref: 'v2.2.0'
         commit: 'sha1-0c5077e51419868618aeaa5fe8019c62421857d6'
