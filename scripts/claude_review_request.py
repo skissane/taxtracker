@@ -1,6 +1,7 @@
-"""Decides which Claude workflow, if any, a GitHub comment or review is for.
+"""Decides which Claude workflow, if any, a GitHub comment, review or issue
+is for.
 
-Reads the comment's text from stdin and prints ``review`` if it asks for
+Reads its body from stdin and prints ``review`` if it asks for
 "@claude review", ``other`` if it's some other request to @claude, or
 ``none`` if it isn't one at all. ``claude-code-review.yml`` runs only for
 ``review``, and ``claude.yml`` for ``other`` (and for ``review`` on a plain
@@ -9,6 +10,7 @@ every request goes to exactly one of them.
 
 A request must start the text, with only whitespace before it, so quoting
 "@claude" mid-sentence, in backticks or in a blockquote never starts a run.
+An issue's title is never checked.
 
 Workflow expressions have no regex (only ``contains``, ``startsWith`` and
 ``endsWith``), hence this script. The workflows run it with the runner's own
