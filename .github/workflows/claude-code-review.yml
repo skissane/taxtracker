@@ -3,6 +3,12 @@ name: Claude Code Review
 on:
   issue_comment:
     types: [created]
+  # "@claude review" in a review comment or a submitted review also comes here,
+  # not to claude.yml, which skips it.
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
   # Self-test: a PR that changes this workflow runs its own copy of it, so the
   # change can be checked before it reaches master. See SELF_TEST_PROMPT.
   pull_request:
@@ -18,8 +24,9 @@ concurrency:
 
 jobs:
   claude-review:
-    # Only run on PR comments (not plain issues) containing the trigger phrase,
-    # and only for commenters trusted enough to grant write-scoped access to the token.
+    # Only run on PR comments (not plain issues), review comments and reviews
+    # containing the trigger phrase, and only for commenters trusted enough to
+    # grant write-scoped access to the token.
     # Self-tests run only for PRs from this repo, as fork PRs get no secrets, and not
     # when Dependabot triggers them: claude-code-action refuses bot actors, and
     # Dependabot's runs get only Dependabot secrets, so no CLAUDE_CODE_OAUTH_TOKEN.
@@ -28,6 +35,12 @@ jobs:
       github.event.issue.pull_request &&
       contains(github.event.comment.body, '@claude review') &&
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' &&
+      contains(github.event.comment.body, '@claude review') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review' &&
+      contains(github.event.review.body, '@claude review') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.review.author_association)) ||
       (github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor != 'dependabot[bot]')
@@ -56,12 +69,12 @@ jobs:
            and say whether it was blocked.
         4. Say whether the Bash sandbox started, and if not, what error you saw.
         5. Try `env` once, and say whether it was blocked. No allowed pattern shows
-           environment variables, so it should be, and then mark this check pass. This
-           checks only the allowlist: no allowed command can show whether the scrub works,
-           so say that the scrub itself is unverified. Only if
-           it isn't blocked, say whether CLAUDE_CODE_OAUTH_TOKEN, GITHUB_TOKEN, GH_TOKEN
-           and ACTIONS_ID_TOKEN_REQUEST_TOKEN are set, never printing their values, and
-           report the allowlist letting it run as a problem.
+           environment variables, so it should be. If it was blocked, mark this check
+           pass; if it ran, mark it fail, report the allowlist letting it run as a
+           problem, and say whether CLAUDE_CODE_OAUTH_TOKEN, GITHUB_TOKEN, GH_TOKEN and
+           ACTIONS_ID_TOKEN_REQUEST_TOKEN are set, never printing their values. Either
+           way, this checks only the allowlist: no allowed command can show whether the
+           scrub works, so say that the scrub itself is unverified.
         6. Note anything in the workflow that looks likely to stop a normal review working.
 
         Your final message is posted as a comment on the PR, so make it a short Markdown
