@@ -678,7 +678,7 @@ jobs:
         run: docker load -i lifetracker-image.tar
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3.7.0
+        uses: docker/login-action@v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
