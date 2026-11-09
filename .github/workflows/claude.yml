@@ -23,18 +23,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  claude:
-    # "@claude review" in a PR comment, review comment or review goes to
-    # claude-code-review.yml instead.
+  # Decides whether a comment or review asks for "@claude review", by the rule in
+  # scripts/claude_review_request.py, which claude-code-review.yml shares; those
+  # go there instead. Workflow expressions have no regex, hence a job. On a
+  # self-test or an issue it runs too, with no text, so the self-test covers it.
+  route:
     # Self-tests skip Dependabot's runs: claude-code-action refuses bot actors, and
     # Dependabot's runs get only Dependabot secrets, so no CLAUDE_CODE_OAUTH_TOKEN.
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && !contains(github.event.comment.body, '@claude review')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') && !contains(github.event.comment.body, '@claude review')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude') && !contains(github.event.review.body, '@claude review')) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      kind: ${{ steps.route.outputs.kind }}
+    steps:
+      - name: Checkout the routing script
+        uses: actions/checkout@v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/claude_review_request.py
+          sparse-checkout-cone-mode: false
+
+      - name: Route
+        id: route
+        env:
+          TEXT: ${{ github.event.comment.body || github.event.review.body }}
+        run: |
+          kind=$(printf '%s' "$TEXT" | python3 scripts/claude_review_request.py)
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+
+  claude:
+    needs: route
+    # claude-code-review.yml handles review requests on PRs only, so one on a
+    # plain issue's comment still comes here.
+    if: |
+      !cancelled() && needs.route.result == 'success' &&
+      (needs.route.outputs.kind == 'other' ||
+      (github.event_name == 'issue_comment' && !github.event.issue.pull_request))
     runs-on: ubuntu-latest
     outputs:
       self-test-report: ${{ steps.self-test-report.outputs.report }}
