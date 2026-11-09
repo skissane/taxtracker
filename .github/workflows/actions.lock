@@ -11,7 +11,7 @@ workflows:
         - 'actions/upload-artifact@v4.6.2'
         - 'astral-sh/setup-uv@v6.8.0'
         - 'codecov/codecov-action@v5.5.5'
-        - 'docker/login-action@v3.7.0'
+        - 'docker/login-action@v4.7.0'
         - 'extractions/setup-just@v3.1.0'
         - 'superfly/flyctl-actions@1.6'
     '.github/workflows/claude-code-review.yml':
@@ -69,9 +69,9 @@ dependencies:
         repo_id: 200299178
         uses:
             - 'actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea'
-    'docker/login-action@v3.7.0':
-        ref: 'v3.7.0'
-        commit: 'sha1-c94ce9fb468520275223c153574b00df6fe4bcc9'
+    'docker/login-action@v4.7.0':
+        ref: 'v4.7.0'
+        commit: 'sha1-81c6f93d4bc991e510b342a00b419b3bb4efc5c6'
         owner_id: 5429470
         repo_id: 287743349
     'extractions/setup-crate@4993624604c307fbca528d28a3c8b60fa5ecc859':
