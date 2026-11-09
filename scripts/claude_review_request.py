@@ -3,8 +3,9 @@
 Reads the comment's text from stdin and prints ``review`` if it asks for
 "@claude review", ``other`` if it's some other request to @claude, or
 ``none`` if it isn't one at all. ``claude-code-review.yml`` runs only for
-``review``, and ``claude.yml`` only for ``other``, so the two workflows share
-one rule and every request goes to exactly one of them.
+``review``, and ``claude.yml`` for ``other`` (and for ``review`` on a plain
+issue, which has no PR to review), so the two workflows share one rule and
+every request goes to exactly one of them.
 
 A request must start the text, with only whitespace before it, so quoting
 "@claude" mid-sentence, in backticks or in a blockquote never starts a run.
