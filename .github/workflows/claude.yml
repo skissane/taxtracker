@@ -23,16 +23,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  claude:
+  # Decides whether a comment, review or new issue's body is a request to
+  # @claude at all (it must start with "@claude"; an issue's title never
+  # counts), and whether it asks for "@claude review", by the rule in
+  # scripts/claude_review_request.py, which claude-code-review.yml shares;
+  # review requests on PRs go there instead. Workflow expressions have no
+  # regex, hence a job. On a self-test it runs too, with no text, so the
+  # self-test covers it.
+  route:
     # Self-tests skip Dependabot's runs: claude-code-action refuses bot actors, and
     # Dependabot's runs get only Dependabot secrets, so no CLAUDE_CODE_OAUTH_TOKEN.
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && !contains(github.event.comment.body, '@claude review')) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
+      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude')) ||
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      kind: ${{ steps.route.outputs.kind }}
+    steps:
+      - name: Checkout the routing script
+        uses: actions/checkout@v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/claude_review_request.py
+          sparse-checkout-cone-mode: false
+
+      - name: Route
+        id: route
+        env:
+          TEXT: ${{ github.event.comment.body || github.event.review.body || github.event.issue.body }}
+        run: |
+          kind=$(printf '%s' "$TEXT" | python3 scripts/claude_review_request.py)
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+
+  claude:
+    needs: route
+    # claude-code-review.yml handles review requests on PRs only, so one in a
+    # plain issue's body or comment still comes here.
+    if: |
+      !cancelled() && needs.route.result == 'success' &&
+      (github.event_name == 'pull_request' || needs.route.outputs.kind == 'other' ||
+      (needs.route.outputs.kind == 'review' && (github.event_name == 'issues' ||
+      (github.event_name == 'issue_comment' && !github.event.issue.pull_request))))
     runs-on: ubuntu-latest
     outputs:
       self-test-report: ${{ steps.self-test-report.outputs.report }}
@@ -59,12 +96,12 @@ jobs:
            and say whether it was blocked.
         4. Say whether the Bash sandbox started, and if not, what error you saw.
         5. Try `env` once, and say whether it was blocked. No allowed pattern shows
-           environment variables, so it should be, and then mark this check pass. This
-           checks only the allowlist: no allowed command can show whether the scrub works,
-           so say that the scrub itself is unverified. Only if
-           it isn't blocked, say whether CLAUDE_CODE_OAUTH_TOKEN, GITHUB_TOKEN, GH_TOKEN
-           and ACTIONS_ID_TOKEN_REQUEST_TOKEN are set, never printing their values, and
-           report the allowlist letting it run as a problem.
+           environment variables, so it should be. If it was blocked, mark this check
+           pass; if it ran, mark it fail, report the allowlist letting it run as a
+           problem, and say whether CLAUDE_CODE_OAUTH_TOKEN, GITHUB_TOKEN, GH_TOKEN and
+           ACTIONS_ID_TOKEN_REQUEST_TOKEN are set, never printing their values. Either
+           way, this checks only the allowlist: no allowed command can show whether the
+           scrub works, so say that the scrub itself is unverified.
         6. Note anything in the workflow that looks likely to stop a normal "@claude" run working.
 
         Your final message is posted as a comment on the PR, so make it a short Markdown
