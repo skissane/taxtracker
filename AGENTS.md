@@ -33,6 +33,7 @@ Like `dependabot-fix`, it checks out with `persist-credentials: false`, as `just
 If the branch moves after checkout, the push isn't a fast-forward and fails.
 
 **Claude workflows:** `.github/workflows/claude.yml` runs claude-code-action when `@claude` is in a PR or issue comment, a review comment, a submitted review, or the body of a newly opened or assigned issue, and `claude-code-review.yml` reviews a PR when its owner, a member or a collaborator writes `@claude review` in a PR comment, a review comment or a submitted review (ported from exolot), which `claude.yml` then skips.
+A review request on a plain issue, in a comment or a new issue's body, goes to `claude.yml` instead, as there's no PR to review.
 Which one a comment goes to, if either, is decided by `scripts/claude_review_request.py` (stdlib-only), which both workflows run in a `route` job first, as workflow expressions have no regex: a request must start the comment, with only whitespace before `@claude`, which must be followed by whitespace, `.,!?;:` or the end, ignoring case; it's a review request if `review` is the next word, followed likewise.
 So `@claude` quoted mid-sentence, in backticks or in a blockquote starts nothing, and `@claude reviewing` goes to `claude.yml`; an issue's body follows the same rule, and its title never counts.
 The `route` jobs run it with the runner's own `python3` (from a sparse checkout of just that file), so it must run on the runner image's Python, not only 3.14; on a self-test they run it on empty text, so the self-test covers them too.
