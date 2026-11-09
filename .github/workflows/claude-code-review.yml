@@ -23,27 +23,58 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  claude-review:
-    # Only run on PR comments (not plain issues), review comments and reviews
-    # containing the trigger phrase, and only for commenters trusted enough to
-    # grant write-scoped access to the token.
+  # Decides whether the comment or review asks for "@claude review" (it must
+  # start with it), by the rule in scripts/claude_review_request.py, which
+  # claude.yml shares, so each request goes to exactly one of the two workflows.
+  # Workflow expressions have no regex, hence a job. On a self-test it runs too,
+  # with no text, so the self-test covers it.
+  route:
+    # Only PR comments (not plain issues), review comments and reviews that
+    # mention @claude, and only from commenters trusted enough to grant
+    # write-scoped access to the token.
     # Self-tests run only for PRs from this repo, as fork PRs get no secrets, and not
     # when Dependabot triggers them: claude-code-action refuses bot actors, and
     # Dependabot's runs get only Dependabot secrets, so no CLAUDE_CODE_OAUTH_TOKEN.
     if: |
       (github.event_name == 'issue_comment' &&
       github.event.issue.pull_request &&
-      contains(github.event.comment.body, '@claude review') &&
+      contains(github.event.comment.body, '@claude') &&
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
       (github.event_name == 'pull_request_review_comment' &&
-      contains(github.event.comment.body, '@claude review') &&
+      contains(github.event.comment.body, '@claude') &&
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
       (github.event_name == 'pull_request_review' &&
-      contains(github.event.review.body, '@claude review') &&
+      contains(github.event.review.body, '@claude') &&
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.review.author_association)) ||
       (github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      kind: ${{ steps.route.outputs.kind }}
+    steps:
+      - name: Checkout the routing script
+        uses: actions/checkout@v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/claude_review_request.py
+          sparse-checkout-cone-mode: false
+
+      - name: Route
+        id: route
+        env:
+          TEXT: ${{ github.event.comment.body || github.event.review.body }}
+        run: |
+          kind=$(printf '%s' "$TEXT" | python3 scripts/claude_review_request.py)
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+
+  claude-review:
+    needs: route
+    if: |
+      !cancelled() && needs.route.result == 'success' &&
+      (github.event_name == 'pull_request' || needs.route.outputs.kind == 'review')
 
     runs-on: ubuntu-latest
     env:
