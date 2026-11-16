@@ -603,7 +603,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "coverage", specifier = ">=7.17.0" },
+    { name = "coverage", specifier = ">=7.17.2" },
     { name = "diff-cover", specifier = ">=11.0.0" },
     { name = "django-stubs", extras = ["compatible-mypy"], specifier = ">=6.1.2" },
     { name = "djlint", specifier = ">=1.49.2" },
