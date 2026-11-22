@@ -477,13 +477,13 @@ wheels = [
 
 [[package]]
 name = "jactionlint"
-version = "2.5.0"
+version = "2.6.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/89/25/b07ca13250a345874829e649d1465eff24599ec78dd79d92c5f7fe78c540/jactionlint-2.5.0-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:39cf4c07e569e477130825f569fd412bbb7f5d012ae9fccd0ae80c2856cba4b3", size = 19972131, upload-time = "2026-11-05T17:53:22.775Z" },
-    { url = "https://files.pythonhosted.org/packages/58/2e/e03a7508b3f99abf089648df0164eee8b9e3a406c83511ee9f742ca10500/jactionlint-2.5.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:f63c914412009c6ab4afe2bf3ce6eed657d3b12dc8ce34d285f8094c9b164460", size = 18550849, upload-time = "2026-11-05T17:53:25.502Z" },
-    { url = "https://files.pythonhosted.org/packages/c4/dc/4d0c9136d21df009e1216fb41b80a9d15b2bc83adb0d69328f32b4dd0208/jactionlint-2.5.0-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:93c9f79e0afac55f028bb835fbb9c8fe8dc69a04304d73d12ce4460acfc8f7cd", size = 18160502, upload-time = "2026-11-05T17:53:27.829Z" },
-    { url = "https://files.pythonhosted.org/packages/de/f1/88ce4c5fedf7fbf2307fba73781e4e001a654327edc19f89ae0b67500a55/jactionlint-2.5.0-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:ee30a96bfd64fd6116e23e5008429c5c4435284c877d00fbf00e0a24fb29b5f9", size = 19647350, upload-time = "2026-11-05T17:53:30.621Z" },
+    { url = "https://files.pythonhosted.org/packages/01/7d/5299d354518eed2cc12c7cebca9b17cd46e601f508fab94a33f4b3c57b78/jactionlint-2.6.0-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:55a0c67cdd228910aa5d520a6935205f09aade3a02acea2119b41f86605b7c1d", size = 20113297, upload-time = "2026-11-12T17:59:05.038Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/64/4d4de1263fbf08939e878c664aa2e17b20c33a3922d3d2bd5b61623b0f54/jactionlint-2.6.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:53ff5a9b211d235b29fd747de70b6ce0316d40f302b1ffd8a151c57d4494ad54", size = 18684870, upload-time = "2026-11-12T17:59:07.544Z" },
+    { url = "https://files.pythonhosted.org/packages/74/52/b63faf525184d25107b99a617b02b5f0bdd478afa19907cb5119c188a5cd/jactionlint-2.6.0-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:831093514388f37afee588aaf1a33cb1fd21ddd597a3d545a79815a4e93281dd", size = 18291687, upload-time = "2026-11-12T17:59:10.13Z" },
+    { url = "https://files.pythonhosted.org/packages/91/d6/c9d3eb17364b50d574e9abd280ea399aeca95c0dcf26abd0bc0ed26c4c69/jactionlint-2.6.0-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:b8b16e1e1f13411a7611cec18705e3211c4376fd5cb8b073dae4332c07abcd06", size = 19782631, upload-time = "2026-11-12T17:59:15.712Z" },
 ]
 
 [[package]]
