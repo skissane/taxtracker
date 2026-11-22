@@ -43,7 +43,7 @@ dev = [
     "ruff>=0.17.4",
 ]
 screenshots = [
-    "playwright>=1.64.1",
+    "playwright>=1.65.2",
 ]
 
 # Files `just long-files` reports when they're over their limit (see AGENTS.md):
