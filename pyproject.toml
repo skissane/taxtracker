@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = "~=3.14.9"
 dependencies = [
     "boto3>=1.43.126",
-    "click>=8.5.0",
+    "click>=8.5.1",
     "django>=6.1.2",
     "django-google-sso>=10.0.0",
     "django-stubs-ext>=6.1.2",
@@ -30,17 +30,17 @@ packages = ["src/lifetracker"]
 
 [dependency-groups]
 dev = [
-    "coverage>=7.17.0",
+    "coverage>=7.17.2",
     "diff-cover>=11.0.0",
     "django-stubs[compatible-mypy]>=6.1.2",
     "djlint>=1.49.2",
     "exolot>=0.5.0",
-    "jactionlint>=2.4.0",
+    "jactionlint>=2.5.0",
     "pytest>=9.2.0",
     "pytest-cov>=7.1.0",
     "pytest-django>=4.14.0",
     "pytest-xdist>=3.8.0",
-    "ruff>=0.17.3",
+    "ruff>=0.17.5",
 ]
 screenshots = [
     "playwright>=1.64.1",
