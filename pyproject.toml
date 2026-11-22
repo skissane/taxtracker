@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = "~=3.14.9"
 dependencies = [
     "boto3>=1.43.123",
-    "click>=8.5.0",
+    "click>=8.5.1",
     "django>=6.1.2",
     "django-google-sso>=10.0.0",
     "django-stubs-ext>=6.1.2",
