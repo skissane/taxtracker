@@ -28,7 +28,7 @@ dist/
 htmlcov/
 coverage.xml
 patch-coverage.md
-junit.xml
+patch-coverage.json
 
 # Environments
 .env

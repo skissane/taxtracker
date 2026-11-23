@@ -10,16 +10,17 @@ workflows:
         - 'actions/download-artifact@v8.0.2'
         - 'actions/upload-artifact@v7.0.2'
         - 'astral-sh/setup-uv@v10.3.3'
-        - 'codecov/codecov-action@v7.1.1'
         - 'docker/login-action@v4.8.0'
         - 'extractions/setup-just@v4.0.0'
         - 'superfly/flyctl-actions@1.6'
     '.github/workflows/claude-code-review.yml':
         - 'actions/checkout@v7.0.1'
         - 'anthropics/claude-code-action@v1.0.276'
+        - 'sjktools/repoutils@v0.5.4'
     '.github/workflows/claude.yml':
         - 'actions/checkout@v7.0.1'
         - 'anthropics/claude-code-action@v1.0.276'
+        - 'sjktools/repoutils@v0.5.4'
     '.github/workflows/fix.yml':
         - 'actions/checkout@v7.0.1'
         - 'astral-sh/setup-uv@v10.3.3'
@@ -40,11 +41,6 @@ dependencies:
         commit: 'sha1-9000827ccba6bdab643e8b6fd33ac0654aef8333'
         owner_id: 44036562
         repo_id: 192626254
-    'actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd':
-        ref: 'v8.0.0'
-        commit: 'sha1-ed597411d8f924073f98dfc5c65a23a2325f34cd'
-        owner_id: 44036562
-        repo_id: 205262760
     'actions/upload-artifact@v7.0.2':
         ref: 'v7.0.2'
         commit: 'sha1-cf430e030ddbb5b0abf93d22962f4752f3646cd9'
@@ -62,13 +58,6 @@ dependencies:
         commit: 'sha1-68559e99cc807c1eb7e9238fd43a15bba460eec2'
         owner_id: 115962839
         repo_id: 846733598
-    'codecov/codecov-action@v7.1.1':
-        ref: 'v7.1.1'
-        commit: 'sha1-303a32d7a59b442fa8d48b6a1cc6825c09c847a5'
-        owner_id: 8226205
-        repo_id: 200299178
-        uses:
-            - 'actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd'
     'docker/login-action@v4.8.0':
         ref: 'v4.8.0'
         commit: 'sha1-8aa5831fb8d48d8f76594c7ddde61ae58019f550'
@@ -91,6 +80,11 @@ dependencies:
         commit: 'sha1-0c5077e51419868618aeaa5fe8019c62421857d6'
         owner_id: 108928776
         repo_id: 512644635
+    'sjktools/repoutils@v0.5.4':
+        ref: 'v0.5.4'
+        commit: 'sha1-a0fde52890ec1ec2352133ed266b4f69a474e052'
+        owner_id: 354208802
+        repo_id: 1452432712
     'superfly/flyctl-actions@1.6':
         ref: '1.6'
         commit: 'sha1-ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1'

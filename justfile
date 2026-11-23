@@ -1,8 +1,17 @@
 set minimum-version := '1.58.0'
+
+# Runs repoutils (see AGENTS.md) with nothing else installed, for recipes CI
+# runs with a write-capable token or on a Dependabot branch: --only-group
+# installs only the repoutils group, checking its hashes against uv.lock, and
+# doesn't install the project or its other dependencies. --project, so a recipe
+# run from another directory still uses this checkout's uv.lock.
+repoutils := "uv run --project " + quote(justfile_directory()) + " --only-group repoutils repoutils"
+
 # Dummy assignment, so every recipe run sets up the repo's local Git config
-# (see scripts/git-config-setup.sh). `eager` makes just evaluate it even though
-# nothing uses it, whether or not `set lazy` is on (casey/just#3759).
-eager _ := shell('./scripts/git-config-setup.sh')
+# (see `repoutils git-config-setup`), e.g. blame.ignoreRevsFile for
+# .git-blame-ignore-revs. `eager` makes just evaluate it even though nothing
+# uses it, whether or not `set lazy` is on (casey/just#3759).
+eager _ := shell(repoutils + ' git-config-setup')
 
 # List available recipes
 default:
@@ -18,35 +27,35 @@ sync:
 
 # Check that dependency minimums in pyproject.toml match uv.lock
 requirements-check:
-    uv run --no-project python scripts/requirements_min_versions.py check
+    {{ repoutils }} requirements-min-versions check
 
 # Rewrite dependency minimums in pyproject.toml to the versions in uv.lock
 requirements-fix:
-    uv run --no-project python scripts/requirements_min_versions.py fix
+    {{ repoutils }} requirements-min-versions fix
 
 # Re-lock a Dependabot branch's uv.lock with this uv, from the base ref's uv.lock
 dependabot-relock base:
-    uv run --no-project python scripts/dependabot_relock.py {{ base }}
+    {{ repoutils }} dependabot-relock {{ quote(base) }}
 
-# Check that uv.lock only has wheels for supported OS/CPU combinations
+# Check that uv.lock only has wheels for the platforms pyproject.toml allows
 lock-os-arch-check:
-    uv run --no-project python scripts/validate_uv_lock_os_arch.py
+    uv run repoutils check-lock-platforms
 
 # Check Git-tracked text files for trailing whitespace and bad newlines
 whitespace-check:
-    uv run --no-project python scripts/check_whitespace.py
+    uv run repoutils check-whitespace
 
 # Check AGENTS.md and README.md stay one sentence per line
 sentence-per-line-check:
-    uv run --no-project python scripts/check_sentence_per_line.py
+    uv run repoutils check-sentence-per-line
 
 # Check that screenshots/ has nothing tracked but its unchanged .gitignore
 screenshots-dir-check:
-    uv run --no-project python scripts/check_screenshots_dir.py
+    uv run repoutils check-screenshots-dir
 
 # Check .git-blame-ignore-revs lists real commits that are ancestors of target
 blame-ignore-revs-check target="HEAD":
-    uv run --no-project python scripts/check_blame_ignore_revs.py {{ quote(target) }}
+    uv run repoutils check-blame-ignore-revs {{ quote(target) }}
 
 # Lint Python code with ruff
 lint:
@@ -87,9 +96,10 @@ fmt-templates:
 test:
     uv run --group dev pytest
 
-# Run the test suite in parallel, print a coverage report, and write coverage.xml and junit.xml
-coverage:
-    uv run --group dev pytest --cov=src/lifetracker --cov=scripts --cov-report=term --cov-report=xml --junitxml=junit.xml -o junit_family=legacy
+# Run the test suite in parallel, print a coverage report, and write coverage.xml (extra args go to pytest)
+[positional-arguments]
+coverage *args:
+    uv run --group dev pytest --cov=src/lifetracker --cov=scripts --cov-report=term --cov-report=xml "$@"
 
 # patch-coverage's first argument is the branch to compare with (default:
 # origin/$GITHUB_BASE_REF on a PR, else origin/master); any more go to
@@ -124,19 +134,32 @@ screenshots:
 # Post screenshots/ to a PR as a comment, or update the existing one
 [positional-arguments]
 screenshots-post *args:
-    uv run --no-project python -m scripts.post_screenshots "$@"
+    {{ repoutils }} post-screenshots "$@"
 
 # patch-coverage-post's arguments are a PR number and, optionally, --report
 # (default patch-coverage.md, from `just patch-coverage '' --format
-# markdown:patch-coverage.md`), --commit and --run-url (see --help for the
-# rest); like screenshots-post, it comments with $GITHUB_TOKEN (default `gh auth
-# token`), posts nothing unless --commit is still the PR's head, and edits its
-# previous comment rather than posting another.
+# markdown:patch-coverage.md`), --coverage-report and --base (to show the
+# project's coverage and its change from the base commit's coverage/project
+# status), --commit and --run-url (see --help for the rest); like
+# screenshots-post, it comments with $GITHUB_TOKEN (default `gh auth token`),
+# posts nothing unless --commit is still the PR's head, and edits its previous
+# comment rather than posting another. --output <file> writes the comment to a
+# file instead, e.g. the job summary.
 
 # Post a patch coverage report to a PR as a comment, or update the existing one
 [positional-arguments]
 patch-coverage-post *args:
-    uv run --no-project python -m scripts.post_patch_coverage "$@"
+    {{ repoutils }} post-patch-coverage "$@"
+
+# Post the coverage in coverage.xml (and --patch-report) as commit statuses on a commit (argument: its SHA)
+[positional-arguments]
+coverage-status-post *args:
+    {{ repoutils }} post-coverage-status "$@"
+
+# Wait (up to 10 minutes) for a PR base commit's coverage/project status: arguments are owner/repo and the base SHA
+[positional-arguments]
+wait-for-base-coverage *args:
+    {{ repoutils }} wait-for-base-coverage "$@"
 
 # Run exolot on this repo's code; extra args go to exolot, e.g. --exit-zero. Like
 # `just integration` in exolot, it downloads the language server (about 250 MB)
@@ -147,25 +170,22 @@ patch-coverage-post *args:
 exolot *args:
     uv run --group dev exolot "$@"
 
-# --no-project, like patch-coverage-post, as CI runs it with a write-capable
-# token; the script uses only the stdlib, so the project isn't installed.
-
 # Post a `just exolot --format github-comment` report to a PR, hiding the ones posted before: arguments are the PR number and the report
 [positional-arguments]
 exolot-post *args:
-    uv run --no-project python -m scripts.post_exolot_findings "$@"
+    {{ repoutils }} post-comment --name exolot-findings --hide-previous "$@"
 
 # long-files' options are --base (default origin/$GITHUB_BASE_REF, else
 # origin/master; files the HEAD's working tree changes since its merge base
 # with it are listed first) and --post <PR> to comment instead of printing,
 # editing the previous comment, with $GITHUB_TOKEN (default `gh auth
-# token`); see --help. Like exolot-post it uses only the stdlib, as CI runs it
-# with a write-capable token.
+# token`); see --help. Like exolot-post it installs only repoutils, as CI runs
+# it with a write-capable token.
 
 # List files over pyproject.toml's line limit as Markdown, or post that to a PR
 [positional-arguments]
 long-files *args:
-    uv run --no-project python -m scripts.long_files "$@"
+    {{ repoutils }} long-files "$@"
 
 # Build the container image
 docker-build:
@@ -272,11 +292,19 @@ lint-workflows:
 
 # Check that every workflow pins the uv and just versions the project requires, and the Dockerfile the same uv
 check-pins:
-    uv run --no-project python -m scripts.check_pins
+    uv run repoutils check-pins
 
 # Check that every actions/checkout step sets persist-credentials, so none keeps its token by default
 check-checkout-credentials:
-    uv run --no-project python -m scripts.check_checkout_credentials
+    uv run repoutils check-checkout-credentials
+
+# Check that the workflows use exactly the secrets pyproject.toml lists
+secrets-workflows-check:
+    uv run repoutils secrets check-workflows
+
+# Check that the workflows use exactly the variables pyproject.toml lists
+variables-workflows-check:
+    uv run repoutils variables check-workflows
 
 # Format the justfile with just's built-in formatter
 just-fmt:
@@ -286,8 +314,8 @@ just-fmt:
 just-fmt-check:
     {{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} --fmt --check
 
-# Run every whitespace, sentence-per-line, screenshots/, blame-ignore-revs, ruff, mypy, djlint, jactionlint, pin, checkout and justfile format check (no fixes, no tests)
-check: whitespace-check sentence-per-line-check screenshots-dir-check blame-ignore-revs-check lint fmt-check mypy lint-templates fmt-check-templates lint-workflows check-pins check-checkout-credentials just-fmt-check
+# Run every whitespace, sentence-per-line, screenshots/, blame-ignore-revs, ruff, mypy, djlint, jactionlint, pin, checkout, secrets, variables and justfile format check (no fixes, no tests)
+check: whitespace-check sentence-per-line-check screenshots-dir-check blame-ignore-revs-check lint fmt-check mypy lint-templates fmt-check-templates lint-workflows check-pins check-checkout-credentials secrets-workflows-check variables-workflows-check just-fmt-check
 
 # Autofix lint issues and reformat code/templates and the justfile
 fix: lint-fix fmt fmt-templates just-fmt

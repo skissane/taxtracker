@@ -29,7 +29,12 @@ build-backend = "hatchling.build"
 packages = ["src/lifetracker"]
 
 [dependency-groups]
+# Repository checks and CI helpers (see AGENTS.md). Its own group, so CI jobs
+# that hold a write-capable token can install it alone, hash-checked against
+# uv.lock, with `uv run --only-group repoutils`.
+repoutils = ["repoutils>=0.5.4"]
 dev = [
+    { include-group = "repoutils" },
     "coverage>=7.17.3",
     "diff-cover>=11.0.2",
     "django-stubs[compatible-mypy]>=6.1.2",
@@ -46,15 +51,39 @@ screenshots = [
     "playwright>=1.65.2",
 ]
 
+# Settings for repoutils' commands (see AGENTS.md). The comment prefix keeps
+# the markers the PR comments had before repoutils, e.g.
+# <!-- lifetracker-patch-coverage -->, so they're still found and edited.
+[tool.repoutils]
+comment-prefix = "lifetracker"
+default-branch = "master"
+
 # Files `just long-files` reports when they're over their limit (see AGENTS.md):
 # tracked files matching an `include` glob and no `exclude` one (`*` matches
 # `/` too). `limits` maps globs to their own limit, the first match winning
 # over `limit`, e.g. "tests/*" = 700.
-[tool.lifetracker.long-files]
+[tool.repoutils.long-files]
 include = ["*.py"]
 exclude = ["*/migrations/*"]
 limit = 500
 limits = {}
+policy = """\
+**For information only.** We aim for files under the limit, but only split one where splitting makes the code \
+better, e.g. moving out a cohesive piece that has no reason to sit there, not just to get under the number. \
+A long file that is already one cohesive unit can stay as it is, and needs no reply or explanation. \
+See [AGENTS.md](https://github.com/skissane/taxtracker/blob/master/AGENTS.md) for more."""
+
+# The platforms uv.lock may have wheels for, as [tool.uv] environments allows
+# (`just lock-os-arch-check`). uv keeps iOS and Emscripten wheels despite
+# environments, so they're tolerated.
+[tool.repoutils.lock-platforms]
+supported = ["any", "linux:x86_64", "linux:aarch64", "macosx"]
+tolerated = ["ios", "pyemscripten"]
+
+# The secrets the workflows use, which `just secrets-workflows-check` checks.
+[tool.repoutils.secrets]
+actions = ["AUTOFIX_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "FLY_API_TOKEN", "FLY_APP", "SCREENSHOTS_TOKEN"]
+dependabot = ["DEPENDABOT_FIX_TOKEN"]
 
 # The policy at the top of the exolot PR comment (see AGENTS.md).
 [tool.exolot]
