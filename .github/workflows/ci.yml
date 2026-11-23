@@ -177,10 +177,22 @@ jobs:
       # The comment post-patch-coverage posts, in the job summary, so it's
       # there for fork and Dependabot PRs too, which can't post it.
       - name: Summarise coverage
-        run: just patch-coverage-post --output "$GITHUB_STEP_SUMMARY" --coverage-report coverage.xml ${BASE_SHA:+--base "$BASE_SHA"}
+        run: |
+          trap 'mkdir -p "$RUNNER_TEMP/step-summaries" && cp "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/step-summaries/patch-coverage.md"' EXIT
+          just patch-coverage-post --output "$GITHUB_STEP_SUMMARY" --coverage-report coverage.xml ${BASE_SHA:+--base "$BASE_SHA"}
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GITHUB_TOKEN: ${{ github.token }}
+
+      # GitHub's API doesn't serve step summaries, so each step that writes one
+      # copies it to step-summaries/ for this artifact (see AGENTS.md).
+      - name: Upload the step summaries
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: step-summaries-${{ github.job }}
+          path: ${{ runner.temp }}/step-summaries/
+          if-no-files-found: ignore
 
   # Run `just screenshots` and keep the PNGs as a workflow artifact, for eyeballing
   # UI changes from the run's summary page; post-screenshots then posts them to the
@@ -495,6 +507,7 @@ jobs:
       # on the PR's diff (changed lines first, as GitHub shows only 10 per type).
       - name: Analyze with exolot
         run: |
+          trap 'mkdir -p "$RUNNER_TEMP/step-summaries" && cp "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/step-summaries/exolot.md"' EXIT
           args=(--exit-zero --format github-comment --annotations)
           if [ -n "$BASE_REF" ]; then
             args+=(--diff-base "origin/${BASE_REF}")
@@ -512,6 +525,16 @@ jobs:
           name: exolot
           path: exolot.md
           retention-days: 14
+
+      # GitHub's API doesn't serve step summaries, so each step that writes one
+      # copies it to step-summaries/ for this artifact (see AGENTS.md).
+      - name: Upload the step summaries
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: step-summaries-${{ github.job }}
+          path: ${{ runner.temp }}/step-summaries/
+          if-no-files-found: ignore
 
   # Posts the exolot job's report to the PR as a new github-actions[bot]
   # comment, and hides the ones earlier runs posted as outdated. The same
@@ -620,7 +643,9 @@ jobs:
         working-directory: head
         env:
           BASE: ${{ github.base_ref && format('origin/{0}', github.base_ref) || '' }}
-        run: just --justfile ../justfile long-files --base "$BASE" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          trap 'mkdir -p "$RUNNER_TEMP/step-summaries" && cp "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/step-summaries/long-files.md"' EXIT
+          just --justfile ../justfile long-files --base "$BASE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Post report to the PR
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
@@ -632,6 +657,16 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         # GITHUB_TOKEN can't look up its own login, so name it.
         run: just --justfile ../justfile long-files --base "$BASE" --commit "$HEAD_SHA" --post "$PR_NUMBER" --author 'github-actions[bot]'
+
+      # GitHub's API doesn't serve step summaries, so each step that writes one
+      # copies it to step-summaries/ for this artifact (see AGENTS.md).
+      - name: Upload the step summaries
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: step-summaries-${{ github.job }}
+          path: ${{ runner.temp }}/step-summaries/
+          if-no-files-found: ignore
 
   # Checks .github/workflows/actions.lock, which pins every action the
   # workflows use, transitive ones included, to a commit.

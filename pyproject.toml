@@ -73,6 +73,32 @@ better, e.g. moving out a cohesive piece that has no reason to sit there, not ju
 A long file that is already one cohesive unit can stay as it is, and needs no reply or explanation. \
 See [AGENTS.md](https://github.com/skissane/taxtracker/blob/master/AGENTS.md) for more."""
 
+# The suppression comments `just added-strings` points out when a PR adds them
+# (see AGENTS.md). Regexes rather than plain strings, so that only a comment
+# matches, not a string literal or test data naming one: only whole string
+# literals (triple-quoted ones on one line too) come before the #, matched
+# possessively so a string isn't reread as shorter ones around a #, and the
+# comment can follow an earlier one, as in `# type: ignore # noqa`
+# (tests/test_added_strings.py checks them).
+[tool.repoutils.added-strings]
+include = ["*.py"]
+
+[[tool.repoutils.added-strings.strings]]
+regex = '''^(?:[^"'#]|"{3}(?:[^"\\]|\\.|"(?!""))*"{3}|'{3}(?:[^'\\]|\\.|'(?!''))*'{3}|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')*+#(?:.*#)?\s*(?i:nosonar)\b'''
+name = "NOSONAR"
+message = "AGENTS.md asks not to suppress exolot's findings: fix the code, or leave the finding as it is"
+
+# ruff reads noqa case-insensitively, and a bare one too.
+[[tool.repoutils.added-strings.strings]]
+regex = '''^(?:[^"'#]|"{3}(?:[^"\\]|\\.|"(?!""))*"{3}|'{3}(?:[^'\\]|\\.|'(?!''))*'{3}|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')*+#(?:.*#)?\s*(?i:noqa)\b'''
+name = "# noqa"
+message = "AGENTS.md asks not to suppress exolot's findings, and a ruff finding is better fixed than suppressed, where you can"
+
+[[tool.repoutils.added-strings.strings]]
+regex = '''^(?:[^"'#]|"{3}(?:[^"\\]|\\.|"(?!""))*"{3}|'{3}(?:[^'\\]|\\.|'(?!''))*'{3}|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')*+#(?:.*#)?\s*type:\s*ignore\b'''
+name = "# type: ignore"
+message = "please fix the type error instead, if you can"
+
 # The platforms uv.lock may have wheels for, as [tool.uv] environments allows
 # (`just lock-os-arch-check`). uv keeps iOS and Emscripten wheels despite
 # environments, so they're tolerated.

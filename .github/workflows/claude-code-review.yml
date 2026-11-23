@@ -156,6 +156,7 @@ jobs:
           EXECUTION_FILE: ${{ steps.claude-review.outputs.execution_file }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          trap 'mkdir -p "$RUNNER_TEMP/step-summaries" && cp "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/step-summaries/self-test-report.md"' EXIT
           report=$(jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXECUTION_FILE" 2>/dev/null || true)
           if [ -z "$report" ]; then
             report="Claude produced no report. See the [workflow run]($RUN_URL)."
@@ -197,3 +198,13 @@ jobs:
               }' >/dev/null
           done
           printf '%s\n\n%s\n' "$MARKER" "$REPORT" | gh pr comment "$PR_NUMBER" --body-file -
+
+      # GitHub's API doesn't serve step summaries, so each step that writes one
+      # copies it to step-summaries/ for this artifact (see AGENTS.md).
+      - name: Upload the step summaries
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: step-summaries-${{ github.job }}
+          path: ${{ runner.temp }}/step-summaries/
+          if-no-files-found: ignore
