@@ -668,6 +668,84 @@ jobs:
           path: ${{ runner.temp }}/step-summaries/
           if-no-files-found: ignore
 
+  # Lists the suppression comments a PR adds (NOSONAR, noqa, type: ignore; see
+  # pyproject.toml's [tool.repoutils.added-strings]), for information only, in
+  # the job summary and as a github-actions[bot] comment that later runs edit.
+  # Like long-files: posts only on same-repo, non-Dependabot PRs, and only once
+  # the PR adds one; queued per PR; posts only if HEAD_SHA is still the PR's
+  # head.
+  added-strings:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: added-strings-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+
+    steps:
+      # The justfile, pyproject.toml and uv.lock that run here come from the
+      # PR's base commit, as in post-patch-coverage, so nothing from the PR
+      # runs beside this job's write-capable token.
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      # The PR's head, as the data the report is about, so lines and links
+      # match the PR's code; its [tool.repoutils] settings apply. Full history
+      # for the merge base with the base branch.
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: head
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.5"
+
+      - name: Set up Python
+        run: uv python install 3.14.9
+
+      - name: Install just
+        uses: extractions/setup-just@v4.0.0
+        with:
+          just-version: "1.58.0"
+
+      # The recipe runs in head (it's [no-cd]) with the base's repoutils.
+      - name: List added strings
+        working-directory: head
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: |
+          trap 'mkdir -p "$RUNNER_TEMP/step-summaries" && cp "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/step-summaries/added-strings.md"' EXIT
+          just --justfile ../justfile added-strings --base "$BASE" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post report to the PR
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+        working-directory: head
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE: origin/${{ github.base_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # GITHUB_TOKEN can't look up its own login, so name it.
+        run: just --justfile ../justfile added-strings --base "$BASE" --commit "$HEAD_SHA" --post "$PR_NUMBER" --author 'github-actions[bot]'
+
+      # GitHub's API doesn't serve step summaries, so each step that writes one
+      # copies it to step-summaries/ for this artifact (see AGENTS.md).
+      - name: Upload the step summaries
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: step-summaries-${{ github.job }}
+          path: ${{ runner.temp }}/step-summaries/
+          if-no-files-found: ignore
+
   # Checks .github/workflows/actions.lock, which pins every action the
   # workflows use, transitive ones included, to a commit.
   actions-lock:
