@@ -27,7 +27,7 @@ Recipes that CI runs with a write-capable token or on a Dependabot branch (posti
 The Claude workflows' `route` jobs use repoutils' `claude-route` composite action, as `uses: sjktools/repoutils/.github/actions/claude-route@v<version>`.
 `just check-pins` checks that `actions.lock` locks every repoutils action at the commit the locked repoutils package was built from, so the actions' `@v<version>` and `uv.lock`'s repoutils must move together; `.github/dependabot.yml` therefore tells Dependabot to ignore repoutils in both ecosystems.
 `comment-prefix = "lifetracker"` keeps the PR comments' hidden markers as they were before repoutils (`<!-- lifetracker-patch-coverage -->` and so on).
-`[tool.repoutils.secrets]` lists the secrets the workflows use; `just secrets-workflows-check` (part of `just check`) fails if a workflow starts or stops using one without it being updated, and `just variables-workflows-check` does the same for Actions variables (none yet).
+`[tool.repoutils.secrets]` lists the secrets the workflows use; `just secrets-workflows-check` (part of `just check`, `just ci` and the `test` job) fails if a workflow starts or stops using one without it being updated, and `just variables-workflows-check` does the same for Actions variables (none yet).
 When a change here needs something repoutils lacks, fix it in repoutils, release it, and bump it here, rather than adding a script to `scripts/`.
 
 **PR Fixes:** `.github/workflows/fix.yml` (issue #254) is run by hand (`workflow_dispatch`) on an open PR's branch.

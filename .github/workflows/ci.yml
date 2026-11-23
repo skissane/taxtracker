@@ -94,6 +94,12 @@ jobs:
       - name: Check every checkout sets persist-credentials
         run: just check-checkout-credentials
 
+      - name: Check the workflows' secrets match [tool.repoutils.secrets]
+        run: just secrets-workflows-check
+
+      - name: Check the workflows' variables match [tool.repoutils.variables]
+        run: just variables-workflows-check
+
       - name: Check justfile formatting
         run: just just-fmt-check
 

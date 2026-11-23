@@ -97,8 +97,9 @@ test:
     uv run --group dev pytest
 
 # Run the test suite in parallel, print a coverage report, and write coverage.xml (extra args go to pytest)
+[positional-arguments]
 coverage *args:
-    uv run --group dev pytest --cov=src/lifetracker --cov=scripts --cov-report=term --cov-report=xml {{ args }}
+    uv run --group dev pytest --cov=src/lifetracker --cov=scripts --cov-report=term --cov-report=xml "$@"
 
 # patch-coverage's first argument is the branch to compare with (default:
 # origin/$GITHUB_BASE_REF on a PR, else origin/master); any more go to
