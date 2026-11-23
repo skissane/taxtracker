@@ -15,10 +15,12 @@ workflows:
         - 'superfly/flyctl-actions@1.6'
     '.github/workflows/claude-code-review.yml':
         - 'actions/checkout@v7.0.1'
+        - 'actions/upload-artifact@v7.0.2'
         - 'anthropics/claude-code-action@v1.0.276'
         - 'sjktools/repoutils@v0.5.4'
     '.github/workflows/claude.yml':
         - 'actions/checkout@v7.0.1'
+        - 'actions/upload-artifact@v7.0.2'
         - 'anthropics/claude-code-action@v1.0.276'
         - 'sjktools/repoutils@v0.5.4'
     '.github/workflows/fix.yml':

@@ -57,9 +57,12 @@ screenshots-dir-check:
 blame-ignore-revs-check target="HEAD":
     uv run repoutils check-blame-ignore-revs {{ quote(target) }}
 
-# Lint Python code with ruff
+# Fails on ruff's warnings too, as ruff only warns about such things as an
+# invalid noqa directive (see `repoutils ruff-check --help`).
+
+# Lint Python code with ruff, failing on any warning too
 lint:
-    uv run --group dev ruff check .
+    uv run --group dev repoutils ruff-check .
 
 # Type-check src, scripts, tests and screenshot_tests with mypy (strict; see pyproject.toml's [tool.mypy])
 mypy:
@@ -189,6 +192,15 @@ exolot-post *args:
 [positional-arguments]
 long-files *args:
     {{ repoutils }} long-files "$@"
+
+# Like long-files, it reports on the working tree it's run in ([no-cd]), so CI
+# can run this justfile, from the PR's base, on a checkout of the PR's head.
+
+# List the suppression comments (NOSONAR, noqa, type: ignore) added since a base as Markdown, or post that to a PR (--post <PR>)
+[no-cd]
+[positional-arguments]
+added-strings *args:
+    {{ repoutils }} added-strings "$@"
 
 # Build the container image
 docker-build:

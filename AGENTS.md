@@ -12,13 +12,16 @@ Keep to this when editing them: put each new sentence on its own line, don't rew
 
 ## Commands
 
-CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `sentence-per-line-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `mypy`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `check-pins`, `check-checkout-credentials`, `secrets-workflows-check`, `variables-workflows-check`, `just-fmt`, `just-fmt-check`, `coverage`, `patch-coverage`, `patch-coverage-post`, `coverage-status-post`, `wait-for-base-coverage`, `screenshots`, `screenshots-post`, `exolot`, `exolot-post`, `long-files`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
+CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `sentence-per-line-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `mypy`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `check-pins`, `check-checkout-credentials`, `secrets-workflows-check`, `variables-workflows-check`, `just-fmt`, `just-fmt-check`, `coverage`, `patch-coverage`, `patch-coverage-post`, `coverage-status-post`, `wait-for-base-coverage`, `screenshots`, `screenshots-post`, `exolot`, `exolot-post`, `long-files`, `added-strings`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
 `just ci` is maintained by hand, so when you change the `test` job's steps in `ci.yml`, change the `ci` recipe to match.
 Coverage is reported by repoutils (see repoutils below), not Codecov: after `just coverage`, the `test` job runs `just patch-coverage` against the PR's base branch (on `master`, against the commit's parent, `HEAD^`), writing `patch-coverage.md` and `patch-coverage.json`, and uploads `coverage.xml` and `patch-coverage.json` as the `coverage-status` artifact and, on PRs, `patch-coverage.md` as the `patch-coverage` artifact (each kept 14 days).
 The `post-coverage-status` job posts the project and patch coverage as the `coverage/project` and `coverage/patch` commit statuses, always `success`, on `master`'s commits and on PRs from this repository other than Dependabot's (`just coverage-status-post`, needing `statuses: write`), so `master`'s statuses keep a history of coverage.
 On those PRs, `post-patch-coverage` also posts the patch coverage report as a PR comment, with the project's coverage and its change from the base commit's `coverage/project` status (see Patch coverage).
 The base's CI may still be running when a PR's coverage is ready (e.g. a stacked PR rebased onto `master` as its parent merges), so the `test` job's last steps run `just wait-for-base-coverage`, which waits up to 10 minutes for the base's `coverage/project` status (giving up at once if the base's `post-coverage-status` job finished without posting one), then write the same report to the job summary, so fork and Dependabot PRs have it too.
 It never fails the job, only warns when it gives up, as a broken `master` mustn't fail the required `test` check of the PR fixing it; the comment then just lacks the change from the base.
+GitHub's API doesn't serve step summaries, so every job that writes one also uploads it as an artifact, which `gh run download <run> --pattern 'step-summaries-*'` can fetch.
+A step that writes to `$GITHUB_STEP_SUMMARY` (itself or through a command such as `just patch-coverage-post`) starts with a `trap` that copies that file to `$RUNNER_TEMP/step-summaries/<name>.md` when the step exits, even if it fails.
+The job's last step (`Upload the step summaries`) uploads that directory as the artifact `step-summaries-${{ github.job }}`, with `if: always()` and `if-no-files-found: ignore`; copy both from an existing job, such as `long-files`.
 `ci.yml` has thirteen jobs, `test`, `post-patch-coverage` (see Patch coverage), `post-coverage-status` (see above), `exolot` and `post-exolot` (see Exolot), `long-files` (see Long files), `screenshots` and `post-screenshots` (see Screenshots), `actions-lock` (see Action pins), `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment).
 
 **repoutils:** the repository checks and CI helpers come from [repoutils](https://github.com/sjktools/repoutils) (formerly repotools), a dev dependency in its own `repoutils` dependency group, configured in `pyproject.toml`'s `[tool.repoutils]`; see its README for each command.
@@ -139,7 +142,10 @@ just exolot-post 123 exolot.md
 # List files over the line limit, those changed since the merge base with origin/master first (--base for another branch, --post 123 to comment on PR 123 instead)
 just long-files
 
-# Lint (matches `just lint`/`just fmt-check`, which check the whole repo root)
+# List the NOSONAR, noqa and type: ignore comments added since the merge base with origin/master (--base for another branch, --post 123 to comment on PR 123 instead)
+just added-strings
+
+# Lint (`just lint` runs ruff through `repoutils ruff-check`, which also fails on ruff's warnings, such as an invalid noqa directive; `just fmt-check` checks formatting; both check the whole repo root)
 uv run ruff check .
 uv run ruff format .
 
@@ -575,6 +581,13 @@ It reports on the PR's head, like `exolot`, so counts and links match the PR's c
 With no file over the limit, it only edits an earlier comment to say so, never posting a new one.
 As the report needs only repoutils, one job makes and posts it, with the same precautions as `post-exolot`: `GITHUB_TOKEN` only, nothing posted unless `--commit` is still the PR's head, and a per-PR `concurrency` group.
 It never fails the job over long files, only if the report can't be made or posted.
+
+## Added suppressions
+
+`just added-strings` (`repoutils added-strings`) lists the `NOSONAR`, `# noqa` and `# type: ignore` comments the working tree adds since its merge base with `--base` (default `origin/$GITHUB_BASE_REF`, else `origin/master`), making the rule against suppressing exolot's findings (see Exolot) easy to check.
+`pyproject.toml`'s `[tool.repoutils.added-strings]` gives each as a regex that matches only a comment, not a string or test data naming one, which `tests/test_added_strings.py` checks.
+Like `long-files` it's `[no-cd]`, reports on the working tree it's run in, and takes `--post <PR>` to post the report as a PR comment that later runs edit in place.
+The report is for information only: keep each added suppression that's actually needed, with no reply or explanation, and remove the rest.
 
 ## Linting config
 
