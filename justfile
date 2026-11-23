@@ -180,9 +180,12 @@ exolot-post *args:
 # with it are listed first) and --post <PR> to comment instead of printing,
 # editing the previous comment, with $GITHUB_TOKEN (default `gh auth
 # token`); see --help. Like exolot-post it installs only repoutils, as CI runs
-# it with a write-capable token.
+# it with a write-capable token. It reports on the working tree it's run in
+# ([no-cd]), so CI can run this justfile, from the PR's base, on a checkout of
+# the PR's head beside it.
 
 # List files over pyproject.toml's line limit as Markdown, or post that to a PR
+[no-cd]
 [positional-arguments]
 long-files *args:
     {{ repoutils }} long-files "$@"
