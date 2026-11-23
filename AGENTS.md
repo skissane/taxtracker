@@ -26,8 +26,6 @@ Recipes that only check run `uv run repoutils <command>`.
 Recipes that CI runs with a write-capable token or on a Dependabot branch (posting PR comments and commit statuses, `requirements-fix`, `dependabot-relock`) use the justfile's `repoutils` variable, `uv run --project <the justfile's directory> --only-group repoutils repoutils`, which installs only repoutils, hash-checked against `uv.lock`, and not the project or its other dependencies.
 The Claude workflows' `route` jobs use repoutils' `claude-route` composite action, as `uses: sjktools/repoutils/.github/actions/claude-route@v<version>`.
 `just check-pins` checks that `actions.lock` locks every repoutils action at the commit the locked repoutils package was built from, so the actions' `@v<version>` and `uv.lock`'s repoutils must move together; `.github/dependabot.yml` therefore tells Dependabot to ignore repoutils in both ecosystems.
-On PRs, the jobs that post comments and commit statuses (`post-patch-coverage`, `post-coverage-status`, `post-screenshots`, `post-exolot` and `long-files`) check out the PR's base commit rather than the PR, so a PR's changes to the justfile, `pyproject.toml` or `uv.lock` don't run beside their write-capable tokens, and take effect only once it merges; the workflow file itself still comes from the PR, as in any `pull_request` run.
-`long-files` reports on the PR's head, so it also checks that out, into `head/`, as data only, and runs the base's `[no-cd]` recipe in it with `just --justfile ../justfile`; that checkout's `pyproject.toml` is read as data, so a PR's changes to `[tool.repoutils.long-files]` do apply to its own report.
 `comment-prefix = "lifetracker"` keeps the PR comments' hidden markers as they were before repoutils (`<!-- lifetracker-patch-coverage -->` and so on).
 `[tool.repoutils.secrets]` lists the secrets the workflows use; `just secrets-workflows-check` (part of `just check`, `just ci` and the `test` job) fails if a workflow starts or stops using one without it being updated, and `just variables-workflows-check` does the same for Actions variables (none yet).
 When a change here needs something repoutils lacks, fix it in repoutils, release it, and bump it here, rather than adding a script to `scripts/`.
@@ -189,7 +187,7 @@ Run via `pytest` (using `pytest-django`, configured in `pyproject.toml`'s `[tool
 The `test` job runs it after the tests, as `just patch-coverage "$BASE" --format markdown:patch-coverage.md,json:patch-coverage.json`, with the PR's base branch, or `HEAD^` on `master` (see Commands).
 Then `post-patch-coverage` (once `test` has finished, whether it succeeded or failed, but only if it uploaded the `patch-coverage` artifact) runs `just patch-coverage-post` (`repoutils post-patch-coverage`), which posts the report as a `github-actions[bot]` PR comment, with the project's coverage from `coverage.xml` and its change from the base commit's `coverage/project` status.
 It works like the screenshot comment: found by a hidden `<!-- lifetracker-patch-coverage -->` marker and edited in place, nothing posted unless `--commit` is still the PR's head, a per-PR `concurrency` group, and skipped for fork PRs and Dependabot.
-It needs only `GITHUB_TOKEN` (`pull-requests: write`, and `statuses: read` for the base's status), no secret, runs the base commit's justfile, and installs nothing but repoutils.
+It needs only `GITHUB_TOKEN` (`pull-requests: write`, and `statuses: read` for the base's status), no secret, and installs nothing but repoutils.
 The comment warns, without failing anything, when a PR drops total coverage by more than 2 points or leaves patch coverage more than 1 point below the base's total (`[tool.repoutils.coverage]` can change both).
 repoutils parses diff-cover's Markdown report and fails if it's in a shape it doesn't know; as the `test` job writes the same comment to its summary on every run, a diff-cover upgrade that changes the format fails `test`, Dependabot's PR included.
 
@@ -205,7 +203,7 @@ Given `--commit` (CI passes the PR's head commit), it first checks that commit i
 The upload uses the undocumented `POST https://uploads.github.com/user-attachments/assets` endpoint, sending the same request `gh ... --attach` does (cli/cli `internal/attachments/client.go`), which only accepts user tokens, not installation tokens such as `GITHUB_TOKEN`.
 So uploads use the `SCREENSHOTS_TOKEN` Actions secret, a fine-grained PAT for this repo with only Pull requests: read and write (the job fails if it's unset), and the comment uses `GITHUB_TOKEN` with `pull-requests: write`.
 Locally both tokens default to `gh auth token`.
-It's skipped for fork PRs and Dependabot, which don't get the secret; it runs the base commit's justfile and installs nothing but repoutils, so nothing from the PR runs with the tokens.
+It's skipped for fork PRs and Dependabot, which don't get the secret; it runs the PR branch's justfile but installs nothing but repoutils, so a bumped dependency never runs with the tokens.
 
 **File storage:** All uploaded attachments are stored in the SQLite database, not on disk.
 When a row of any model with a `DatabaseStorage` `FileField` is deleted, `core.attachments.delete_stored_files` deletes its `DBStoredFile` too: a `post_delete` receiver, which `CoreConfig.ready()` connects to each such model (not to every sender, which would turn off fast bulk deletes everywhere), so cascades and `QuerySet.delete()` (e.g. the admin's "Delete selected") clean up as well, which a `delete()` override wouldn't.
@@ -571,7 +569,7 @@ Lines are counted as `wc -l` does, plus a last line without a newline.
 `pyproject.toml`'s `[tool.repoutils.long-files]` picks the files and limits, and the policy the report starts with: tracked files matching an `include` glob and no `exclude` one (all `*.py` but migrations), `limit` (500), and `limits`, which maps globs to their own limit (none yet; e.g. `"tests/*" = 700`), the first match winning.
 There's no list of accepted files: the policy above means a long file that should stay long just stays in the list.
 CI's `long-files` job, on every run, writes the report to the job summary and, on PRs from this repository other than Dependabot's, runs it with `--post`, which posts it as a `github-actions[bot]` PR comment, found by a hidden `<!-- lifetracker-long-files -->` marker and edited in place like the patch coverage comment.
-It reports on the PR's head, like `exolot`, so counts and links match the PR's code, but runs the base commit's justfile and repoutils (see repoutils above).
+It checks out the PR's head, like `exolot`, so counts and links match the PR's code.
 With no file over the limit, it only edits an earlier comment to say so, never posting a new one.
 As the report needs only repoutils, one job makes and posts it, with the same precautions as `post-exolot`: `GITHUB_TOKEN` only, nothing posted unless `--commit` is still the PR's head, and a per-PR `concurrency` group.
 It never fails the job over long files, only if the report can't be made or posted.

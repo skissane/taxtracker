@@ -241,9 +241,9 @@ jobs:
   # images are uploaded with SCREENSHOTS_TOKEN, a fine-grained PAT (the job
   # fails if it's unset); the comment itself is written with GITHUB_TOKEN.
   # Skipped for forks and Dependabot, whose runs don't get the repo's Actions
-  # secrets (and whose code shouldn't see the tokens). It runs the PR's base
-  # commit's justfile, and installs nothing but repoutils (`uv run
-  # --only-group repoutils`), so nothing from the PR runs with the tokens. Queued
+  # secrets (and whose code shouldn't see the tokens). It runs the PR branch's
+  # justfile, but installs nothing but repoutils (`uv run --only-group
+  # repoutils`), so no dependency bump runs with the tokens. Queued
   # per PR, so two runs can't both see no previous comment and both post; not in
   # commit order, though, so the script posts only if HEAD_SHA is still the
   # PR's head, lest an older commit's slow run overwrite newer screenshots.
@@ -268,14 +268,9 @@ jobs:
             exit 1
           fi
 
-      # The base commit's justfile, pyproject.toml and uv.lock, not the PR's,
-      # so a PR's changes to those files don't run beside this job's
-      # write-capable token (they take effect once it merges). The workflow
-      # file itself still comes from the PR, as in any pull_request run.
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.3.3
@@ -314,9 +309,9 @@ jobs:
   # either falls short (never failing for that). Runs whether or not test then
   # failed (e.g. on the Docker smoke test), but only if test uploaded the
   # report. Skipped, and queued per PR, like post-screenshots, and likewise
-  # posts only if HEAD_SHA is still the PR's head. Needs no secrets, runs the
-  # base commit's justfile, and installs nothing but repoutils alongside its
-  # token (`uv run --only-group repoutils`).
+  # posts only if HEAD_SHA is still the PR's head. Needs no secrets, and
+  # installs nothing but repoutils alongside its token (`uv run --only-group
+  # repoutils`).
   post-patch-coverage:
     needs: test
     if: ${{ !cancelled() && needs.test.outputs.patch-report == 'success' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
@@ -331,14 +326,9 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      # The base commit's justfile, pyproject.toml and uv.lock, not the PR's,
-      # so a PR's changes to those files don't run beside this job's
-      # write-capable token (they take effect once it merges). The workflow
-      # file itself still comes from the PR, as in any pull_request run.
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.3.3
@@ -386,8 +376,7 @@ jobs:
   # coverage that PRs compare with. Only where GITHUB_TOKEN can post them, so
   # not on a fork's or Dependabot's PR. A token with statuses: write can post a
   # status named like any required check, so, like post-patch-coverage, this
-  # job runs the base commit's justfile on PRs and installs nothing but
-  # repoutils.
+  # job installs nothing but repoutils.
   post-coverage-status:
     needs: test
     if: ${{ !cancelled() && needs.test.outputs.coverage-report == 'success' && (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) }}
@@ -397,15 +386,11 @@ jobs:
       statuses: write
 
     steps:
-      # On a PR, the base commit's justfile, pyproject.toml and uv.lock, not
-      # the PR's, so a PR's changes to those files don't run beside this job's
-      # write-capable token (the workflow file itself still comes from the
-      # PR). On master, the commit itself, two commits deep for its parent.
+      # Two commits deep on master, for the commit's parent.
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 2
-          ref: ${{ github.event.pull_request.base.sha || github.sha }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.3.3
@@ -517,8 +502,7 @@ jobs:
   # comment, and hides the ones earlier runs posted as outdated. The same
   # conditions and precautions as post-patch-coverage: only same-repo,
   # non-Dependabot PRs; queued per PR; posts only if HEAD_SHA is still the PR's
-  # head; runs the base commit's justfile and installs nothing but repoutils
-  # beside its token.
+  # head; installs nothing but repoutils beside its token.
   post-exolot:
     needs: exolot
     # !cancelled() as dependabot-fix, an ancestor, is skipped on most runs.
@@ -532,14 +516,9 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      # The base commit's justfile, pyproject.toml and uv.lock, not the PR's,
-      # so a PR's changes to those files don't run beside this job's
-      # write-capable token (they take effect once it merges). The workflow
-      # file itself still comes from the PR, as in any pull_request run.
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.3.3
@@ -571,8 +550,9 @@ jobs:
   # place, with the files the PR changes first. The report is cheap to make and
   # needs only repoutils, so one job both makes and posts it, with the same
   # precautions as post-exolot: only same-repo, non-Dependabot PRs post; queued
-  # per PR; posts only if HEAD_SHA is still the PR's head; runs the base
-  # commit's justfile and installs nothing but repoutils. See AGENTS.md.
+  # per PR; posts only if HEAD_SHA is still the PR's head; installs nothing but
+  # repoutils.
+  # See AGENTS.md.
   long-files:
     runs-on: ubuntu-latest
     permissions:
@@ -583,24 +563,13 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      # The justfile, pyproject.toml and uv.lock that run here come from the
-      # base commit on PRs (else this commit), as in post-patch-coverage, so
-      # nothing from the PR runs beside this job's write-capable token.
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.event.pull_request.base.sha || github.sha }}
-
-      # The PR's head (else this commit), as the data the report is about, as
-      # for exolot, so line counts and links match the PR's code; its
-      # [tool.repoutils] settings apply. Full history for the merge base with
-      # the base branch.
+      # The PR's head, as for exolot, so line counts and links match the PR's
+      # code. Full history for the merge base with the base branch.
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          path: head
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.3.3
@@ -615,23 +584,20 @@ jobs:
         with:
           just-version: "1.58.0"
 
-      # The recipe runs in head (it's [no-cd]) with the base's repoutils.
       - name: List long files
-        working-directory: head
         env:
           BASE: ${{ github.base_ref && format('origin/{0}', github.base_ref) || '' }}
-        run: just --justfile ../justfile long-files --base "$BASE" >> "$GITHUB_STEP_SUMMARY"
+        run: just long-files --base "$BASE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Post report to the PR
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
-        working-directory: head
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BASE: origin/${{ github.base_ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         # GITHUB_TOKEN can't look up its own login, so name it.
-        run: just --justfile ../justfile long-files --base "$BASE" --commit "$HEAD_SHA" --post "$PR_NUMBER" --author 'github-actions[bot]'
+        run: just long-files --base "$BASE" --commit "$HEAD_SHA" --post "$PR_NUMBER" --author 'github-actions[bot]'
 
   # Checks .github/workflows/actions.lock, which pins every action the
   # workflows use, transitive ones included, to a commit.
