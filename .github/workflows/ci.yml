@@ -46,7 +46,7 @@ jobs:
         run: just lock-check
 
       - name: Check lockfile only targets supported platforms
-        run: just lock-os-arch-check
+        run: just lock-platforms-check
 
       - name: Install dependencies
         run: just sync
@@ -59,6 +59,9 @@ jobs:
 
       - name: Check AGENTS.md and README.md sentence-per-line formatting
         run: just sentence-per-line-check
+
+      - name: Check AGENTS.md and README.md for doubled spaces
+        run: just doubled-spaces-check
 
       - name: Check nothing is committed under screenshots/
         run: just screenshots-dir-check
@@ -103,6 +106,9 @@ jobs:
       - name: Check justfile formatting
         run: just just-fmt-check
 
+      - name: Check the justfile has the standard recipes
+        run: just check-justfile
+
       # tests/core/test_envoy.py runs the real Envoy with Docker, and fails
       # rather than being skipped without Docker when LIFETRACKER_REQUIRE_ENVOY
       # is set.
@@ -114,7 +120,7 @@ jobs:
       # The lines a PR changes, or on master the lines the commit changes. The
       # base is there, as checkout fetched every branch.
       - name: Report patch coverage
-        run: just patch-coverage "$BASE" --format markdown:patch-coverage.md,json:patch-coverage.json
+        run: just diff-cover "$BASE" --format markdown:patch-coverage.md,json:patch-coverage.json
         env:
           BASE: ${{ github.base_ref && format('origin/{0}', github.base_ref) || 'HEAD^' }}
 

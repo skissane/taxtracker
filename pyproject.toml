@@ -99,8 +99,16 @@ regex = '''^(?:[^"'#]|"{3}(?:[^"\\]|\\.|"(?!""))*"{3}|'{3}(?:[^'\\]|\\.|'(?!''))
 name = "# type: ignore"
 message = "please fix the type error instead, if you can"
 
+# The standard recipes (`just check-justfile`) taxtracker leaves out on
+# purpose: pyright, as mypy type-checks it; prose-check from check until
+# AGENTS.md and README.md pass it; and actions-lock from fix until fix.yml can
+# run gh actions-lock (#352).
+[tool.repoutils.justfile]
+omit = ["pyright"]
+omit-dependencies = { check = ["prose-check"], fix = ["actions-lock"] }
+
 # The platforms uv.lock may have wheels for, as [tool.uv] environments allows
-# (`just lock-os-arch-check`). uv keeps iOS and Emscripten wheels despite
+# (`just lock-platforms-check`). uv keeps iOS and Emscripten wheels despite
 # environments, so they're tolerated.
 [tool.repoutils.lock-platforms]
 supported = ["any", "linux:x86_64", "linux:aarch64", "macosx"]
