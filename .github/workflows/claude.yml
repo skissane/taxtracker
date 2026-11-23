@@ -26,7 +26,7 @@ jobs:
   # Decides whether a comment, review or new issue's body is a request to
   # @claude at all (it must start with "@claude"; an issue's title never
   # counts), and whether it asks for "@claude review", by the rule in
-  # scripts/claude_review_request.py, which claude-code-review.yml shares;
+  # `repoutils claude-route`, which claude-code-review.yml shares;
   # review requests on PRs go there instead. Workflow expressions have no
   # regex, hence a job. On a self-test it runs too, with no text, so the
   # self-test covers it.
@@ -46,20 +46,11 @@ jobs:
     outputs:
       kind: ${{ steps.route.outputs.kind }}
     steps:
-      - name: Checkout the routing script
-        uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-          sparse-checkout: scripts/claude_review_request.py
-          sparse-checkout-cone-mode: false
-
       - name: Route
         id: route
-        env:
-          TEXT: ${{ github.event.comment.body || github.event.review.body || github.event.issue.body }}
-        run: |
-          kind=$(printf '%s' "$TEXT" | python3 scripts/claude_review_request.py)
-          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+        uses: sjktools/repoutils/.github/actions/claude-route@v0.5.4
+        with:
+          text: ${{ github.event.comment.body || github.event.review.body || github.event.issue.body }}
 
   claude:
     needs: route

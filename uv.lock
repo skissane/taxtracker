@@ -580,7 +580,11 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-django" },
     { name = "pytest-xdist" },
+    { name = "repoutils" },
     { name = "ruff" },
+]
+repoutils = [
+    { name = "repoutils" },
 ]
 screenshots = [
     { name = "playwright" },
@@ -613,8 +617,10 @@ dev = [
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "pytest-django", specifier = ">=4.14.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
+    { name = "repoutils", specifier = ">=0.5.4" },
     { name = "ruff", specifier = ">=0.17.5" },
 ]
+repoutils = [{ name = "repoutils", specifier = ">=0.5.4" }]
 screenshots = [{ name = "playwright", specifier = ">=1.65.2" }]
 
 [[package]]
@@ -936,6 +942,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/cb/6b/8399f68dd41a2030218839b9b18360d79b86d22b9fab5ef477c7f23ca67c/regex-2026.4.4-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:07f190d65f5a72dcb9cf7106bfc3d21e7a49dd2879eda2207b683f32165e4d99", size = 816388, upload-time = "2026-04-03T20:56:04.595Z" },
     { url = "https://files.pythonhosted.org/packages/fa/ee/7f6054c0dec0cee3463c304405e4ff42e27cff05bf36fcb34be549ab17bd/regex-2026.4.4-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:b26c30df3a28fd9793113dac7385a4deb7294a06c0f760dd2b008bd49a9139bc", size = 801483, upload-time = "2026-04-03T20:56:09.365Z" },
     { url = "https://files.pythonhosted.org/packages/0b/33/3c76d9962949e487ebba353a18e89399f292287204ac8f2f4cfc3a51c233/regex-2026.4.4-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:9776b85f510062f5a75ef112afe5f494ef1635607bf1cc220c1391e9ac2f5e81", size = 803463, upload-time = "2026-04-03T20:56:18.923Z" },
+]
+
+[[package]]
+name = "repoutils"
+version = "0.5.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/52/e1df8bb6ddadc7feac847117177482faed7225c3d4bcb39e93f8081558df/repoutils-0.5.4.tar.gz", hash = "sha256:10558ad60f08aa5e1f2d99af85acf2a616f5c8a77aac83f6a4fda580f2b128c7", size = 551477, upload-time = "2026-11-23T12:54:00.199Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/df/0d/424343f276b7e1be9925e63c47846ce39807047c8a73f5cf1a45f9b31188/repoutils-0.5.4-py3-none-any.whl", hash = "sha256:00fb5879296cd3c4391e21bb892bb8d4dde9b07ab0cc14f91a4aa8b545186251", size = 307395, upload-time = "2026-11-23T12:53:58.922Z" },
 ]
 
 [[package]]

@@ -9,6 +9,10 @@ updates:
     cooldown:
       default-days: 7
     versioning-strategy: "increase"
+    # repoutils' Bump downstream workflow bumps it, along with its actions, at
+    # each release, as `just check-pins` needs both at one commit.
+    ignore:
+      - dependency-name: "repoutils"
 
   # Workflows name actions by version tag, and .github/workflows/actions.lock
   # pins each to a commit; Dependabot updates both together.
@@ -18,6 +22,10 @@ updates:
       interval: "weekly"
     cooldown:
       default-days: 7
+    # See the uv entry's repoutils ignore. The wildcard also covers names that
+    # carry an action's path.
+    ignore:
+      - dependency-name: "sjktools/repoutils*"
     labels:
       - "dependencies"
       - "type:maintenance"

@@ -13,8 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # Reading the PR base's check runs, before uploading coverage.
+      # For wait-for-base-coverage to read the base commit's check runs and
+      # statuses, and the summary step its coverage/project status.
       checks: read
+      statuses: read
+    outputs:
+      # So post-coverage-status posts the coverage statuses, and
+      # post-patch-coverage the report, even if a later step fails.
+      coverage-report: ${{ steps.coverage-report.outcome }}
+      patch-report: ${{ steps.patch-report.outcome }}
 
     steps:
       - uses: actions/checkout@v7.0.1
@@ -98,30 +105,29 @@ jobs:
         env:
           LIFETRACKER_REQUIRE_ENVOY: "1"
 
-      # Codecov Test Analytics. Runs even if the tests failed, as that's when the
-      # results matter most; placed straight after them so a later step's failure
-      # can't skip it.
-      - name: Upload test results to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@v7.1.1
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: junit.xml
-          report_type: test_results
-
-      # Kept for post-patch-coverage to post to the PR, for reading without
-      # Codecov. Informational only, so it never fails the job: codecov/patch
-      # is still the gate. The base is there, as checkout fetched every branch.
+      # The lines a PR changes, or on master the lines the commit changes. The
+      # base is there, as checkout fetched every branch.
       - name: Report patch coverage
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
+        run: just patch-coverage "$BASE" --format markdown:patch-coverage.md,json:patch-coverage.json
         env:
-          BASE_REF: ${{ github.base_ref }}
-        run: just patch-coverage "origin/$BASE_REF" --format markdown:patch-coverage.md
+          BASE: ${{ github.base_ref && format('origin/{0}', github.base_ref) || 'HEAD^' }}
 
+      # For post-coverage-status to post on the commit. Only once the tests
+      # pass, as a failed run's coverage isn't the commit's.
+      - name: Upload coverage reports
+        id: coverage-report
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: coverage-status
+          path: |
+            coverage.xml
+            patch-coverage.json
+          retention-days: 14
+
+      # For post-patch-coverage to post to the PR.
       - name: Upload patch coverage report
-        if: github.event_name == 'pull_request' && hashFiles('patch-coverage.md') != ''
-        continue-on-error: true
+        id: patch-report
+        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v7.0.2
         with:
           name: patch-coverage
@@ -149,23 +155,26 @@ jobs:
           path: lifetracker-image.tar
           retention-days: 1
 
-      # Codecov compares a PR with its base's report only when the PR's upload is
-      # processed, so wait for the base's (e.g. a stacked PR rebased onto master
-      # just as its parent merged, while master's run is still going). It never
-      # fails the job, only warns, and is quick when the base's CI has finished.
-      - name: Wait for the PR base's coverage on Codecov
+      # The comparison with the PR's base reads the base commit's
+      # coverage/project status, which the base's own post-coverage-status job
+      # posts, so wait for it (e.g. a stacked PR rebased onto master just as its
+      # parent merged, while master's run is still going). Last, so the Docker
+      # steps give the base's run time to finish. It never fails the job, only
+      # warns, and is quick when the base's CI has finished.
+      - name: Wait for the PR base's coverage status
         if: github.event_name == 'pull_request'
-        run: uv run --no-project python -m scripts.wait_for_base_coverage "$GITHUB_REPOSITORY" "$BASE_SHA"
+        run: just wait-for-base-coverage "$GITHUB_REPOSITORY" "$BASE_SHA"
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7.1.1
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: coverage.xml
-          fail_ci_if_error: true
+      # The comment post-patch-coverage posts, in the job summary, so it's
+      # there for fork and Dependabot PRs too, which can't post it.
+      - name: Summarise coverage
+        run: just patch-coverage-post --output "$GITHUB_STEP_SUMMARY" --coverage-report coverage.xml ${BASE_SHA:+--base "$BASE_SHA"}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
 
   # Run `just screenshots` and keep the PNGs as a workflow artifact, for eyeballing
   # UI changes from the run's summary page; post-screenshots then posts them to the
@@ -227,8 +236,8 @@ jobs:
   # fails if it's unset); the comment itself is written with GITHUB_TOKEN.
   # Skipped for forks and Dependabot, whose runs don't get the repo's Actions
   # secrets (and whose code shouldn't see the tokens). It runs the PR branch's
-  # own script, but installs nothing: the script is stdlib-only and runs with
-  # `uv run --no-project`, so no dependency bump runs with the tokens. Queued
+  # justfile, but installs nothing but repoutils (`uv run --only-group
+  # repoutils`), so no dependency bump runs with the tokens. Queued
   # per PR, so two runs can't both see no previous comment and both post; not in
   # commit order, though, so the script posts only if HEAD_SHA is still the
   # PR's head, lest an older commit's slow run overwrite newer screenshots.
@@ -287,19 +296,25 @@ jobs:
         run: just screenshots-post "$PR_NUMBER" --commit "$HEAD_SHA" --run-url "$RUN_URL" --author 'github-actions[bot]'
 
   # Post the patch-coverage artifact (diff-cover's Markdown report) to the PR
-  # as a github-actions[bot] comment, or edit the one posted before, so it can
-  # be read without Codecov. Runs whether or not test then failed (e.g. on
-  # the Docker smoke test), but only if test uploaded the report. Skipped, and
-  # queued per PR, like post-screenshots, and likewise posts only if HEAD_SHA is
-  # still the PR's head. Needs no secrets: it runs the PR branch's stdlib-only
-  # script with `uv run --no-project`, installing nothing.
+  # as a github-actions[bot] comment, or edit the one posted before, so it's
+  # seen without opening the test job's summary. It adds the project's coverage
+  # from the coverage-status artifact, and its change from the base's
+  # coverage/project status, which the test job waited for, and warns when
+  # either falls short (never failing for that). Runs whether or not test then
+  # failed (e.g. on the Docker smoke test), but only if test uploaded the
+  # report. Skipped, and queued per PR, like post-screenshots, and likewise
+  # posts only if HEAD_SHA is still the PR's head. Needs no secrets, and
+  # installs nothing but repoutils alongside its token (`uv run --only-group
+  # repoutils`).
   post-patch-coverage:
     needs: test
-    if: ${{ !cancelled() && (needs.test.result == 'success' || needs.test.result == 'failure') && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+    if: ${{ !cancelled() && needs.test.outputs.patch-report == 'success' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
+      # To read the base commit's coverage/project status.
+      statuses: read
     concurrency:
       group: post-patch-coverage-${{ github.event.pull_request.number }}
       cancel-in-progress: false
@@ -322,23 +337,85 @@ jobs:
         with:
           just-version: "1.58.0"
 
-      # Missing if the tests failed, or diff-cover did.
       - name: Download patch coverage report
-        id: download
-        continue-on-error: true
         uses: actions/download-artifact@v8.0.2
         with:
           name: patch-coverage
+          path: ${{ runner.temp }}/patch-coverage
+
+      - name: Download coverage reports
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: coverage-status
+          path: ${{ runner.temp }}/coverage-status
 
       - name: Post patch coverage to the PR
-        if: steps.download.outcome == 'success'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          REPORTS: ${{ runner.temp }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         # GITHUB_TOKEN can't look up its own login, so name it.
-        run: just patch-coverage-post "$PR_NUMBER" --commit "$HEAD_SHA" --run-url "$RUN_URL" --author 'github-actions[bot]'
+        run: |
+          just patch-coverage-post "$PR_NUMBER" --commit "$HEAD_SHA" --run-url "$RUN_URL" --author 'github-actions[bot]' \
+            --report "$REPORTS/patch-coverage/patch-coverage.md" \
+            --coverage-report "$REPORTS/coverage-status/coverage.xml" --base "$BASE_SHA"
+
+  # Posts the test job's figures as two commit statuses, always success:
+  # coverage/project, with the change from the PR's base (or on master, the
+  # commit's parent) when that has one, and coverage/patch. On a PR they go on
+  # its head, and on master on the commit, so master's keep a history of
+  # coverage that PRs compare with. Only where GITHUB_TOKEN can post them, so
+  # not on a fork's or Dependabot's PR. A token with statuses: write can post a
+  # status named like any required check, so, like post-patch-coverage, this
+  # job installs nothing but repoutils.
+  post-coverage-status:
+    needs: test
+    if: ${{ !cancelled() && needs.test.outputs.coverage-report == 'success' && (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+
+    steps:
+      # Two commits deep on master, for the commit's parent.
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.5"
+
+      - name: Set up Python
+        run: uv python install 3.14.9
+
+      - name: Install just
+        uses: extractions/setup-just@v4.0.0
+        with:
+          just-version: "1.58.0"
+
+      - name: Download coverage reports
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: coverage-status
+          path: ${{ runner.temp }}/coverage-status
+
+      - name: Post coverage as commit statuses
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          REPORTS: ${{ runner.temp }}/coverage-status
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          base="${PR_BASE:-$(git rev-parse HEAD^)}"
+          just coverage-status-post "$COMMIT" --base "$base" --run-url "$RUN_URL" \
+            --report "$REPORTS/coverage.xml" --patch-report "$REPORTS/patch-coverage.json"
 
   # Runs exolot on this repo's code, for information only: --exit-zero, so its
   # findings never fail the job (only a failed analysis does). It reports them
@@ -419,8 +496,7 @@ jobs:
   # comment, and hides the ones earlier runs posted as outdated. The same
   # conditions and precautions as post-patch-coverage: only same-repo,
   # non-Dependabot PRs; queued per PR; posts only if HEAD_SHA is still the PR's
-  # head; runs only the PR's stdlib-only script, without installing the
-  # project, beside its token.
+  # head; installs nothing but repoutils beside its token.
   post-exolot:
     needs: exolot
     # !cancelled() as dependabot-fix, an ancestor, is skipped on most runs.
@@ -466,9 +542,10 @@ jobs:
   # Lists the files over pyproject.toml's line limit, for information only, in
   # the job summary and, on PRs, as a github-actions[bot] comment edited in
   # place, with the files the PR changes first. The report is cheap to make and
-  # its script stdlib-only, so one job both makes and posts it, with the same
+  # needs only repoutils, so one job both makes and posts it, with the same
   # precautions as post-exolot: only same-repo, non-Dependabot PRs post; queued
-  # per PR; posts only if HEAD_SHA is still the PR's head; installs nothing.
+  # per PR; posts only if HEAD_SHA is still the PR's head; installs nothing but
+  # repoutils.
   # See AGENTS.md.
   long-files:
     runs-on: ubuntu-latest
@@ -540,6 +617,18 @@ jobs:
             https://github.com/github/gh-actions-lock/releases/download/v0.4.1/linux-amd64
           echo "39deb2fe714dbf74b073d8245fc7f3d50cd0eee18d5c0900e9e849ae933ae17e  $RUNNER_TEMP/gh-actions-lock" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/gh-actions-lock"
+
+      # TEMPORARY: regenerate actions.lock for this PR (sessions can't reach
+      # GraphQL), to be committed from the artifact and then removed.
+      - name: Relock (temporary)
+        run: '"$RUNNER_TEMP/gh-actions-lock"'
+
+      - name: Upload the relocked actions.lock (temporary)
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: actions-lock
+          path: .github/workflows/actions.lock
+          retention-days: 3
 
       # Fails if actions.lock is missing an action a workflow uses, or a
       # locked commit no longer verifies upstream. Rerun `gh actions-lock`
