@@ -1,56 +1,77 @@
 name: PR Fixes
 
-# Run by hand (Actions → PR Fixes → Run workflow) on an open PR's branch:
-# merges the PR's base branch in, runs `just fix`, and pushes the result.
-# autofix-comment.yml also runs it when the owner comments `/autofix` on a PR.
+# Merges an open PR's base branch into its branch, runs `just fix`, and uploads
+# the result as a Git bundle. Run it on the PR's branch (Actions → PR Fixes →
+# Run workflow, with Use workflow from: the PR's branch). autofix-comment.yml
+# also runs it when the owner comments `/autofix` on a PR, and passes the PR's
+# number, as a branch can have more than one open PR (against different bases).
+# The run's name carries the number, as GitHub's API doesn't give a run's
+# inputs but does give its name, so fix-push.yml can tell which PR it was for.
+#
+# It pushes nothing and uses no secrets. When it succeeds, master's copy of
+# fix-push.yml checks its bundle and pushes it with AUTOFIX_TOKEN, which lives
+# in the autofix environment that only master can deploy to.
+#
+# It runs on the branch, not on master, because it runs the branch's own justfile
+# and dev dependencies (on a Dependabot PR, at their bumped, untrusted
+# versions). Any code in a job can write to the Actions cache of the run's ref,
+# so in a run on master that code could plant entries that master's other jobs
+# restore. On the branch, it can only write to the branch's own cache.
+#
+# A branch can change its copy of this workflow, but that gains it nothing:
+# the run holds no secret and only a read-only GITHUB_TOKEN, and fix-push.yml
+# trusts nothing it produces except as commits to check and push.
 on:
   workflow_dispatch:
+    inputs:
+      head-sha:
+        description: >-
+          The commit the branch is expected to be at (optional): the run fails
+          if the branch has moved on, rather than fix commits nobody looked at
+        required: false
+        type: string
+      pr-number:
+        description: >-
+          The pull request to fix (optional): needed only when the branch has
+          more than one open pull request
+        required: false
+        type: string
 
+# fix-push.yml reads the PR number back from this name, so keep the two in step.
+run-name: "${{ inputs.pr-number && format('PR Fixes #{0}', inputs.pr-number) || 'PR Fixes' }}"
+
+# A second run on the same branch waits for the first rather than cancelling
+# it. If the first one's fixes get pushed, the second one's push then fails, as
+# the branch has moved on from the commit it started from.
 concurrency:
   group: fix-${{ github.ref }}
+
+permissions: {}
 
 jobs:
   fix:
     runs-on: ubuntu-latest
-    # The push uses AUTOFIX_TOKEN, so GITHUB_TOKEN only needs to read.
     permissions:
       contents: read
       pull-requests: read
     timeout-minutes: 10
 
     steps:
-      - name: Check token configuration
-        env:
-          AUTOFIX_TOKEN: ${{ secrets.AUTOFIX_TOKEN }}
-        run: |
-          if [ -z "$AUTOFIX_TOKEN" ]; then
-            echo "::error::AUTOFIX_TOKEN secret is not set"
-            exit 1
-          fi
-
+      # The run is checked again by fix-push.yml, which trusts nothing this job
+      # does; these checks only fail early with a clearer message.
       - name: Find the branch's pull request
         id: check-pr
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ github.ref_name }}
-        run: |
-          if [ "$GITHUB_REF_TYPE" != branch ]; then
-            echo "::error::This workflow must be run on a pull request branch, not a $GITHUB_REF_TYPE."
-            exit 1
-          fi
-          base_branch=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open \
-            --json baseRefName,isCrossRepository \
-            --jq '[.[] | select(.isCrossRepository | not)][0].baseRefName // empty')
-          if [ -z "$base_branch" ]; then
-            echo "::error::Branch $BRANCH has no open pull request in this repository."
-            exit 1
-          fi
-          echo "base_branch=$base_branch" >> "$GITHUB_OUTPUT"
+        uses: sjktools/repoutils/.github/actions/autofix-check@v0.5.4
+        with:
+          head-sha: ${{ inputs.head-sha }}
+          pr-number: ${{ inputs.pr-number }}
 
       # No credentials are kept, as the steps after this run the branch's own
-      # justfile and dependencies; only the final push sees AUTOFIX_TOKEN.
+      # justfile and dependencies. The run's own commit, which fix-push.yml
+      # takes from the event, not the branch's head now.
       - uses: actions/checkout@v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -68,6 +89,8 @@ jobs:
             exit 1
           fi
 
+      # Keep version in step with pyproject.toml's [tool.uv] required-version.
+      # The cache is the branch's own, as this run is on the branch.
       - name: Install uv
         uses: astral-sh/setup-uv@v10.3.3
         with:
@@ -76,6 +99,7 @@ jobs:
       - name: Set up Python
         run: uv python install 3.14.9
 
+      # Keep just-version in step with the justfile's minimum-version.
       - name: Install just
         uses: extractions/setup-just@v4.0.0
         with:
@@ -84,16 +108,21 @@ jobs:
       - name: Install dependencies
         run: just sync
 
+      # repoutils' action, at the commit of the repoutils that uv.lock locks.
+      - name: Install gh-actions-lock
+        uses: sjktools/repoutils/.github/actions/install-gh-actions-lock@v0.5.4
+
+      # The job's GITHUB_TOKEN is read-only, and is all gh actions-lock needs to
+      # read the actions' public repositories.
       - name: Run fixes
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: just fix
 
-      # Pushes with AUTOFIX_TOKEN, not GITHUB_TOKEN, so the push triggers CI.
-      # Pushes the merge commit even if `just fix` changed nothing. If the branch
-      # moved since checkout, the push isn't a fast-forward and fails.
-      - name: Commit and push changes
-        env:
-          AUTOFIX_TOKEN: ${{ secrets.AUTOFIX_TOKEN }}
-          BRANCH: ${{ github.ref_name }}
+      # Bundles the merge commit even if `just fix` changed nothing. With
+      # nothing to bundle, it uploads nothing, and fix-push.yml stops there.
+      - name: Commit changes
+        id: commit
         run: |
           git add -u
           if git diff --staged --quiet; then
@@ -104,5 +133,15 @@ jobs:
           if [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]; then
             echo "Branch is up to date and needs no fixes"
           else
-            git push "https://x-access-token:${AUTOFIX_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${BRANCH}"
+            git bundle create "$RUNNER_TEMP/fixes.bundle" "$GITHUB_SHA..HEAD"
+            echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Upload the fixes
+        if: steps.commit.outputs.head
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: fixes
+          path: ${{ runner.temp }}/fixes.bundle
+          retention-days: 1
+          if-no-files-found: error

@@ -379,7 +379,7 @@ just-fmt-check:
 check: lock-platforms-check requirements-check whitespace-check sentence-per-line-check doubled-spaces-check screenshots-dir-check blame-ignore-revs-check lint fmt-check mypy lint-templates fmt-check-templates lint-workflows actions-lock-check check-pins check-checkout-credentials secrets-workflows-check variables-workflows-check just-fmt-check check-justfile
 
 # Autofix lint issues, and reformat code, templates, the justfile and prose
-fix: lint-fix fmt fmt-templates just-fmt doubled-spaces-fix
+fix: lint-fix fmt fmt-templates just-fmt doubled-spaces-fix actions-lock
 
 # Run everything the CI workflow runs
 ci: lock-check sync check coverage docker-build docker-smoke

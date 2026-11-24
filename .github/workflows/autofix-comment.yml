@@ -1,63 +1,115 @@
 name: PR Fixes on comment
 
-# A PR comment from the repo owner that is just `/autofix` (whitespace aside)
-# runs the PR Fixes workflow (fix.yml) on the PR's branch, as running it by
-# hand would. This runs no code from the branch.
+# A PR comment from the repo owner (or, in an organization, a member) that is
+# just `/autofix` (whitespace aside) runs the PR Fixes workflow (fix.yml) on the
+# PR's branch, as running it by hand would. This runs no code from the branch.
+# The dispatched run is the branch's copy of fix.yml, which holds no secrets;
+# master's copy of fix-push.yml checks what it made before pushing it.
+#
+# The autofix-start action does the work, with `repoutils autofix`: it waits
+# for the fix run to finish and then dispatches fix-push.yml on master itself. A
+# run dispatched with a GITHUB_TOKEN starts no workflow_run workflow when it
+# completes, so fix-push.yml's own trigger never fires for it. If fix-push.yml
+# doesn't report on the PR, the action does.
+#
+# GitHub won't start the branch's fix.yml if the branch's actions.lock doesn't
+# list every action it uses, which only a relock fixes. This workflow is master's
+# copy, with master's lock, so it still starts, and relocks the branch itself:
+# the relock job runs `gh actions-lock` on the branch with no write token and
+# uploads the commit as a bundle, as fix.yml does. The retry job then has
+# fix-push.yml push it, and starts PR Fixes again on the new head.
 on:
   issue_comment:
     types: [created]
 
+# fix-push.yml reads the pull request's number from this name, so keep the two
+# in step. Every comment, on an issue too, starts a run, whose jobs skip it.
+run-name: "Comment on #${{ github.event.issue.number }}"
+
 jobs:
   dispatch:
-    # A cheap pre-filter; the exact match is checked below, as expressions
+    # A cheap pre-filter; autofix-start checks the exact match, as expressions
     # can't trim whitespace.
+    # OWNER is a user-owned repository's owner; in an organization's
+    # repository its members, owners included, are MEMBER.
     if: >-
       github.event.issue.pull_request &&
-      github.event.comment.author_association == 'OWNER' &&
+      contains(fromJSON('["OWNER", "MEMBER"]'), github.event.comment.author_association) &&
       contains(github.event.comment.body, '/autofix')
     runs-on: ubuntu-latest
     permissions:
       actions: write
+      contents: read
       pull-requests: write
-    timeout-minutes: 5
+    # autofix-start gives up after 40 minutes, before this, so its report
+    # still runs: a job that times out is cancelled, and runs no failure() steps.
+    timeout-minutes: 45
+    outputs:
+      relock: ${{ steps.autofix.outputs.relock }}
+      head-sha: ${{ steps.autofix.outputs.head-sha }}
 
     steps:
-      - name: Check the comment is only /autofix
-        id: check-comment
-        env:
-          BODY: ${{ github.event.comment.body }}
-        run: |
-          if [[ $BODY =~ ^[[:space:]]*/autofix[[:space:]]*$ ]]; then
-            echo "matched=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Comment has more than /autofix in it; not running PR Fixes."
-          fi
+      # Only for [tool.repoutils]'s comment-prefix, which the report's marker uses.
+      - name: Checkout pyproject.toml
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: /pyproject.toml
+          sparse-checkout-cone-mode: false
 
-      - name: Run PR Fixes on the PR's branch
-        if: steps.check-comment.outputs.matched == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NUMBER: ${{ github.event.issue.number }}
-          COMMENT_ID: ${{ github.event.comment.id }}
-        run: |
-          # Not read from a process substitution, whose failure wouldn't stop the step.
-          pr=$(gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --json state,isCrossRepository,headRefName \
-            --jq '"\(.state) \(.isCrossRepository) \(.headRefName)"')
-          read -r state cross_repo branch <<< "$pr"
-          if [ "$state" != OPEN ]; then
-            echo "::error::Pull request #$NUMBER is not open."
-            exit 1
-          fi
-          if [ "$cross_repo" != false ]; then
-            echo "::error::Pull request #$NUMBER is from a fork, which PR Fixes can't push to."
-            exit 1
-          fi
-          gh workflow run fix.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
-          # PR Fixes has started, so a failed reaction only warns: a red run would
-          # suggest commenting again.
-          if ! gh api --method POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
-            -f content=rocket > /dev/null; then
-            echo "::warning::Couldn't react to the comment."
-          fi
-          echo "Started PR Fixes on $branch."
+      - name: Run PR Fixes and push its fixes
+        id: autofix
+        uses: sjktools/repoutils/.github/actions/autofix-start@v0.5.4
+        with:
+          pr: ${{ github.event.issue.number }}
+          comment-id: ${{ github.event.comment.id }}
+          comment-body: ${{ github.event.comment.body }}
+          relock: "true"
+
+  # Only when GitHub refused to start PR Fixes because the branch's
+  # actions.lock doesn't list every action its fix.yml uses. It reads the
+  # branch's workflow files, but runs nothing from the branch, and holds no
+  # token that can write, so fix-push.yml checks and pushes what it makes. It
+  # restores no cache, as a run on master could reach master's.
+  relock:
+    needs: dispatch
+    if: needs.dispatch.outputs.relock == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+
+    steps:
+      - name: Relock actions.lock
+        uses: sjktools/repoutils/.github/actions/autofix-relock@v0.5.4
+        with:
+          head-sha: ${{ needs.dispatch.outputs.head-sha }}
+
+  # Even if the relock job failed, so the pull request hears how it went.
+  # fix-push.yml reads the relock job's result and bundle from this run, which
+  # it accepts as a relock run by its workflow, event and name.
+  retry:
+    needs: [dispatch, relock]
+    if: "!cancelled() && needs.dispatch.outputs.relock == 'true'"
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: write
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout pyproject.toml
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: /pyproject.toml
+          sparse-checkout-cone-mode: false
+
+      - name: Push the relock, then run PR Fixes and push its fixes
+        uses: sjktools/repoutils/.github/actions/autofix-start@v0.5.4
+        with:
+          pr: ${{ github.event.issue.number }}
+          comment-id: ${{ github.event.comment.id }}
+          comment-body: ${{ github.event.comment.body }}
+          relocked-run: ${{ github.run_id }}
