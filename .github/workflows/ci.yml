@@ -780,6 +780,14 @@ jobs:
       # Fails if actions.lock is missing an action a workflow uses, or a
       # locked commit no longer verifies upstream. Rerun `gh actions-lock`
       # after changing any `uses:`.
+      # TEMPORARY: regenerate actions.lock and print the diff.
+      - name: Regenerate actions.lock (temporary)
+        run: |
+          "$RUNNER_TEMP/gh-actions-lock"
+          git diff
+          echo ===== FULL
+          cat .github/workflows/actions.lock
+
       - name: Verify actions.lock
         run: '"$RUNNER_TEMP/gh-actions-lock" --verify'
 
