@@ -38,7 +38,7 @@ dependabot-relock base:
     {{ repoutils }} dependabot-relock {{ quote(base) }}
 
 # Check that uv.lock only has wheels for the platforms pyproject.toml allows
-lock-os-arch-check:
+lock-platforms-check:
     uv run repoutils check-lock-platforms
 
 # Check Git-tracked text files for trailing whitespace and bad newlines
@@ -104,15 +104,18 @@ test:
 coverage *args:
     uv run --group dev pytest --cov=src/lifetracker --cov=scripts --cov-report=term --cov-report=xml "$@"
 
-# patch-coverage's first argument is the branch to compare with (default:
-# origin/$GITHUB_BASE_REF on a PR, else origin/master); any more go to
-# diff-cover, e.g. `--format markdown:patch-coverage.md`, as CI passes to post
-# the report as a PR comment.
+# The base is the branch to compare with (default: origin/$GITHUB_BASE_REF on a
+# PR, else origin/master); diff-cover's further arguments go to diff-cover,
+# e.g. `--format markdown:patch-coverage.md`, as CI passes to post the report
+# as a PR comment. It exits 0 even with lines missing, so read its report.
 
-# Show patch coverage from coverage.xml against a base branch (or PR base)
+# Run coverage, then report coverage of the lines changed since base
+patch-coverage base='': coverage (diff-cover base)
+
+# Report coverage of the lines changed since base from an existing coverage.xml (extra args go to diff-cover)
 [positional-arguments]
-patch-coverage compare_branch="" *args:
-    compare_branch="${1:-${GITHUB_BASE_REF:+origin/$GITHUB_BASE_REF}}"; shift $(( $# > 0 )); uv run --group dev diff-cover coverage.xml --compare-branch="${compare_branch:-origin/master}" --branch-coverage "$@"
+diff-cover base='' *args:
+    base="${1:-${GITHUB_BASE_REF:+origin/$GITHUB_BASE_REF}}"; shift $(( $# > 0 )); uv run --group dev diff-cover coverage.xml --compare-branch="${base:-origin/master}" --branch-coverage "$@"
 
 # The screenshot tests live outside `testpaths`, so plain `pytest` (and
 # `just test`/`just coverage`) never collects them; `-n 0` because two tests
@@ -325,15 +328,46 @@ variables-workflows-check:
 just-fmt:
     {{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} --fmt
 
+# Check AGENTS.md and README.md prose for doubled spaces between words
+doubled-spaces-check:
+    uv run repoutils check-doubled-spaces
+
+# Collapse doubled spaces between words in AGENTS.md and README.md prose to one space
+doubled-spaces-fix:
+    uv run repoutils check-doubled-spaces --fix
+
+# Not part of check until AGENTS.md and README.md pass it (see pyproject.toml's
+# [tool.repoutils.justfile]).
+
+# Check AGENTS.md and README.md prose for long, clause-heavy sentences, or too many short ones
+prose-check:
+    uv run repoutils check-prose
+
+# Check that the justfile has the standard recipes, and that check, fix, ci and patch-coverage reach the standard ones
+check-justfile:
+    uv run repoutils check-justfile --just {{ quote(just_executable()) }} --justfile {{ quote(justfile()) }}
+
+# Check `secrets export` round-trips made-up secrets through age (on the PATH), also encrypting to the GitHub key given as USER/SHA256:FINGERPRINT
+secrets-export-test $SECRETS_EXPORT_KEY='':
+    {{ repoutils }} secrets export --self-test ${SECRETS_EXPORT_KEY:+--github-key "$SECRETS_EXPORT_KEY"}
+
+# Check .github/workflows/actions.lock pins every action the workflows use, transitive ones included, to a commit that still verifies upstream (needs gh, logged in, with the github/gh-actions-lock extension)
+actions-lock-check:
+    gh actions-lock --verify
+
+# Pin every action the workflows use in .github/workflows/actions.lock (needs gh, logged in, with the github/gh-actions-lock extension)
+actions-lock:
+    gh actions-lock
+
 # Check that the justfile is formatted as just's built-in formatter would
 just-fmt-check:
     {{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} --fmt --check
 
-# Run every whitespace, sentence-per-line, screenshots/, blame-ignore-revs, ruff, mypy, djlint, jactionlint, pin, checkout, secrets, variables and justfile format check (no fixes, no tests)
-check: whitespace-check sentence-per-line-check screenshots-dir-check blame-ignore-revs-check lint fmt-check mypy lint-templates fmt-check-templates lint-workflows check-pins check-checkout-credentials secrets-workflows-check variables-workflows-check just-fmt-check
+# Run every check, without fixing anything or running tests (actions-lock-check needs gh with the gh-actions-lock extension)
+check: lock-platforms-check requirements-check whitespace-check sentence-per-line-check doubled-spaces-check screenshots-dir-check blame-ignore-revs-check lint fmt-check mypy lint-templates fmt-check-templates lint-workflows actions-lock-check check-pins check-checkout-credentials secrets-workflows-check variables-workflows-check just-fmt-check check-justfile
 
-# Autofix lint issues and reformat code/templates and the justfile
-fix: lint-fix fmt fmt-templates just-fmt
+# Autofix lint issues, and reformat code, templates, the justfile and prose
+fix: lint-fix fmt fmt-templates just-fmt doubled-spaces-fix
 
 # Run everything the CI workflow runs
-ci: lock-check lock-os-arch-check sync requirements-check check coverage docker-build docker-smoke
+ci: lock-check sync check coverage docker-build docker-smoke
