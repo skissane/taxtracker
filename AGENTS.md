@@ -111,7 +111,7 @@ The job checks out with `fetch-depth: 0` so the base branch and the merge base a
 No job that runs the branch's code holds a token that can push: `dependabot-fix` checks out with `persist-credentials: false` and a read-only `GITHUB_TOKEN`, and uploads its commit as a Git bundle artifact; its `uv lock` runs can build a dependency's sdist to read its metadata, running that package's build backend.
 `dependabot-push`, on a fresh runner that runs nothing from the branch, checks out the PR's head from the event and runs repoutils' `push-bundle` action, which checks that the bundle is one commit on that head changing only `pyproject.toml` and `uv.lock`, and pushes it with a lease (failing if Dependabot has moved the branch; the run its push triggers redoes the fix).
 It pushes with the `DEPENDABOT_FIX_TOKEN` secret (a token with `contents: write` on the repo, without workflows write; it must be a Dependabot secret, as Dependabot runs don't get Actions secrets, and the action fails if it's unset), not `GITHUB_TOKEN`, because pushes made with `GITHUB_TOKEN` don't trigger new workflow runs.
-`test` waits on it and runs only if it was skipped or committed nothing; if it committed a fix, that run's `test` is skipped and the run `dependabot-push`'s push triggers tests the fixed commit.
+`test` waits on `dependabot-fix` and runs only if it was skipped or committed nothing; if it committed a fix, that run's `test` is skipped and the run `dependabot-push`'s push triggers tests the fixed commit.
 
 ```bash
 # Start the app (sync deps, migrate, create superuser, runserver)

@@ -852,6 +852,8 @@ jobs:
         uses: actions/upload-artifact@v7.0.2
         with:
           name: dependabot-fix
+          # A re-run of the workflow replaces the previous attempt's bundle.
+          overwrite: true
           path: ${{ runner.temp }}/dependabot-fix.bundle
           retention-days: 1
           if-no-files-found: error
