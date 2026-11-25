@@ -163,41 +163,18 @@ jobs:
           fi
           report="### Self-test of claude-code-review.yml"$'\n\n'"$report"
           printf '%s\n' "$report" >> "$GITHUB_STEP_SUMMARY"
-          delimiter="EOF_$(openssl rand -hex 16)"
-          printf 'report<<%s\n%s\n%s\n' "$delimiter" "$report" "$delimiter" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$report" > "$RUNNER_TEMP/self-test-report.md"
+          echo "report=$RUNNER_TEMP/self-test-report.md" >> "$GITHUB_OUTPUT"
 
+      # Posts a new report and hides this workflow's earlier ones as outdated.
       - name: Comment self-test report on PR
         if: always() && steps.self-test-report.outputs.report != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPORT: ${{ steps.self-test-report.outputs.report }}
-          MARKER: '<!-- self-test:claude-code-review.yml -->'
-        run: |
-          # shellcheck disable=SC2016 # $vars in the GraphQL queries are GraphQL's, not the shell's
-          # Hide this workflow's earlier reports as outdated. Matching on the author
-          # too means nobody else's comment can be hidden by copying the marker.
-          gh api graphql --paginate -F owner="${GH_REPO%/*}" -F name="${GH_REPO#*/}" -F pr="$PR_NUMBER" -f query='
-            query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) {
-              repository(owner: $owner, name: $name) {
-                pullRequest(number: $pr) {
-                  comments(first: 100, after: $endCursor) {
-                    nodes { id isMinimized body author { login } }
-                    pageInfo { hasNextPage endCursor }
-                  }
-                }
-              }
-            }' --jq '.data.repository.pullRequest.comments.nodes[]
-              | select(.author.login == "github-actions" and (.isMinimized | not)
-                and (.body | startswith(env.MARKER))) | .id' |
-          while read -r id; do
-            gh api graphql -F id="$id" -f query='
-              mutation($id: ID!) {
-                minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { clientMutationId }
-              }' >/dev/null
-          done
-          printf '%s\n\n%s\n' "$MARKER" "$REPORT" | gh pr comment "$PR_NUMBER" --body-file -
+        uses: sjktools/repoutils/.github/actions/post-comment@v0.5.4
+        with:
+          pr: ${{ github.event.pull_request.number }}
+          body: ${{ steps.self-test-report.outputs.report }}
+          name: self-test-claude-code-review.yml
+          hide-previous: "true"
 
       # GitHub's API doesn't serve step summaries, so each step that writes one
       # copies it to step-summaries/ for this artifact (see AGENTS.md).

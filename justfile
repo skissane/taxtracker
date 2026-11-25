@@ -324,6 +324,10 @@ secrets-workflows-check:
 variables-workflows-check:
     uv run repoutils variables check-workflows
 
+# Run the Inspect Secrets workflow on master and print what it found about each secret (token types, owners, expiry); needs a token with Actions write access
+inspect-secrets *args:
+    uv run repoutils secrets inspect-remote {{ args }}
+
 # Format the justfile with just's built-in formatter
 just-fmt:
     {{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} --fmt
