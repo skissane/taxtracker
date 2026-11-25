@@ -324,6 +324,14 @@ secrets-workflows-check:
 variables-workflows-check:
     uv run repoutils variables check-workflows
 
+# Check that the repository's GitHub settings (labels, rulesets, environments, ...) match pyproject.toml; needs an admin token
+github-settings-check *args:
+    uv run repoutils github-settings check {{ args }}
+
+# Apply the GitHub settings pyproject.toml declares, creating what's missing; needs an admin token
+github-settings-ensure *args:
+    uv run repoutils github-settings ensure {{ args }}
+
 # Run the Inspect Secrets workflow on master and print what it found about each secret (token types, owners, expiry); needs a token with Actions write access
 inspect-secrets *args:
     uv run repoutils secrets inspect-remote {{ args }}
