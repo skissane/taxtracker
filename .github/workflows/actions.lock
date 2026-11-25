@@ -3,7 +3,9 @@
 # Docs: https://gh.io/actions-lockfile
 version: 'v0.0.3'
 workflows:
-    '.github/workflows/autofix-comment.yml': []
+    '.github/workflows/autofix-comment.yml':
+        - 'actions/checkout@v7.0.1'
+        - 'sjktools/repoutils@v0.5.4'
     '.github/workflows/ci.yml':
         - 'actions/cache@v6.1.0'
         - 'actions/checkout@v7.0.1'
@@ -24,10 +26,15 @@ workflows:
         - 'actions/upload-artifact@v7.0.2'
         - 'anthropics/claude-code-action@v1.0.276'
         - 'sjktools/repoutils@v0.5.4'
+    '.github/workflows/fix-push.yml':
+        - 'actions/checkout@v7.0.1'
+        - 'sjktools/repoutils@v0.5.4'
     '.github/workflows/fix.yml':
         - 'actions/checkout@v7.0.1'
+        - 'actions/upload-artifact@v7.0.2'
         - 'astral-sh/setup-uv@v10.3.3'
         - 'extractions/setup-just@v4.0.0'
+        - 'sjktools/repoutils@v0.5.4'
     '.github/workflows/inspect-secrets.yml':
         - 'sjktools/repoutils@v0.5.4'
 dependencies:
