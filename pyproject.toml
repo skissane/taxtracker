@@ -154,8 +154,9 @@ push-protection = true
 immutable-releases = false
 
 # The deployment environments `repoutils environments` checks or creates.
-# Only master can deploy to autofix, which holds AUTOFIX_TOKEN for
-# fix-push.yml, so a branch's own copy of a workflow can't read it.
+# Only master can deploy to autofix. The /autofix redesign (#352) moves
+# AUTOFIX_TOKEN here for its fix-push.yml, which runs from master, so a
+# branch's own copy of a workflow can't read it.
 [tool.repoutils.environments.autofix]
 deployment-branches = "selected"
 allowed-branches = ["master"]
