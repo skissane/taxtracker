@@ -100,12 +100,11 @@ name = "# type: ignore"
 message = "please fix the type error instead, if you can"
 
 # The standard recipes (`just check-justfile`) taxtracker leaves out on
-# purpose: pyright, as mypy type-checks it; prose-check from check until
-# AGENTS.md and README.md pass it; and actions-lock from fix until fix.yml can
-# run gh actions-lock (#352).
+# purpose: pyright, as mypy type-checks it, and prose-check from check until
+# AGENTS.md and README.md pass it.
 [tool.repoutils.justfile]
 omit = ["pyright"]
-omit-dependencies = { check = ["prose-check"], fix = ["actions-lock"] }
+omit-dependencies = { check = ["prose-check"] }
 
 # The platforms uv.lock may have wheels for, as [tool.uv] environments allows
 # (`just lock-platforms-check`). uv keeps iOS and Emscripten wheels despite
@@ -116,8 +115,11 @@ tolerated = ["ios", "pyemscripten"]
 
 # The secrets the workflows use, which `just secrets-workflows-check` checks.
 [tool.repoutils.secrets]
-actions = ["AUTOFIX_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "FLY_API_TOKEN", "FLY_APP", "SCREENSHOTS_TOKEN"]
+actions = ["CLAUDE_CODE_OAUTH_TOKEN", "FLY_API_TOKEN", "FLY_APP", "SCREENSHOTS_TOKEN"]
 dependabot = ["DEPENDABOT_FIX_TOKEN"]
+# fix-push.yml pushes /autofix's commits to a PR's branch with this; only
+# master can deploy to the autofix environment.
+environments.autofix = ["AUTOFIX_TOKEN"]
 
 # The GitHub settings below are what `just github-settings-check` checks and
 # `just github-settings-ensure` applies (see AGENTS.md's GitHub settings).
@@ -154,9 +156,8 @@ push-protection = true
 immutable-releases = false
 
 # The deployment environments `repoutils environments` checks or creates.
-# Only master can deploy to autofix. The /autofix redesign (#352) moves
-# AUTOFIX_TOKEN here for its fix-push.yml, which runs from master, so a
-# branch's own copy of a workflow can't read it.
+# Only master can deploy to autofix, which holds AUTOFIX_TOKEN for
+# fix-push.yml, so a branch's own copy of a workflow can't read it.
 [tool.repoutils.environments.autofix]
 deployment-branches = "selected"
 allowed-branches = ["master"]
