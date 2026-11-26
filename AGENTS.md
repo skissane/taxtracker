@@ -12,32 +12,42 @@ Keep to this when editing them: put each new sentence on its own line, don't rew
 
 ## Commands
 
-CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `sentence-per-line-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `mypy`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `check-pins`, `check-checkout-credentials`, `secrets-workflows-check`, `variables-workflows-check`, `just-fmt`, `just-fmt-check`, `coverage`, `patch-coverage`, `patch-coverage-post`, `coverage-status-post`, `wait-for-base-coverage`, `screenshots`, `screenshots-post`, `exolot`, `exolot-post`, `long-files`, `sync`, `lock-check`, `lock-os-arch-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
+CI (`.github/workflows/ci.yml`) delegates each step to the `justfile`; run `just ci` to run everything CI runs, or `just --list` to see individual recipes (`whitespace-check`, `sentence-per-line-check`, `screenshots-dir-check`, `blame-ignore-revs-check`, `lint`, `fmt-check`, `mypy`, `lint-templates`, `fmt-check-templates`, `lint-workflows`, `check-pins`, `check-checkout-credentials`, `secrets-workflows-check`, `variables-workflows-check`, `just-fmt`, `just-fmt-check`, `doubled-spaces-check`, `doubled-spaces-fix`, `prose-check`, `check-justfile`, `actions-lock-check`, `actions-lock`, `secrets-export-test`, `inspect-secrets`, `github-settings-check`, `github-settings-ensure`, `coverage`, `patch-coverage`, `diff-cover`, `patch-coverage-post`, `coverage-status-post`, `wait-for-base-coverage`, `screenshots`, `screenshots-post`, `exolot`, `exolot-post`, `long-files`, `added-strings`, `sync`, `lock-check`, `lock-platforms-check`, `requirements-check`, `requirements-fix`, `dependabot-relock`, `docker-build`, `docker-smoke`).
 `just ci` is maintained by hand, so when you change the `test` job's steps in `ci.yml`, change the `ci` recipe to match.
 Coverage is reported by repoutils (see repoutils below), not Codecov: after `just coverage`, the `test` job runs `just patch-coverage` against the PR's base branch (on `master`, against the commit's parent, `HEAD^`), writing `patch-coverage.md` and `patch-coverage.json`, and uploads `coverage.xml` and `patch-coverage.json` as the `coverage-status` artifact and, on PRs, `patch-coverage.md` as the `patch-coverage` artifact (each kept 14 days).
 The `post-coverage-status` job posts the project and patch coverage as the `coverage/project` and `coverage/patch` commit statuses, always `success`, on `master`'s commits and on PRs from this repository other than Dependabot's (`just coverage-status-post`, needing `statuses: write`), so `master`'s statuses keep a history of coverage.
 On those PRs, `post-patch-coverage` also posts the patch coverage report as a PR comment, with the project's coverage and its change from the base commit's `coverage/project` status (see Patch coverage).
 The base's CI may still be running when a PR's coverage is ready (e.g. a stacked PR rebased onto `master` as its parent merges), so the `test` job's last steps run `just wait-for-base-coverage`, which waits up to 10 minutes for the base's `coverage/project` status (giving up at once if the base's `post-coverage-status` job finished without posting one), then write the same report to the job summary, so fork and Dependabot PRs have it too.
 It never fails the job, only warns when it gives up, as a broken `master` mustn't fail the required `test` check of the PR fixing it; the comment then just lacks the change from the base.
-`ci.yml` has thirteen jobs, `test`, `post-patch-coverage` (see Patch coverage), `post-coverage-status` (see above), `exolot` and `post-exolot` (see Exolot), `long-files` (see Long files), `screenshots` and `post-screenshots` (see Screenshots), `actions-lock` (see Action pins), `dependabot-fix`, `check-fly`, `publish` and `deploy` (see Deployment).
+GitHub's API doesn't serve step summaries, so every job that writes one also uploads it as an artifact, which `gh run download <run> --pattern 'step-summaries-*'` can fetch.
+A step that writes to `$GITHUB_STEP_SUMMARY` (itself or through a command such as `just patch-coverage-post`) starts with a `trap` that copies that file to `$RUNNER_TEMP/step-summaries/<name>.md` when the step exits, even if it fails.
+The job's last step (`Upload the step summaries`) uploads that directory as the artifact `step-summaries-${{ github.job }}`, with `if: always()` and `if-no-files-found: ignore`; copy both from an existing job, such as `long-files`.
+`ci.yml` has fifteen jobs, `test`, `post-patch-coverage` (see Patch coverage), `post-coverage-status` (see above), `exolot` and `post-exolot` (see Exolot), `long-files` (see Long files), `added-strings` (see Added suppressions), `screenshots` and `post-screenshots` (see Screenshots), `actions-lock` (see Action pins), `dependabot-fix` and `dependabot-push` (see Dependency minimums), `check-fly`, `publish` and `deploy` (see Deployment).
 
 **repoutils:** the repository checks and CI helpers come from [repoutils](https://github.com/sjktools/repoutils) (formerly repotools), a dev dependency in its own `repoutils` dependency group, configured in `pyproject.toml`'s `[tool.repoutils]`; see its README for each command.
 Recipes that only check run `uv run repoutils <command>`.
 Recipes that CI runs with a write-capable token or on a Dependabot branch (posting PR comments and commit statuses, `requirements-fix`, `dependabot-relock`) use the justfile's `repoutils` variable, `uv run --project <the justfile's directory> --only-group repoutils repoutils`, which installs only repoutils, hash-checked against `uv.lock`, and not the project or its other dependencies.
-The Claude workflows' `route` jobs use repoutils' `claude-route` composite action, as `uses: sjktools/repoutils/.github/actions/claude-route@v<version>`.
+The workflows use repoutils' composite actions as `uses: sjktools/repoutils/.github/actions/<action>@v<version>`: `claude-route` and `post-comment` in the Claude workflows, `inspect-secrets`, and the `/autofix` ones (see PR Fixes); each runs one repoutils command from the action's own commit with the runner's `python3`, installing nothing, except `install-gh-actions-lock`, which installs gh-actions-lock.
 `just check-pins` checks that `actions.lock` locks every repoutils action at the commit the locked repoutils package was built from, so the actions' `@v<version>` and `uv.lock`'s repoutils must move together; `.github/dependabot.yml` therefore tells Dependabot to ignore repoutils in both ecosystems.
+On PRs, the jobs that post comments and commit statuses (`post-patch-coverage`, `post-coverage-status`, `post-screenshots`, `post-exolot`, `long-files` and `added-strings`) check out the PR's base commit rather than the PR, so a PR's changes to the justfile, `pyproject.toml` or `uv.lock` don't run beside their write-capable tokens, and take effect only once it merges; the workflow file itself still comes from the PR, as in any `pull_request` run.
+`long-files` and `added-strings` report on the PR's head, so they also check that out, into `head/`, as data only, and run the base's `[no-cd]` recipes in it with `just --justfile ../justfile`; that checkout's `pyproject.toml` is read as data, so a PR's changes to `[tool.repoutils.long-files]` or `[tool.repoutils.added-strings]` do apply to its own report.
 `comment-prefix = "lifetracker"` keeps the PR comments' hidden markers as they were before repoutils (`<!-- lifetracker-patch-coverage -->` and so on).
 `[tool.repoutils.secrets]` lists the secrets the workflows use; `just secrets-workflows-check` (part of `just check`, `just ci` and the `test` job) fails if a workflow starts or stops using one without it being updated, and `just variables-workflows-check` does the same for Actions variables (none yet).
+The Inspect Secrets workflow (`inspect-secrets.yml`, run by hand from `master`) runs repoutils' `inspect-secrets` action on the secrets `[tool.repoutils.secrets]` lists, reporting each GitHub token's type, owner and expiry (never its value) in its job summary, and fails when a token expires within 14 days or GitHub rejects it.
+`just inspect-secrets` starts it from your machine and prints its summary (it needs a token with Actions write access, e.g. `gh auth login`'s); Dependabot secrets can't be inspected, as only Dependabot's runs get them.
 When a change here needs something repoutils lacks, fix it in repoutils, release it, and bump it here, rather than adding a script to `scripts/`.
 
-**PR Fixes:** `.github/workflows/fix.yml` (issue #254) is run by hand (`workflow_dispatch`) on an open PR's branch.
-A PR comment from the repo owner (`author_association` `OWNER`) that is only `/autofix`, give or take whitespace, also runs it: `.github/workflows/autofix-comment.yml` (issue #261) checks the whole body against `^[[:space:]]*/autofix[[:space:]]*$`, so a comment that merely mentions `/autofix` doesn't, then runs `gh workflow run fix.yml --ref <head branch>` and reacts 🚀 to the comment.
-It dispatches rather than giving `fix.yml` an `issue_comment` trigger, as an `issue_comment` run's `github.ref` is always the default branch; the dispatched run is the same as one run by hand, and the comment workflow never checks out the branch (`GITHUB_TOKEN` may trigger `workflow_dispatch`, unlike other events).
+**PR Fixes:** `/autofix` uses repoutils' design, as exolot does (issues #254, #261 and #352).
+A PR comment from the repo owner (`author_association` `OWNER`, or `MEMBER` were the repository an organization's) that is only `/autofix`, give or take whitespace, runs `.github/workflows/autofix-comment.yml`, whose `autofix-start` action (`repoutils autofix`) checks the whole body, dispatches `fix.yml` (PR Fixes) on the PR's branch with the PR's number, reacts to the comment, waits for the fix run, and dispatches `fix-push.yml` (PR Fixes Push) itself, as a run dispatched with a `GITHUB_TOKEN` starts no `workflow_run` workflow.
 It runs only on newly created comments, not edits, and fails for a closed or fork PR.
-It fails unless the branch has an open PR from this repo (`gh pr list --head`), merges the PR's base branch in (failing on conflicts), runs `just sync` and `just fix`, commits any changes to tracked files (`git add -u`) as `chore: apply automated fixes`, and pushes if that or the merge moved `HEAD`.
+`fix.yml` checks the run with the `autofix-check` action, merges the PR's base branch in (failing on conflicts), runs `just sync` and `just fix` with no secrets and a read-only `GITHUB_TOKEN` (enough for `gh actions-lock`, installed by the `install-gh-actions-lock` action), commits any changes to tracked files (`git add -u`) as `chore: apply automated fixes`, and uploads the new commits as a Git bundle.
+It runs on the branch rather than `master` because code in a run can write to the Actions cache of the run's branch; it puts the PR's number in the run's name, as GitHub's API gives a run's name but not its inputs.
+`fix-push.yml` always runs from `master` and runs nothing from the branch: its `resolve` job checks the fix run and finds its PR (`autofix-resolve`), its `push` job checks the bundle holds at most a clean merge of the base and one commit changing nothing under `.github/workflows` except `actions.lock`, and pushes it with a lease (`push-bundle`), and its `report` job posts the outcome as a new PR comment, hiding the earlier ones (`post-comment`).
+A `workflow_run` trigger covers a fix run started by hand (Actions → PR Fixes → Run workflow, on the PR's branch), which then needs the branch to have exactly one open PR.
+It pushes with `AUTOFIX_TOKEN`, not `GITHUB_TOKEN`, whose pushes wouldn't trigger CI: a fine-grained PAT with Contents and Workflows (for `actions.lock`) write, in the `autofix` environment, which only `master` can deploy to, so no other branch's workflow can read it.
+If GitHub refuses to start the branch's `fix.yml` because its `actions.lock` doesn't list every action it uses, `autofix-comment.yml`'s `relock` job (`autofix-relock`) relocks the branch with no write-capable token, and its `retry` job has `fix-push.yml` push that one commit and starts PR Fixes again.
+A branch that predates `fix.yml`'s bundle design has to merge `master` in before `/autofix` can run on it.
 `fmt-templates` reruns djlint with `--check` if `--reformat` fails, as `--reformat` exits 1 whenever it changes a file.
-Like `dependabot-fix`, it checks out with `persist-credentials: false`, as `just fix` runs the branch's own `justfile` and dependencies, and only the push step sees its token, the `AUTOFIX_TOKEN` Actions secret (a fine-grained PAT with Contents: read and write; the job fails if it's unset), not `GITHUB_TOKEN`, whose pushes wouldn't trigger CI.
-If the branch moves after checkout, the push isn't a fast-forward and fails.
 
 **Claude workflows:** `.github/workflows/claude.yml` runs claude-code-action when `@claude` is in a PR or issue comment, a review comment, a submitted review, or the body of a newly opened or assigned issue, and `claude-code-review.yml` reviews a PR when its owner, a member or a collaborator writes `@claude review` in a PR comment, a review comment or a submitted review (ported from exolot), which `claude.yml` then skips.
 A review request on a plain issue, in a comment or a new issue's body, goes to `claude.yml` instead, as there's no PR to review.
@@ -46,9 +56,14 @@ So `@claude` quoted mid-sentence, in backticks or in a blockquote starts nothing
 The action runs repoutils from the action's own commit with the runner's `python3`, installing nothing and needing no checkout; on a self-test the `route` jobs run it on empty text, so the self-test covers them too.
 Both set `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`, which strips secrets from the environment of the commands Claude runs, as what it reads may hold a prompt injection; that isolates the commands with bubblewrap, so each job first installs `bubblewrap` and `socat` and allows unprivileged user namespaces, without which Claude has no Bash at all.
 They allow only `git diff`, `git log` and `git show` beyond the action's defaults (`--allowedTools`), with the full history checked out, and deliberately not `just`: the action puts its write-capable token in `.git/config`, where the PR's own recipes and tests could read it, so CI runs them and Claude reads the results (`actions: read`).
-Each self-tests: a PR from this repository that changes the workflow (not Dependabot's, as the action refuses bot actors and Dependabot's runs get no `CLAUDE_CODE_OAUTH_TOKEN`) runs the PR's copy with a prompt asking Claude to check its tools, the allowed and a denied command, the sandbox and that `env` is denied (which shows only that the allowlist stops Claude listing environment variables, not that the scrub works), and posts the report as a `github-actions[bot]` comment, hiding that workflow's earlier ones (found by a `<!-- self-test:<file> -->` marker and the author).
+Each self-tests: a PR from this repository that changes the workflow (not Dependabot's, as the action refuses bot actors and Dependabot's runs get no `CLAUDE_CODE_OAUTH_TOKEN`) runs the PR's copy with a prompt asking Claude to check its tools, the allowed and a denied command, the sandbox and that `env` is denied (which shows only that the allowlist stops Claude listing environment variables, not that the scrub works), and posts the report as a `github-actions[bot]` comment with repoutils' `post-comment` action, hiding that workflow's earlier ones (found by a `<!-- lifetracker-self-test-<file> -->` marker and the author).
 A self-test uses the job's own `GITHUB_TOKEN`, as the Claude app refuses a token to a workflow that differs from master's, and a new push cancels a running one (a per-PR `concurrency` group; other events get one each).
 `claude.yml`'s job can't write to PRs, so its report is posted by a second job.
+
+**GitHub settings:** `pyproject.toml`'s `[tool.repoutils]` declares the repository's labels, repository and security settings, `master`'s ruleset (`main`: squash merges only, the `test`, `screenshots` and `post-screenshots` checks on an up-to-date head, admins may bypass) and the `autofix` environment, which only `master` can deploy to, as exolot's does.
+`just github-settings-check` (`repoutils github-settings check`) checks that the repository matches them, and the secrets `[tool.repoutils.secrets]` lists, and `just github-settings-ensure` applies them, creating what's missing; secret values are never set, so add a new environment's secrets by hand.
+Both need a token with administration access, which neither CI nor Claude Code sessions have, so the owner runs them.
+When you change a setting on GitHub, change `pyproject.toml` to match, and the other way round.
 
 **Recreate PR:** `uv run repoutils recreate-pr <PR URL>` closes an open same-repo PR and opens a draft PR from the same branch with its title, body, labels and milestone, then comments "Superseded by #N" on the original (see repoutils' README for how it handles failures).
 
@@ -64,10 +79,11 @@ That's the `correctness` profile (what actionlint checks) plus the default profi
 
 **Action pins:** `.github/workflows/actions.lock` pins every action the workflows use, transitive ones (those composite actions use) included, to a commit, with its repository's IDs, so a moved tag or a renamed and re-created repository can't change the code that runs.
 It's generated by GitHub's [`gh actions-lock`](https://github.com/github/gh-actions-lock) extension (`gh extension install github/gh-actions-lock --pin v0.4.1`); never edit it by hand.
-After changing any `uses:`, run `gh actions-lock` to update it; it narrows a partial version (`@v4`) to the newest full tag (`@v4.4.0`) when it first pins it, so name full tags.
+After changing any `uses:`, run `just actions-lock` (`gh actions-lock`; part of `just fix`) to update it; it narrows a partial version (`@v4`) to the newest full tag (`@v4.4.0`) when it first pins it, so name full tags.
 It needs GitHub's GraphQL API, which Claude Code sessions can't reach; there, push the workflow change with a temporary `gh actions-lock` step in the `actions-lock` job that uploads `.github/workflows/` as an artifact, then commit the generated files and remove the step.
 The `actions-lock` job runs `gh actions-lock --verify` (with `GITHUB_TOKEN`, `contents: read`), failing if the lockfile is missing an action or a locked commit no longer verifies upstream, and `publish` waits on it.
-`just ci` leaves it out, as it needs GitHub's API.
+`just actions-lock-check` (`gh actions-lock --verify`; part of `just check` and so `just ci`) does the same locally, so `just check` and `just ci` need `gh`, logged in, with the extension; in Claude Code sessions, run the other recipes `check` lists instead.
+There `just fix` likewise fails at its last step, `actions-lock`, after its other fixes have run; after a `uses:` change, `/autofix` on the PR relocks it in Actions (see PR Fixes).
 It downloads v0.4.1's `linux-amd64` release binary and checks its SHA-256 before running it standalone, rather than `gh extension install --pin`, which takes only a release tag for a precompiled extension; to upgrade it, change the version in the URL, the hash, and the `--pin` version in the install command above together.
 Dependabot's `github-actions` entry bumps the actions weekly, with the same 7-day cooldown as uv, which `gh actions-lock` also warns about when it pins a tag younger than that.
 Dependabot regenerates the lockfile entries in the same PR as a bump, for workflows already in the lockfile.
@@ -75,8 +91,12 @@ Dependabot regenerates the lockfile entries in the same PR as a bump, for workfl
 **Pins and checkout credentials:** `just check-pins` (part of `just check`, `just ci` and the `test` job; `repoutils check-pins`) fails unless every `astral-sh/setup-uv` step in the workflows (and any local composite actions under `.github/actions`) sets `version` to `[tool.uv] required-version`'s minimum, every `extractions/setup-just` step sets `just-version` to the `justfile`'s `minimum-version`, and the `Dockerfile`'s `ghcr.io/astral-sh/uv` stage has the same uv tag; it also fails if it finds no such step or stage, as that more likely means it no longer recognises them.
 It also checks that `actions.lock` locks every repoutils action the workflows use at the commit the locked repoutils package was built from, so the actions' `@v<version>` and `uv.lock`'s repoutils move together (see repoutils below).
 `just check-checkout-credentials` (likewise; `repoutils check-checkout-credentials`) fails on any `actions/checkout` step that doesn't set `persist-credentials` to `false` or `true`.
-Set `true` only in a job that pushes with the checkout's token, with a comment saying so; the check can't tell whether a job pushes, so that part is left to review (no job does yet: `fix.yml` and `dependabot-fix` push with their own tokens, so check out with `false`).
+Set `true` only in a job that pushes with the checkout's token, with a comment saying so; the check can't tell whether a job pushes, so that part is left to review (no job does yet: `fix-push.yml` and `dependabot-push` push with their own tokens, so check out with `false`).
 Left unset, checkout keeps the token where every later step can read it, including the PR's own code in `test` and `screenshots`; jactionlint's `artipacked` rule doesn't catch it, as it skips checkout v6 and later.
+
+**Standard recipes:** `just check-justfile` (part of `just check`, `just ci` and the `test` job; `repoutils check-justfile`) fails unless the `justfile` has repoutils' standard recipes and `check`, `fix`, `ci` and `patch-coverage` reach the standard ones, as exolot's does.
+`pyproject.toml`'s `[tool.repoutils.justfile]` lists what taxtracker leaves out on purpose: `pyright`, as mypy type-checks the code, and `prose-check` from `check` until `AGENTS.md` and `README.md` pass it (`just prose-check` lists their long, clause-heavy sentences).
+`just doubled-spaces-check` (likewise; `repoutils check-doubled-spaces`) fails on doubled spaces between words in their prose, and `just doubled-spaces-fix` (part of `just fix`) collapses them.
 
 **justfile formatting:** `just just-fmt-check` (part of `just check`, `just ci` and the `test` job) fails unless the `justfile` is as `just --fmt` would write it, and `just just-fmt` (part of `just fix`) rewrites it so.
 
@@ -91,16 +111,16 @@ Locally it defaults to `HEAD`, so that mistake is caught only in CI unless you p
 **Screenshots directory:** `just screenshots-dir-check` (part of `just check`, `just ci` and the `test` job; `repoutils check-screenshots-dir`) fails unless `screenshots/.gitignore` is the only file `git ls-files` lists under `screenshots/`, and it ignores everything else there.
 Without it, `rm -rf screenshots` before a screenshot run, then `git add -A`, commits the PNGs and the `.gitignore`'s deletion (as happened on PR #137).
 
-**Dependency minimums:** `pyproject.toml`'s dependency lower bounds (`>=`) are kept equal to the versions uv resolved, by `repoutils requirements-min-versions`: `just requirements-check` (part of `just ci` and the `test` job) fails if any in `[project].dependencies`, any optional extra or any dependency group differ from the versions in `uv.lock`, and `just requirements-fix` rewrites them; run `uv lock` afterwards.
+**Dependency minimums:** `pyproject.toml`'s dependency lower bounds (`>=`) are kept equal to the versions uv resolved, by `repoutils requirements-min-versions`: `just requirements-check` (part of `just check`, `just ci` and the `test` job) fails if any in `[project].dependencies`, any optional extra or any dependency group differ from the versions in `uv.lock`, and `just requirements-fix` rewrites them; run `uv lock` afterwards.
 Dependabot only edits `pyproject.toml` when the new version falls outside the existing constraint, which a `>=` minimum never excludes, so its PRs usually bump only `uv.lock`, even with `versioning-strategy: "increase"`, and would fail that check (see <https://github.com/dependabot/dependabot-core/issues/12788#issuecomment-3606306953>).
-The `dependabot-fix` job, which runs only on PRs whose `github.actor` is `dependabot[bot]`, runs `dependabot-relock`, `requirements-fix` and `uv lock` on the PR branch and pushes any change as a `chore: re-lock with pinned uv and sync dependency minimum versions` commit.
+The `dependabot-fix` job, which runs only on PRs whose `github.actor` is `dependabot[bot]`, runs `dependabot-relock`, `requirements-fix` and `uv lock` on the PR's head and commits any change as `chore: re-lock with pinned uv and sync dependency minimum versions`, which the `dependabot-push` job pushes.
 Dependabot runs its own uv, which can write `uv.lock` in a newer format than ours (a higher `revision`, simplified markers), changing lines that have nothing to do with the bump; `uv lock` alone never rewrites a lock that's already satisfied.
 So `just dependabot-relock origin/<base>` (`repoutils dependabot-relock`) puts back the `uv.lock` the branch started from (at its merge base with the base branch, so the base branch's own later lock changes aren't undone) and re-locks it with our uv, passing `--upgrade-package <name>==<version>` for each package whose locked versions Dependabot changed, then fails, restoring Dependabot's lock, unless the result locks exactly Dependabot's versions (or if `uv lock` fails).
 The job checks out with `fetch-depth: 0` so the base branch and the merge base are there.
-It pushes with the `DEPENDABOT_FIX_TOKEN` secret (a token with `contents: write` on the repo; it must be a Dependabot secret, as Dependabot runs don't get Actions secrets, and the job fails if it's unset), not `GITHUB_TOKEN`, because pushes made with `GITHUB_TOKEN` don't trigger new workflow runs.
-As the branch's bumped dependency isn't trusted, only the final push step sees the token: checkout runs with `persist-credentials: false`, and the job never syncs or installs anything but repoutils (`requirements-fix` and `dependabot-relock` use the justfile's `repoutils` variable, `uv run --only-group repoutils`).
-Its `uv lock` runs can still build a dependency's sdist to read its metadata, running that package's build backend, but no step before the push has the token.
-`test` waits on it and runs only if it was skipped or pushed nothing; if it pushed, that run's `test` is skipped and the run the push triggers tests the fixed commit.
+No job that runs the branch's code holds a token that can push: `dependabot-fix` checks out with `persist-credentials: false` and a read-only `GITHUB_TOKEN`, and uploads its commit as a Git bundle artifact; its `uv lock` runs can build a dependency's sdist to read its metadata, running that package's build backend.
+`dependabot-push`, on a fresh runner that runs nothing from the branch, checks out the PR's head from the event and runs repoutils' `push-bundle` action, which checks that the bundle is one commit on that head changing only `pyproject.toml` and `uv.lock`, and pushes it with a lease (failing if Dependabot has moved the branch; the run its push triggers redoes the fix).
+It pushes with the `DEPENDABOT_FIX_TOKEN` secret (a token with `contents: write` on the repo, without workflows write; it must be a Dependabot secret, as Dependabot runs don't get Actions secrets, and the action fails if it's unset), not `GITHUB_TOKEN`, because pushes made with `GITHUB_TOKEN` don't trigger new workflow runs.
+`test` waits on `dependabot-fix` and runs only if it was skipped or committed nothing; if it committed a fix, that run's `test` is skipped and the run `dependabot-push`'s push triggers tests the fixed commit.
 
 ```bash
 # Start the app (sync deps, migrate, create superuser, runserver)
@@ -116,8 +136,11 @@ uv run pytest tests/taxtracker/test_models.py::ItemModelTests::test_str_root
 # Run tests under coverage, print a report, and write coverage.xml (no minimum enforced)
 just coverage
 
-# Check patch coverage of coverage.xml against the PR target branch ($GITHUB_BASE_REF, else origin/master); run `just coverage` first, as it reads whatever coverage.xml is there, and it exits 0 even with lines missing, so read its report; run this before submitting a PR and try to cover all changed lines where the value of coverage is worth the extra test complexity
+# Run `just coverage`, then check patch coverage against the PR target branch ($GITHUB_BASE_REF, else origin/master); it exits 0 even with lines missing, so read its report; run this before submitting a PR and try to cover all changed lines where the value of coverage is worth the extra test complexity
 just patch-coverage
+
+# The same from an existing coverage.xml, without rerunning the tests
+just diff-cover
 
 # Post patch-coverage.md (from `just patch-coverage '' --format markdown:patch-coverage.md`) to PR 123 as a comment, or update it (as gh's logged-in user)
 just patch-coverage-post 123
@@ -137,7 +160,10 @@ just exolot-post 123 exolot.md
 # List files over the line limit, those changed since the merge base with origin/master first (--base for another branch, --post 123 to comment on PR 123 instead)
 just long-files
 
-# Lint (matches `just lint`/`just fmt-check`, which check the whole repo root)
+# List the NOSONAR, noqa and type: ignore comments added since the merge base with origin/master (--base for another branch, --post 123 to comment on PR 123 instead)
+just added-strings
+
+# Lint (`just lint` runs ruff through `repoutils ruff-check`, which also fails on ruff's warnings, such as an invalid noqa directive; `just fmt-check` checks formatting; both check the whole repo root)
 uv run ruff check .
 uv run ruff format .
 
@@ -183,11 +209,11 @@ Coverage measures `scripts` alongside `src/lifetracker`, with branch coverage on
 Run via `pytest` (using `pytest-django`, configured in `pyproject.toml`'s `[tool.pytest.ini_options]` with `testpaths = ["tests"]`), parallelised across CPU cores by `pytest-xdist` (`-n auto`, set as a default in `addopts`).
 `manage.py test tests` still works as an unparallelised fallback, using the `tests` package as its label rather than the `lifetracker.*` app labels.
 
-**Patch coverage:** `just patch-coverage [<base>] [<diff-cover option>...]` runs diff-cover over `coverage.xml` against `<base>` (default `origin/$GITHUB_BASE_REF`, else `origin/master`) with `--branch-coverage`, so a changed line with an untaken branch counts as missing, passing it any further arguments.
-The `test` job runs it after the tests, as `just patch-coverage "$BASE" --format markdown:patch-coverage.md,json:patch-coverage.json`, with the PR's base branch, or `HEAD^` on `master` (see Commands).
+**Patch coverage:** `just diff-cover [<base>] [<diff-cover option>...]` runs diff-cover over `coverage.xml` against `<base>` (default `origin/$GITHUB_BASE_REF`, else `origin/master`) with `--branch-coverage`, so a changed line with an untaken branch counts as missing, passing it any further arguments; `just patch-coverage [<base>]` runs `just coverage` first.
+The `test` job runs `diff-cover` after the tests, as `just diff-cover "$BASE" --format markdown:patch-coverage.md,json:patch-coverage.json`, with the PR's base branch, or `HEAD^` on `master` (see Commands).
 Then `post-patch-coverage` (once `test` has finished, whether it succeeded or failed, but only if it uploaded the `patch-coverage` artifact) runs `just patch-coverage-post` (`repoutils post-patch-coverage`), which posts the report as a `github-actions[bot]` PR comment, with the project's coverage from `coverage.xml` and its change from the base commit's `coverage/project` status.
 It works like the screenshot comment: found by a hidden `<!-- lifetracker-patch-coverage -->` marker and edited in place, nothing posted unless `--commit` is still the PR's head, a per-PR `concurrency` group, and skipped for fork PRs and Dependabot.
-It needs only `GITHUB_TOKEN` (`pull-requests: write`, and `statuses: read` for the base's status), no secret, and installs nothing but repoutils.
+It needs only `GITHUB_TOKEN` (`pull-requests: write`, and `statuses: read` for the base's status), no secret, runs the base commit's justfile, and installs nothing but repoutils.
 The comment warns, without failing anything, when a PR drops total coverage by more than 2 points or leaves patch coverage more than 1 point below the base's total (`[tool.repoutils.coverage]` can change both).
 repoutils parses diff-cover's Markdown report and fails if it's in a shape it doesn't know; as the `test` job writes the same comment to its summary on every run, a diff-cover upgrade that changes the format fails `test`, Dependabot's PR included.
 
@@ -203,7 +229,7 @@ Given `--commit` (CI passes the PR's head commit), it first checks that commit i
 The upload uses the undocumented `POST https://uploads.github.com/user-attachments/assets` endpoint, sending the same request `gh ... --attach` does (cli/cli `internal/attachments/client.go`), which only accepts user tokens, not installation tokens such as `GITHUB_TOKEN`.
 So uploads use the `SCREENSHOTS_TOKEN` Actions secret, a fine-grained PAT for this repo with only Pull requests: read and write (the job fails if it's unset), and the comment uses `GITHUB_TOKEN` with `pull-requests: write`.
 Locally both tokens default to `gh auth token`.
-It's skipped for fork PRs and Dependabot, which don't get the secret; it runs the PR branch's justfile but installs nothing but repoutils, so a bumped dependency never runs with the tokens.
+It's skipped for fork PRs and Dependabot, which don't get the secret; it runs the base commit's justfile and installs nothing but repoutils, so nothing from the PR runs with the tokens.
 
 **File storage:** All uploaded attachments are stored in the SQLite database, not on disk.
 When a row of any model with a `DatabaseStorage` `FileField` is deleted, `core.attachments.delete_stored_files` deletes its `DBStoredFile` too: a `post_delete` receiver, which `CoreConfig.ready()` connects to each such model (not to every sender, which would turn off fast bulk deletes everywhere), so cascades and `QuerySet.delete()` (e.g. the admin's "Delete selected") clean up as well, which a `delete()` override wouldn't.
@@ -569,10 +595,18 @@ Lines are counted as `wc -l` does, plus a last line without a newline.
 `pyproject.toml`'s `[tool.repoutils.long-files]` picks the files and limits, and the policy the report starts with: tracked files matching an `include` glob and no `exclude` one (all `*.py` but migrations), `limit` (500), and `limits`, which maps globs to their own limit (none yet; e.g. `"tests/*" = 700`), the first match winning.
 There's no list of accepted files: the policy above means a long file that should stay long just stays in the list.
 CI's `long-files` job, on every run, writes the report to the job summary and, on PRs from this repository other than Dependabot's, runs it with `--post`, which posts it as a `github-actions[bot]` PR comment, found by a hidden `<!-- lifetracker-long-files -->` marker and edited in place like the patch coverage comment.
-It checks out the PR's head, like `exolot`, so counts and links match the PR's code.
+It reports on the PR's head, like `exolot`, so counts and links match the PR's code, but runs the base commit's justfile and repoutils (see repoutils above).
 With no file over the limit, it only edits an earlier comment to say so, never posting a new one.
 As the report needs only repoutils, one job makes and posts it, with the same precautions as `post-exolot`: `GITHUB_TOKEN` only, nothing posted unless `--commit` is still the PR's head, and a per-PR `concurrency` group.
 It never fails the job over long files, only if the report can't be made or posted.
+
+## Added suppressions
+
+`just added-strings` (`repoutils added-strings`) lists the `NOSONAR`, `# noqa` and `# type: ignore` comments the working tree adds since its merge base with `--base` (default `origin/$GITHUB_BASE_REF`, else `origin/master`), making the rule against suppressing exolot's findings (see Exolot) easy to check.
+`pyproject.toml`'s `[tool.repoutils.added-strings]` gives each as a regex that matches only a comment, not a string or test data naming one, which `tests/test_added_strings.py` checks.
+Like `long-files` it's `[no-cd]`, reports on the working tree it's run in, and takes `--post <PR>` to post the report as a PR comment that later runs edit in place.
+CI's `added-strings` job, on PRs, writes the report to the job summary and, on PRs from this repository other than Dependabot's, posts it as a `github-actions[bot]` PR comment, found by a hidden `<!-- lifetracker-added-strings -->` marker and edited in place, with the same precautions as `long-files`; it posts no first comment while the PR adds none.
+The report is for information only: keep each added suppression that's actually needed, with no reply or explanation, and remove the rest.
 
 ## Linting config
 
@@ -621,6 +655,7 @@ When you file an issue, give it one `type:` and one `priority:` label, a `size:`
 An open issue with no `priority:` label is untriaged; find them with `is:open -label:priority:p0 -label:priority:p1 -label:priority:p2 -label:priority:p3`.
 When asked what to work on next, start from the `priority:p1` issues.
 Update an issue's labels when you learn more about it, e.g. a fix turns out bigger than its `size:`, or it's split into sub-issues and so loses its `size:`.
+`pyproject.toml`'s `[[tool.repoutils.labels]]` defines them (see GitHub settings), with `dependencies` and `python:uv`, which Dependabot adds to its PRs.
 Use only these labels: applying a label that doesn't exist creates a new grey one, so a typo or a new value silently adds to the scheme.
 Propose a new dimension or value to the owner rather than inventing one.
 
@@ -628,7 +663,7 @@ Propose a new dimension or value to the owner rather than inventing one.
 
 **Only Linux (x86_64 and aarch64) and macOS are supported; Windows deliberately isn't.**
 `pyproject.toml`'s `[tool.uv] environments` restricts resolution to `darwin`, and to `linux` on `x86_64`/`aarch64` only, which keeps wheels for other Linux architectures (ppc64le, s390x, armv7l, riscv64) out of `uv.lock`.
-`just lock-os-arch-check` (part of `just ci` and the `test` job; `repoutils check-lock-platforms`) fails if `uv.lock` has a wheel for a platform outside `[tool.repoutils.lock-platforms]`' `supported` list (the platforms `environments` is meant to allow) and `tolerated` list (iOS and Emscripten, which aren't supported but whose wheels uv keeps despite `environments`).
+`just lock-platforms-check` (part of `just check`, `just ci` and the `test` job; `repoutils check-lock-platforms`) fails if `uv.lock` has a wheel for a platform outside `[tool.repoutils.lock-platforms]`' `supported` list (the platforms `environments` is meant to allow) and `tolerated` list (iOS and Emscripten, which aren't supported but whose wheels uv keeps despite `environments`).
 Don't flag or "fix" Windows portability issues (e.g. relying on `HOME`, POSIX shell syntax in the `justfile` or scripts, `/` path separators, file permission bits), and don't add Windows-specific workarounds.
 musl Linux (e.g. Alpine) isn't supported either, though `uv.lock` can't exclude it (environment markers can't tell glibc from musl): some dev tools, such as jactionlint, ship only glibc (manylinux) and macOS wheels, so `uv sync` fails there.
 Don't move such a tool to its own dependency group, or otherwise work around it, for musl's sake.

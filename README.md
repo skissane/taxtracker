@@ -535,15 +535,15 @@ The main ones:
 |---|---|
 | `just test` | Runs the test suite (pytest, in parallel across CPU cores). |
 | `just check` | Runs the whitespace, one-sentence-per-line, `screenshots/`, `.git-blame-ignore-revs`, ruff, djlint and workflow lint checks, without fixing anything. |
-| `just fix` | Fixes lint issues and reformats code and templates. |
+| `just fix` | Fixes lint issues, reformats code and templates, and regenerates `actions.lock` (needs `gh` with the gh-actions-lock extension). |
 | `just coverage` | Runs the tests and prints a coverage report. |
 | `just screenshots` | Saves light and dark mode screenshots of admin pages to `screenshots/`, using a headless Chromium it installs with Playwright. |
 | `just ci` | Runs everything CI runs, including building the Docker image. |
 
 The tests that send requests through Envoy run it with Docker, and are skipped without it; on macOS they need Docker Desktop's host networking turned on (Settings → Resources → Network).
 On a pull request, CI also takes the screenshots and posts them as a comment on it.
-To fix lint and formatting on a pull request without checking it out, run the **PR Fixes** workflow on its branch (Actions → PR Fixes → Run workflow): it merges in the base branch, runs `just fix` and pushes the result.
-Commenting `/autofix`, with nothing else in the comment, on an open pull request from a branch of this repo (not a fork) does the same (repo owner only).
-It needs an `AUTOFIX_TOKEN` Actions secret, a fine-grained PAT for this repo with Contents: read and write.
+To fix lint and formatting on a pull request without checking it out, comment `/autofix`, with nothing else in the comment, on an open pull request from a branch of this repo (not a fork; repo owner only, or members were it an organization's repo): the **PR Fixes** workflow merges in the base branch and runs `just fix`, and **PR Fixes Push** pushes the result and reports on the pull request.
+Running PR Fixes by hand on the branch (Actions → PR Fixes → Run workflow) does the same.
+It needs an `autofix` environment that only `master` can deploy to, with an `AUTOFIX_TOKEN` secret: a fine-grained PAT for this repo with Contents and Workflows: read and write.
 
 [`AGENTS.md`](AGENTS.md) has more detail on the code's layout, CI and conventions.
