@@ -9,7 +9,7 @@ on:
 jobs:
   test:
     needs: dependabot-fix
-    if: ${{ always() && (needs.dependabot-fix.result == 'skipped' || needs.dependabot-fix.outputs.pushed_changes == 'false') }}
+    if: ${{ always() && (needs.dependabot-fix.result == 'skipped' || (needs.dependabot-fix.result == 'success' && !needs.dependabot-fix.outputs.head)) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -46,7 +46,7 @@ jobs:
         run: just lock-check
 
       - name: Check lockfile only targets supported platforms
-        run: just lock-os-arch-check
+        run: just lock-platforms-check
 
       - name: Install dependencies
         run: just sync
@@ -59,6 +59,9 @@ jobs:
 
       - name: Check AGENTS.md and README.md sentence-per-line formatting
         run: just sentence-per-line-check
+
+      - name: Check AGENTS.md and README.md for doubled spaces
+        run: just doubled-spaces-check
 
       - name: Check nothing is committed under screenshots/
         run: just screenshots-dir-check
@@ -103,6 +106,9 @@ jobs:
       - name: Check justfile formatting
         run: just just-fmt-check
 
+      - name: Check the justfile has the standard recipes
+        run: just check-justfile
+
       # tests/core/test_envoy.py runs the real Envoy with Docker, and fails
       # rather than being skipped without Docker when LIFETRACKER_REQUIRE_ENVOY
       # is set.
@@ -114,7 +120,7 @@ jobs:
       # The lines a PR changes, or on master the lines the commit changes. The
       # base is there, as checkout fetched every branch.
       - name: Report patch coverage
-        run: just patch-coverage "$BASE" --format markdown:patch-coverage.md,json:patch-coverage.json
+        run: just diff-cover "$BASE" --format markdown:patch-coverage.md,json:patch-coverage.json
         env:
           BASE: ${{ github.base_ref && format('origin/{0}', github.base_ref) || 'HEAD^' }}
 
@@ -177,10 +183,22 @@ jobs:
       # The comment post-patch-coverage posts, in the job summary, so it's
       # there for fork and Dependabot PRs too, which can't post it.
       - name: Summarise coverage
-        run: just patch-coverage-post --output "$GITHUB_STEP_SUMMARY" --coverage-report coverage.xml ${BASE_SHA:+--base "$BASE_SHA"}
+        run: |
+          trap 'mkdir -p "$RUNNER_TEMP/step-summaries" && cp "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/step-summaries/patch-coverage.md"' EXIT
+          just patch-coverage-post --output "$GITHUB_STEP_SUMMARY" --coverage-report coverage.xml ${BASE_SHA:+--base "$BASE_SHA"}
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GITHUB_TOKEN: ${{ github.token }}
+
+      # GitHub's API doesn't serve step summaries, so each step that writes one
+      # copies it to step-summaries/ for this artifact (see AGENTS.md).
+      - name: Upload the step summaries
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: step-summaries-${{ github.job }}
+          path: ${{ runner.temp }}/step-summaries/
+          if-no-files-found: ignore
 
   # Run `just screenshots` and keep the PNGs as a workflow artifact, for eyeballing
   # UI changes from the run's summary page; post-screenshots then posts them to the
@@ -189,7 +207,7 @@ jobs:
   # Same needs/if as test, so it skips a commit dependabot-fix is replacing.
   screenshots:
     needs: dependabot-fix
-    if: ${{ always() && (needs.dependabot-fix.result == 'skipped' || needs.dependabot-fix.outputs.pushed_changes == 'false') }}
+    if: ${{ always() && (needs.dependabot-fix.result == 'skipped' || (needs.dependabot-fix.result == 'success' && !needs.dependabot-fix.outputs.head)) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -241,9 +259,9 @@ jobs:
   # images are uploaded with SCREENSHOTS_TOKEN, a fine-grained PAT (the job
   # fails if it's unset); the comment itself is written with GITHUB_TOKEN.
   # Skipped for forks and Dependabot, whose runs don't get the repo's Actions
-  # secrets (and whose code shouldn't see the tokens). It runs the PR branch's
-  # justfile, but installs nothing but repoutils (`uv run --only-group
-  # repoutils`), so no dependency bump runs with the tokens. Queued
+  # secrets (and whose code shouldn't see the tokens). It runs the PR's base
+  # commit's justfile, and installs nothing but repoutils (`uv run
+  # --only-group repoutils`), so nothing from the PR runs with the tokens. Queued
   # per PR, so two runs can't both see no previous comment and both post; not in
   # commit order, though, so the script posts only if HEAD_SHA is still the
   # PR's head, lest an older commit's slow run overwrite newer screenshots.
@@ -268,9 +286,14 @@ jobs:
             exit 1
           fi
 
+      # The base commit's justfile, pyproject.toml and uv.lock, not the PR's,
+      # so a PR's changes to those files don't run beside this job's
+      # write-capable token (they take effect once it merges). The workflow
+      # file itself still comes from the PR, as in any pull_request run.
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.3.3
@@ -309,9 +332,9 @@ jobs:
   # either falls short (never failing for that). Runs whether or not test then
   # failed (e.g. on the Docker smoke test), but only if test uploaded the
   # report. Skipped, and queued per PR, like post-screenshots, and likewise
-  # posts only if HEAD_SHA is still the PR's head. Needs no secrets, and
-  # installs nothing but repoutils alongside its token (`uv run --only-group
-  # repoutils`).
+  # posts only if HEAD_SHA is still the PR's head. Needs no secrets, runs the
+  # base commit's justfile, and installs nothing but repoutils alongside its
+  # token (`uv run --only-group repoutils`).
   post-patch-coverage:
     needs: test
     if: ${{ !cancelled() && needs.test.outputs.patch-report == 'success' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
@@ -326,9 +349,14 @@ jobs:
       cancel-in-progress: false
 
     steps:
+      # The base commit's justfile, pyproject.toml and uv.lock, not the PR's,
+      # so a PR's changes to those files don't run beside this job's
+      # write-capable token (they take effect once it merges). The workflow
+      # file itself still comes from the PR, as in any pull_request run.
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.3.3
@@ -376,7 +404,8 @@ jobs:
   # coverage that PRs compare with. Only where GITHUB_TOKEN can post them, so
   # not on a fork's or Dependabot's PR. A token with statuses: write can post a
   # status named like any required check, so, like post-patch-coverage, this
-  # job installs nothing but repoutils.
+  # job runs the base commit's justfile on PRs and installs nothing but
+  # repoutils.
   post-coverage-status:
     needs: test
     if: ${{ !cancelled() && needs.test.outputs.coverage-report == 'success' && (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) }}
@@ -386,11 +415,15 @@ jobs:
       statuses: write
 
     steps:
-      # Two commits deep on master, for the commit's parent.
+      # On a PR, the base commit's justfile, pyproject.toml and uv.lock, not
+      # the PR's, so a PR's changes to those files don't run beside this job's
+      # write-capable token (the workflow file itself still comes from the
+      # PR). On master, the commit itself, two commits deep for its parent.
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 2
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.3.3
@@ -429,7 +462,7 @@ jobs:
   # comment, with the ones on lines the PR changes first. See AGENTS.md.
   exolot:
     needs: dependabot-fix
-    if: ${{ always() && (needs.dependabot-fix.result == 'skipped' || needs.dependabot-fix.outputs.pushed_changes == 'false') }}
+    if: ${{ always() && (needs.dependabot-fix.result == 'skipped' || (needs.dependabot-fix.result == 'success' && !needs.dependabot-fix.outputs.head)) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -480,6 +513,7 @@ jobs:
       # on the PR's diff (changed lines first, as GitHub shows only 10 per type).
       - name: Analyze with exolot
         run: |
+          trap 'mkdir -p "$RUNNER_TEMP/step-summaries" && cp "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/step-summaries/exolot.md"' EXIT
           args=(--exit-zero --format github-comment --annotations)
           if [ -n "$BASE_REF" ]; then
             args+=(--diff-base "origin/${BASE_REF}")
@@ -498,11 +532,22 @@ jobs:
           path: exolot.md
           retention-days: 14
 
+      # GitHub's API doesn't serve step summaries, so each step that writes one
+      # copies it to step-summaries/ for this artifact (see AGENTS.md).
+      - name: Upload the step summaries
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: step-summaries-${{ github.job }}
+          path: ${{ runner.temp }}/step-summaries/
+          if-no-files-found: ignore
+
   # Posts the exolot job's report to the PR as a new github-actions[bot]
   # comment, and hides the ones earlier runs posted as outdated. The same
   # conditions and precautions as post-patch-coverage: only same-repo,
   # non-Dependabot PRs; queued per PR; posts only if HEAD_SHA is still the PR's
-  # head; installs nothing but repoutils beside its token.
+  # head; runs the base commit's justfile and installs nothing but repoutils
+  # beside its token.
   post-exolot:
     needs: exolot
     # !cancelled() as dependabot-fix, an ancestor, is skipped on most runs.
@@ -516,9 +561,14 @@ jobs:
       cancel-in-progress: false
 
     steps:
+      # The base commit's justfile, pyproject.toml and uv.lock, not the PR's,
+      # so a PR's changes to those files don't run beside this job's
+      # write-capable token (they take effect once it merges). The workflow
+      # file itself still comes from the PR, as in any pull_request run.
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.3.3
@@ -550,9 +600,8 @@ jobs:
   # place, with the files the PR changes first. The report is cheap to make and
   # needs only repoutils, so one job both makes and posts it, with the same
   # precautions as post-exolot: only same-repo, non-Dependabot PRs post; queued
-  # per PR; posts only if HEAD_SHA is still the PR's head; installs nothing but
-  # repoutils.
-  # See AGENTS.md.
+  # per PR; posts only if HEAD_SHA is still the PR's head; runs the base
+  # commit's justfile and installs nothing but repoutils. See AGENTS.md.
   long-files:
     runs-on: ubuntu-latest
     permissions:
@@ -563,13 +612,24 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      # The PR's head, as for exolot, so line counts and links match the PR's
-      # code. Full history for the merge base with the base branch.
+      # The justfile, pyproject.toml and uv.lock that run here come from the
+      # base commit on PRs (else this commit), as in post-patch-coverage, so
+      # nothing from the PR runs beside this job's write-capable token.
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+
+      # The PR's head (else this commit), as the data the report is about, as
+      # for exolot, so line counts and links match the PR's code; its
+      # [tool.repoutils] settings apply. Full history for the merge base with
+      # the base branch.
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: head
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.3.3
@@ -584,20 +644,113 @@ jobs:
         with:
           just-version: "1.58.0"
 
+      # The recipe runs in head (it's [no-cd]) with the base's repoutils.
       - name: List long files
+        working-directory: head
         env:
           BASE: ${{ github.base_ref && format('origin/{0}', github.base_ref) || '' }}
-        run: just long-files --base "$BASE" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          trap 'mkdir -p "$RUNNER_TEMP/step-summaries" && cp "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/step-summaries/long-files.md"' EXIT
+          just --justfile ../justfile long-files --base "$BASE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Post report to the PR
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+        working-directory: head
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BASE: origin/${{ github.base_ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         # GITHUB_TOKEN can't look up its own login, so name it.
-        run: just long-files --base "$BASE" --commit "$HEAD_SHA" --post "$PR_NUMBER" --author 'github-actions[bot]'
+        run: just --justfile ../justfile long-files --base "$BASE" --commit "$HEAD_SHA" --post "$PR_NUMBER" --author 'github-actions[bot]'
+
+      # GitHub's API doesn't serve step summaries, so each step that writes one
+      # copies it to step-summaries/ for this artifact (see AGENTS.md).
+      - name: Upload the step summaries
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: step-summaries-${{ github.job }}
+          path: ${{ runner.temp }}/step-summaries/
+          if-no-files-found: ignore
+
+  # Lists the suppression comments a PR adds (NOSONAR, noqa, type: ignore; see
+  # pyproject.toml's [tool.repoutils.added-strings]), for information only, in
+  # the job summary and as a github-actions[bot] comment that later runs edit.
+  # Like long-files: posts only on same-repo, non-Dependabot PRs, and only once
+  # the PR adds one; queued per PR; posts only if HEAD_SHA is still the PR's
+  # head.
+  added-strings:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: added-strings-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+
+    steps:
+      # The justfile, pyproject.toml and uv.lock that run here come from the
+      # PR's base commit, as in post-patch-coverage, so nothing from the PR
+      # runs beside this job's write-capable token.
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      # The PR's head, as the data the report is about, so lines and links
+      # match the PR's code; its [tool.repoutils] settings apply. Full history
+      # for the merge base with the base branch.
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: head
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.5"
+
+      - name: Set up Python
+        run: uv python install 3.14.9
+
+      - name: Install just
+        uses: extractions/setup-just@v4.0.0
+        with:
+          just-version: "1.58.0"
+
+      # The recipe runs in head (it's [no-cd]) with the base's repoutils.
+      - name: List added strings
+        working-directory: head
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: |
+          trap 'mkdir -p "$RUNNER_TEMP/step-summaries" && cp "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/step-summaries/added-strings.md"' EXIT
+          just --justfile ../justfile added-strings --base "$BASE" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post report to the PR
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+        working-directory: head
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE: origin/${{ github.base_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # GITHUB_TOKEN can't look up its own login, so name it.
+        run: just --justfile ../justfile added-strings --base "$BASE" --commit "$HEAD_SHA" --post "$PR_NUMBER" --author 'github-actions[bot]'
+
+      # GitHub's API doesn't serve step summaries, so each step that writes one
+      # copies it to step-summaries/ for this artifact (see AGENTS.md).
+      - name: Upload the step summaries
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: step-summaries-${{ github.job }}
+          path: ${{ runner.temp }}/step-summaries/
+          if-no-files-found: ignore
 
   # Checks .github/workflows/actions.lock, which pins every action the
   # workflows use, transitive ones included, to a commit.
@@ -641,21 +794,14 @@ jobs:
     permissions:
       contents: read
     outputs:
-      pushed_changes: ${{ steps.commit-and-push.outputs.pushed }}
+      head: ${{ steps.commit.outputs.head }}
 
     steps:
-      - name: Check token configuration
-        env:
-          DEPENDABOT_FIX_TOKEN: ${{ secrets.DEPENDABOT_FIX_TOKEN }}
-        run: |
-          if [ -z "$DEPENDABOT_FIX_TOKEN" ]; then
-            echo "DEPENDABOT_FIX_TOKEN secret is not set" >&2
-            exit 1
-          fi
-
+      # The PR head from the event, which dependabot-push checks the fix is a
+      # single commit on, not the branch, which may have moved since.
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.head_ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
           # Fetch the base branch and history too, for dependabot-relock's merge base.
           fetch-depth: 0
           persist-credentials: false
@@ -686,27 +832,73 @@ jobs:
       - name: Update lockfile
         run: uv lock
 
-      # Pushes with DEPENDABOT_FIX_TOKEN, not GITHUB_TOKEN, so the push triggers a
-      # new workflow run. If Dependabot updates the branch after checkout, the push
-      # fails; the run Dependabot's push triggers redoes the fix.
-      - name: Commit and push if needed
-        id: commit-and-push
-        env:
-          DEPENDABOT_FIX_TOKEN: ${{ secrets.DEPENDABOT_FIX_TOKEN }}
-          HEAD_REF: ${{ github.head_ref }}
-          REPOSITORY: ${{ github.repository }}
+      - name: Commit if needed
+        id: commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          start="$(git rev-parse HEAD)"
           git add pyproject.toml uv.lock
           if git diff --staged --quiet; then
             echo "No changes to commit"
-            echo "pushed=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "chore: re-lock with pinned uv and sync dependency minimum versions"
-            git push "https://x-access-token:${DEPENDABOT_FIX_TOKEN}@github.com/${REPOSITORY}.git" "HEAD:refs/heads/${HEAD_REF}"
-            echo "pushed=true" >> "$GITHUB_OUTPUT"
+            git bundle create "$RUNNER_TEMP/dependabot-fix.bundle" "$start..HEAD"
+            echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Upload the fix
+        if: steps.commit.outputs.head
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: dependabot-fix
+          # A re-run of the workflow replaces the previous attempt's bundle.
+          overwrite: true
+          path: ${{ runner.temp }}/dependabot-fix.bundle
+          retention-days: 1
+          if-no-files-found: error
+
+  # A fresh runner that runs no code from the Dependabot branch: it checks out
+  # the PR head, fetches the bundled commit onto it, checks it changes only
+  # pyproject.toml and uv.lock, and pushes it. DEPENDABOT_FIX_TOKEN is a
+  # Dependabot secret (only Dependabot's runs can read it) with contents write
+  # only, without the workflows permission, so a bundle can't change the
+  # workflows either.
+  dependabot-push:
+    needs: dependabot-fix
+    if: needs.dependabot-fix.outputs.head
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 5
+
+    steps:
+      # The PR head from the event, not a dependabot-fix output, which code
+      # from the branch could have set.
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      # Pushes with DEPENDABOT_FIX_TOKEN, not GITHUB_TOKEN, so the push triggers a
+      # new workflow run. The lease makes the push fail unless the branch is still
+      # at the PR head this run started from; if Dependabot has updated it, the
+      # run Dependabot's push triggers redoes the fix. dependabot-fix ran the
+      # bumped dependency's build code, so push-bundle takes only what it is
+      # meant to change: one commit on the PR head, touching only pyproject.toml
+      # and uv.lock.
+      - name: Push the fix
+        uses: sjktools/repoutils/.github/actions/push-bundle@v0.5.4
+        with:
+          token: ${{ secrets.DEPENDABOT_FIX_TOKEN }}
+          artifact: dependabot-fix
+          branch: ${{ github.head_ref }}
+          start: ${{ github.event.pull_request.head.sha }}
+          expected-head: ${{ needs.dependabot-fix.outputs.head }}
+          single-commit: "true"
+          allow-paths: |
+            pyproject.toml
+            uv.lock
 
   # Check, on PRs too, that the secrets deploy needs are set and FLY_APP names an
   # app the token can see, so a missing or broken setup fails the build rather

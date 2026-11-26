@@ -155,6 +155,7 @@ jobs:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          trap 'mkdir -p "$RUNNER_TEMP/step-summaries" && cp "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/step-summaries/self-test-report.md"' EXIT
           report=$(jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXECUTION_FILE" 2>/dev/null || true)
           if [ -z "$report" ]; then
             report="Claude produced no report. See the [workflow run]($RUN_URL)."
@@ -164,42 +165,43 @@ jobs:
           delimiter="EOF_$(openssl rand -hex 16)"
           printf 'report<<%s\n%s\n%s\n' "$delimiter" "$report" "$delimiter" >> "$GITHUB_OUTPUT"
 
+      # GitHub's API doesn't serve step summaries, so each step that writes one
+      # copies it to step-summaries/ for this artifact (see AGENTS.md).
+      - name: Upload the step summaries
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: step-summaries-${{ github.job }}
+          path: ${{ runner.temp }}/step-summaries/
+          if-no-files-found: ignore
+
   # Posted from its own job, as the job that runs Claude can't write to PRs.
   self-test-report:
     needs: claude
     if: always() && github.event_name == 'pull_request' && needs.claude.outputs.self-test-report != ''
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: write
     steps:
-      - name: Comment self-test report on PR
+      # Only for [tool.repoutils]'s comment-prefix, which the comment's marker uses.
+      - name: Checkout pyproject.toml
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: /pyproject.toml
+          sparse-checkout-cone-mode: false
+
+      - name: Write the report to a file
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
           REPORT: ${{ needs.claude.outputs.self-test-report }}
-          MARKER: '<!-- self-test:claude.yml -->'
-        run: |
-          # shellcheck disable=SC2016 # $vars in the GraphQL queries are GraphQL's, not the shell's
-          # Hide this workflow's earlier reports as outdated. Matching on the author
-          # too means nobody else's comment can be hidden by copying the marker.
-          gh api graphql --paginate -F owner="${GH_REPO%/*}" -F name="${GH_REPO#*/}" -F pr="$PR_NUMBER" -f query='
-            query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) {
-              repository(owner: $owner, name: $name) {
-                pullRequest(number: $pr) {
-                  comments(first: 100, after: $endCursor) {
-                    nodes { id isMinimized body author { login } }
-                    pageInfo { hasNextPage endCursor }
-                  }
-                }
-              }
-            }' --jq '.data.repository.pullRequest.comments.nodes[]
-              | select(.author.login == "github-actions" and (.isMinimized | not)
-                and (.body | startswith(env.MARKER))) | .id' |
-          while read -r id; do
-            gh api graphql -F id="$id" -f query='
-              mutation($id: ID!) {
-                minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { clientMutationId }
-              }' >/dev/null
-          done
-          printf '%s\n\n%s\n' "$MARKER" "$REPORT" | gh pr comment "$PR_NUMBER" --body-file -
+        run: printf '%s\n' "$REPORT" > "$RUNNER_TEMP/self-test-report.md"
+
+      # Posts a new report and hides this workflow's earlier ones as outdated.
+      - name: Comment self-test report on PR
+        uses: sjktools/repoutils/.github/actions/post-comment@v0.5.4
+        with:
+          pr: ${{ github.event.pull_request.number }}
+          body: ${{ runner.temp }}/self-test-report.md
+          name: self-test-claude.yml
+          hide-previous: "true"

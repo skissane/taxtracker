@@ -5,7 +5,7 @@ description = "Personal life admin tracker app, with tax and task tracking modul
 readme = "README.md"
 requires-python = "~=3.14.9"
 dependencies = [
-    "boto3>=1.44.3",
+    "boto3>=1.44.4",
     "click>=8.5.1",
     "django>=6.1.3",
     "django-google-sso>=10.0.0",
@@ -73,8 +73,41 @@ better, e.g. moving out a cohesive piece that has no reason to sit there, not ju
 A long file that is already one cohesive unit can stay as it is, and needs no reply or explanation. \
 See [AGENTS.md](https://github.com/skissane/taxtracker/blob/master/AGENTS.md) for more."""
 
+# The suppression comments `just added-strings` points out when a PR adds them
+# (see AGENTS.md). Regexes rather than plain strings, so that only a comment
+# matches, not a string literal or test data naming one: only whole string
+# literals (triple-quoted ones on one line too) come before the #, matched
+# possessively so a string isn't reread as shorter ones around a #, and the
+# comment can follow an earlier one, as in `# type: ignore # noqa`
+# (tests/test_added_strings.py checks them).
+[tool.repoutils.added-strings]
+include = ["*.py"]
+
+[[tool.repoutils.added-strings.strings]]
+regex = '''^(?:[^"'#]|"{3}(?:[^"\\]|\\.|"(?!""))*"{3}|'{3}(?:[^'\\]|\\.|'(?!''))*'{3}|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')*+#(?:.*#)?\s*(?i:nosonar)\b'''
+name = "NOSONAR"
+message = "AGENTS.md asks not to suppress exolot's findings: fix the code, or leave the finding as it is"
+
+# ruff reads noqa case-insensitively, and a bare one too.
+[[tool.repoutils.added-strings.strings]]
+regex = '''^(?:[^"'#]|"{3}(?:[^"\\]|\\.|"(?!""))*"{3}|'{3}(?:[^'\\]|\\.|'(?!''))*'{3}|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')*+#(?:.*#)?\s*(?i:noqa)\b'''
+name = "# noqa"
+message = "AGENTS.md asks not to suppress exolot's findings, and a ruff finding is better fixed than suppressed, where you can"
+
+[[tool.repoutils.added-strings.strings]]
+regex = '''^(?:[^"'#]|"{3}(?:[^"\\]|\\.|"(?!""))*"{3}|'{3}(?:[^'\\]|\\.|'(?!''))*'{3}|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')*+#(?:.*#)?\s*type:\s*ignore\b'''
+name = "# type: ignore"
+message = "please fix the type error instead, if you can"
+
+# The standard recipes (`just check-justfile`) taxtracker leaves out on
+# purpose: pyright, as mypy type-checks it, and prose-check from check until
+# AGENTS.md and README.md pass it.
+[tool.repoutils.justfile]
+omit = ["pyright"]
+omit-dependencies = { check = ["prose-check"] }
+
 # The platforms uv.lock may have wheels for, as [tool.uv] environments allows
-# (`just lock-os-arch-check`). uv keeps iOS and Emscripten wheels despite
+# (`just lock-platforms-check`). uv keeps iOS and Emscripten wheels despite
 # environments, so they're tolerated.
 [tool.repoutils.lock-platforms]
 supported = ["any", "linux:x86_64", "linux:aarch64", "macosx"]
@@ -82,8 +115,166 @@ tolerated = ["ios", "pyemscripten"]
 
 # The secrets the workflows use, which `just secrets-workflows-check` checks.
 [tool.repoutils.secrets]
-actions = ["AUTOFIX_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "FLY_API_TOKEN", "FLY_APP", "SCREENSHOTS_TOKEN"]
+actions = ["CLAUDE_CODE_OAUTH_TOKEN", "FLY_API_TOKEN", "FLY_APP", "SCREENSHOTS_TOKEN"]
 dependabot = ["DEPENDABOT_FIX_TOKEN"]
+# fix-push.yml pushes /autofix's commits to a PR's branch with this; only
+# master can deploy to the autofix environment.
+environments.autofix = ["AUTOFIX_TOKEN"]
+
+# The GitHub settings below are what `just github-settings-check` checks and
+# `just github-settings-ensure` applies (see AGENTS.md's GitHub settings).
+# Both need a token with administration access, which CI and Claude Code
+# sessions don't have, so the owner runs them.
+
+# The repository settings `repoutils repo-settings` checks or changes.
+[tool.repoutils.repo-settings]
+description = "Personal life tracker app"
+homepage = ""
+issues = true
+projects = true
+wiki = true
+discussions = false
+pull-requests = true
+pull-request-creation = "collaborators"
+merge-commit = { allow = false }
+squash-merge = { allow = true, title = "pr-title", message = "blank" }
+rebase-merge = { allow = false }
+allow-auto-merge = true
+allow-update-branch = true
+delete-branch-on-merge = true
+require-web-commit-signoff = false
+
+# The security settings `repoutils security-settings` checks or changes.
+# CodeQL default setup raises code scanning alerts, which we dismiss where
+# they don't apply.
+[tool.repoutils.security-settings]
+private-vulnerability-reporting = false
+dependabot-security-updates = true
+codeql-default-setup = true
+secret-protection = true
+push-protection = true
+immutable-releases = false
+
+# The deployment environments `repoutils environments` checks or creates.
+# Only master can deploy to autofix, which holds AUTOFIX_TOKEN for
+# fix-push.yml, so a branch's own copy of a workflow can't read it.
+[tool.repoutils.environments.autofix]
+deployment-branches = "selected"
+allowed-branches = ["master"]
+allowed-tags = []
+
+# The rulesets `repoutils rulesets` checks or creates, each giving only what
+# differs from a new ruleset's defaults. master changes only by a squash-merged
+# PR whose test and screenshot checks passed on an up-to-date head; admins can
+# bypass.
+[tool.repoutils.rulesets.main]
+include = ["~DEFAULT_BRANCH"]
+bypass = [{ role = "admin" }]
+
+[tool.repoutils.rulesets.main.rules]
+deletion = true
+non-fast-forward = true
+required-linear-history = true
+
+[tool.repoutils.rulesets.main.rules.pull-request]
+allowed-merge-methods = ["squash"]
+
+[tool.repoutils.rulesets.main.rules.required-status-checks]
+# "Require branches to be up to date before merging", so a PR's checks ran against what it merges into.
+strict-required-status-checks-policy = true
+required-status-checks = [
+    { context = "post-screenshots", app = "github-actions" },
+    { context = "screenshots", app = "github-actions" },
+    { context = "test", app = "github-actions" },
+]
+
+# The issue and PR labels `repoutils labels` checks or creates (see AGENTS.md's
+# Issue labels).
+[[tool.repoutils.labels]]
+name = "concern:data-integrity"
+color = "e4a11b"
+description = "Could lose or corrupt data"
+
+[[tool.repoutils.labels]]
+name = "concern:security"
+color = "fbca04"
+description = "Security risk or hardening"
+
+[[tool.repoutils.labels]]
+name = "dependencies"
+color = "0366d6"
+description = "Pull requests that update a dependency file"
+
+[[tool.repoutils.labels]]
+name = "priority:p0"
+color = "b60205"
+description = "Drop everything: prod broken or data at risk"
+
+[[tool.repoutils.labels]]
+name = "priority:p1"
+color = "e99695"
+description = "Do next"
+
+[[tool.repoutils.labels]]
+name = "priority:p2"
+color = "f9d0c4"
+description = "Worth doing when convenient"
+
+[[tool.repoutils.labels]]
+name = "priority:p3"
+color = "ededed"
+description = "Someday/maybe"
+
+# Dependabot adds this one to its uv PRs.
+[[tool.repoutils.labels]]
+name = "python:uv"
+color = "2b67c6"
+description = "Pull requests that update python:uv code"
+
+[[tool.repoutils.labels]]
+name = "question"
+color = "d876e3"
+description = "Further information is requested"
+
+[[tool.repoutils.labels]]
+name = "size:l"
+color = "0e8a16"
+description = "Several PRs: should become a parent issue with sub-issues"
+
+[[tool.repoutils.labels]]
+name = "size:m"
+color = "7fd18b"
+description = "One PR that needs some design"
+
+[[tool.repoutils.labels]]
+name = "size:s"
+color = "c2e0c6"
+description = "One small PR"
+
+[[tool.repoutils.labels]]
+name = "type:bug"
+color = "d73a4a"
+description = "Something behaves wrongly"
+
+[[tool.repoutils.labels]]
+name = "type:docs"
+color = "0075ca"
+description = "Documentation only"
+
+[[tool.repoutils.labels]]
+name = "type:feature"
+color = "0e5a8a"
+description = "New capability or module"
+
+[[tool.repoutils.labels]]
+name = "type:improvement"
+color = "1d76db"
+description = "Makes something that already works better"
+
+[[tool.repoutils.labels]]
+name = "type:maintenance"
+color = "5319e7"
+description = "Refactors, dead code, CI, dependencies; no visible change"
 
 # The policy at the top of the exolot PR comment (see AGENTS.md).
 [tool.exolot]
