@@ -30,7 +30,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.13.5"
 
@@ -173,7 +173,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.13.5"
 
@@ -251,7 +251,7 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.13.5"
 
@@ -314,7 +314,7 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.13.5"
 
@@ -381,7 +381,7 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.13.5"
 
@@ -435,7 +435,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.13.5"
 
@@ -526,7 +526,7 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.13.5"
 
@@ -587,7 +587,7 @@ jobs:
           path: head
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.13.5"
 
@@ -665,7 +665,7 @@ jobs:
           path: head
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.13.5"
 
@@ -731,7 +731,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.13.5"
 
@@ -936,7 +936,7 @@ jobs:
           FLY_APP: ${{ secrets.FLY_APP }}
           IMAGE: ${{ needs.publish.outputs.image }}
 
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.13.5"
 

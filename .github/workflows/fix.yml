@@ -92,7 +92,7 @@ jobs:
       # Keep version in step with pyproject.toml's [tool.uv] required-version.
       # The cache is the branch's own, as this run is on the branch.
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.13.5"
 
