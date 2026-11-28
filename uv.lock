@@ -618,7 +618,7 @@ dev = [
     { name = "pytest-django", specifier = ">=4.14.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "repoutils", specifier = ">=0.5.4" },
-    { name = "ruff", specifier = ">=0.17.5" },
+    { name = "ruff", specifier = ">=0.17.6" },
 ]
 repoutils = [{ name = "repoutils", specifier = ">=0.5.4" }]
 screenshots = [{ name = "playwright", specifier = ">=1.65.2" }]
