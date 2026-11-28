@@ -29,3 +29,23 @@ updates:
     labels:
       - "dependencies"
       - "type:maintenance"
+
+  # The Dockerfile's base images, chiefly Envoy, the auth proxy in front of
+  # the app, which otherwise changes only when someone edits its tag.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    ignore:
+      # `just check-pins` needs this tag to match [tool.uv] required-version
+      # and the workflows' setup-uv versions, so all three move together, by hand.
+      - dependency-name: "ghcr.io/astral-sh/uv"
+      # python:3.14-slim already gets each patch release on rebuild; a new
+      # minor goes with requires-python and CI's Python, by hand.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    labels:
+      - "dependencies"
+      - "type:maintenance"

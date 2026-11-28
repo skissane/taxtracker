@@ -535,7 +535,7 @@ The main ones:
 |---|---|
 | `just test` | Runs the test suite (pytest, in parallel across CPU cores). |
 | `just check` | Runs the whitespace, one-sentence-per-line, `screenshots/`, `.git-blame-ignore-revs`, ruff, djlint and workflow lint checks, without fixing anything. |
-| `just fix` | Fixes lint issues, reformats code and templates, and regenerates `actions.lock` (needs `gh` with the gh-actions-lock extension). |
+| `just fix` | Reformats code and templates, fixes lint issues, syncs dependency minimums with `uv.lock`, and regenerates `actions.lock` (needs `gh` with the gh-actions-lock extension). |
 | `just coverage` | Runs the tests and prints a coverage report. |
 | `just screenshots` | Saves light and dark mode screenshots of admin pages to `screenshots/`, using a headless Chromium it installs with Playwright. |
 | `just ci` | Runs everything CI runs, including building the Docker image. |

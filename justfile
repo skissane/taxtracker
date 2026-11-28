@@ -29,9 +29,10 @@ sync:
 requirements-check:
     {{ repoutils }} requirements-min-versions check
 
-# Rewrite dependency minimums in pyproject.toml to the versions in uv.lock
+# Rewrite dependency minimums in pyproject.toml to the versions in uv.lock, and re-lock
 requirements-fix:
     {{ repoutils }} requirements-min-versions fix
+    uv lock
 
 # Re-lock a Dependabot branch's uv.lock with this uv, from the base ref's uv.lock
 dependabot-relock base:
@@ -54,7 +55,7 @@ screenshots-dir-check:
     uv run repoutils check-screenshots-dir
 
 # Check .git-blame-ignore-revs lists real commits that are ancestors of target
-blame-ignore-revs-check target="HEAD":
+blame-ignore-revs-check target=env("BLAME_IGNORE_REVS_TARGET", "HEAD"):
     uv run repoutils check-blame-ignore-revs {{ quote(target) }}
 
 # Fails on ruff's warnings too, as ruff only warns about such things as an
@@ -378,8 +379,11 @@ just-fmt-check:
 # Run every check, without fixing anything or running tests (actions-lock-check needs gh with the gh-actions-lock extension)
 check: lock-platforms-check requirements-check whitespace-check sentence-per-line-check doubled-spaces-check screenshots-dir-check blame-ignore-revs-check lint fmt-check mypy lint-templates fmt-check-templates lint-workflows actions-lock-check check-pins check-checkout-credentials secrets-workflows-check variables-workflows-check just-fmt-check check-justfile
 
-# Autofix lint issues, reformat code, templates, the justfile and prose, and relock actions.lock (actions-lock needs gh with the gh-actions-lock extension)
-fix: lint-fix fmt fmt-templates just-fmt doubled-spaces-fix actions-lock
+# Formatting first fixes the long lines it can, so lint-fix stops only on
+# findings that need a hand edit.
+
+# Reformat code, autofix lint issues, reformat templates, the justfile and prose, sync dependency minimums, and relock actions.lock (actions-lock needs gh with the gh-actions-lock extension)
+fix: fmt lint-fix fmt-templates just-fmt doubled-spaces-fix requirements-fix actions-lock
 
 # Run everything the CI workflow runs
 ci: lock-check sync check coverage docker-build docker-smoke
