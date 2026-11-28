@@ -2,7 +2,7 @@ FROM ghcr.io/astral-sh/uv:0.13.5 AS uv
 
 # Envoy, the reverse proxy in front of gunicorn (see docker-entrypoint.sh).
 # Only its binary is used, which needs nothing beyond glibc.
-FROM envoyproxy/envoy:distroless-v1.40.1 AS envoy
+FROM envoyproxy/envoy:distroless-v1.40.2 AS envoy
 
 FROM python:3.14-slim AS builder
 
