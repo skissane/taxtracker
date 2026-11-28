@@ -11,7 +11,7 @@ dependencies = [
     "django-google-sso>=10.0.0",
     "django-stubs-ext>=6.1.2",
     "gunicorn>=27.0.1",
-    "maxminddb>=3.2.0",
+    "maxminddb>=3.3.0",
     "pdfkit>=1.0.0",
     "pyjwt[crypto]>=2.15.1",
     "requests>=2.34.2",
@@ -35,7 +35,7 @@ packages = ["src/lifetracker"]
 repoutils = ["repoutils>=0.5.4"]
 dev = [
     { include-group = "repoutils" },
-    "coverage>=7.17.3",
+    "coverage>=7.17.4",
     "diff-cover>=11.0.2",
     "django-stubs[compatible-mypy]>=6.1.2",
     "djlint>=1.54.0",
@@ -45,7 +45,7 @@ dev = [
     "pytest-cov>=7.1.0",
     "pytest-django>=4.14.0",
     "pytest-xdist>=3.8.0",
-    "ruff>=0.17.5",
+    "ruff>=0.17.6",
 ]
 screenshots = [
     "playwright>=1.65.2",
