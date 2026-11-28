@@ -45,69 +45,24 @@ jobs:
       - name: Check lockfile is up to date
         run: just lock-check
 
-      - name: Check lockfile only targets supported platforms
-        run: just lock-platforms-check
-
       - name: Install dependencies
         run: just sync
 
-      - name: Check dependency minimum versions
-        run: just requirements-check
+      # For `just check`'s actions-lock-check.
+      - name: Install gh-actions-lock
+        uses: sjktools/repoutils/.github/actions/install-gh-actions-lock@v0.5.4
 
-      - name: Check whitespace in text files
-        run: just whitespace-check
-
-      - name: Check AGENTS.md and README.md sentence-per-line formatting
-        run: just sentence-per-line-check
-
-      - name: Check AGENTS.md and README.md for doubled spaces
-        run: just doubled-spaces-check
-
-      - name: Check nothing is committed under screenshots/
-        run: just screenshots-dir-check
-
-      # On a PR, check against the base branch, which is what the squash merge lands on:
-      # a commit from the PR itself would pass against HEAD but not once merged.
-      - name: Check .git-blame-ignore-revs entries
+      # Every check `just check` runs, so CI and `just check` can't drift apart.
+      # GH_TOKEN is the job's read-only token, which is all gh actions-lock
+      # needs to verify each locked commit against the action's repository.
+      # On a PR, blame-ignore-revs-check checks against the base branch, which
+      # is what the squash merge lands on: a commit from the PR itself would
+      # pass against HEAD but not once merged.
+      - name: Run checks
         env:
-          TARGET: ${{ github.event.pull_request.base.sha || 'HEAD' }}
-        run: just blame-ignore-revs-check "$TARGET"
-
-      - name: Lint with ruff
-        run: just lint
-
-      - name: Check formatting with ruff
-        run: just fmt-check
-
-      - name: Type-check with mypy
-        run: just mypy
-
-      - name: Lint with djlint
-        run: just lint-templates
-
-      - name: Check formatting with djlint
-        run: just fmt-check-templates
-
-      - name: Lint GitHub Actions workflows with jactionlint
-        run: just lint-workflows
-
-      - name: Check uv and just version pins
-        run: just check-pins
-
-      - name: Check every checkout sets persist-credentials
-        run: just check-checkout-credentials
-
-      - name: Check the workflows' secrets match [tool.repoutils.secrets]
-        run: just secrets-workflows-check
-
-      - name: Check the workflows' variables match [tool.repoutils.variables]
-        run: just variables-workflows-check
-
-      - name: Check justfile formatting
-        run: just just-fmt-check
-
-      - name: Check the justfile has the standard recipes
-        run: just check-justfile
+          GH_TOKEN: ${{ github.token }}
+          BLAME_IGNORE_REVS_TARGET: ${{ github.event.pull_request.base.sha || 'HEAD' }}
+        run: just check
 
       # tests/core/test_envoy.py runs the real Envoy with Docker, and fails
       # rather than being skipped without Docker when LIFETRACKER_REQUIRE_ENVOY
@@ -752,37 +707,6 @@ jobs:
           path: ${{ runner.temp }}/step-summaries/
           if-no-files-found: ignore
 
-  # Checks .github/workflows/actions.lock, which pins every action the
-  # workflows use, transitive ones included, to a commit.
-  actions-lock:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    env:
-      GH_TOKEN: ${{ github.token }}
-
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-
-      # The release binary, checked against its SHA-256, so a moved tag or a
-      # replaced asset can't swap the verifier. `gh extension install --pin`
-      # takes only a release tag for a precompiled extension. The binary runs
-      # standalone, reading GH_TOKEN as the extension would.
-      - name: Install gh-actions-lock
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/gh-actions-lock" \
-            https://github.com/github/gh-actions-lock/releases/download/v0.4.1/linux-amd64
-          echo "39deb2fe714dbf74b073d8245fc7f3d50cd0eee18d5c0900e9e849ae933ae17e  $RUNNER_TEMP/gh-actions-lock" | sha256sum -c -
-          chmod +x "$RUNNER_TEMP/gh-actions-lock"
-
-      # Fails if actions.lock is missing an action a workflow uses, or a
-      # locked commit no longer verifies upstream. Rerun `gh actions-lock`
-      # after changing any `uses:`.
-      - name: Verify actions.lock
-        run: '"$RUNNER_TEMP/gh-actions-lock" --verify'
-
   # Runs on a Dependabot branch, whose bumped dependency we don't trust, so the
   # write-capable DEPENDABOT_FIX_TOKEN is only exposed to the final push step:
   # checkout doesn't persist credentials, and nothing installs the project or its
@@ -826,11 +750,9 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: just dependabot-relock "origin/$BASE_REF"
 
+      # Also re-locks, as uv.lock records each minimum.
       - name: Update dependency minimum versions
         run: just requirements-fix
-
-      - name: Update lockfile
-        run: uv lock
 
       - name: Commit if needed
         id: commit
@@ -933,8 +855,8 @@ jobs:
   # success(), because success() also checks transitive dependencies, and
   # dependabot-fix (test's dependency) is always skipped on master pushes.
   publish:
-    needs: [test, actions-lock]
-    if: ${{ !cancelled() && needs.test.result == 'success' && needs.actions-lock.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+    needs: test
+    if: ${{ !cancelled() && needs.test.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
     runs-on: ubuntu-latest
     permissions:
       packages: write
