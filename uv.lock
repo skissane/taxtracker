@@ -598,7 +598,7 @@ requires-dist = [
     { name = "django-google-sso", specifier = ">=10.0.0" },
     { name = "django-stubs-ext", specifier = ">=6.1.2" },
     { name = "gunicorn", specifier = ">=27.0.1" },
-    { name = "maxminddb", specifier = ">=3.2.0" },
+    { name = "maxminddb", specifier = ">=3.3.0" },
     { name = "pdfkit", specifier = ">=1.0.0" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.15.1" },
     { name = "requests", specifier = ">=2.34.2" },
